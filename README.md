@@ -25,6 +25,20 @@ A production-quality PDF viewer with rectangular crop/measure tool for Ubuntu 22
 pip install PySide6 PyMuPDF
 ```
 
+### Install as Application (launchable)
+
+```bash
+pip install .
+```
+
+This installs a `neoview` launcher. Run it to open the app, then use File → Open to choose a PDF.
+
+Optional desktop launcher (Linux):
+
+```bash
+./install_desktop.sh
+```
+
 ## Usage
 
 ### Direct Run
@@ -35,6 +49,16 @@ python pdf_crop_measure.py
 
 # Open specific PDF
 python pdf_crop_measure.py /path/to/document.pdf
+```
+
+### Installed App
+
+```bash
+# Open the app
+neoview
+
+# Open specific PDF
+neoview /path/to/document.pdf
 ```
 
 ### Container Run

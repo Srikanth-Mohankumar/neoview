@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "neoview"
+version = "0.1.0"
+description = "NeoView PDF viewer with rectangular crop/measure tool"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "PySide6",
+  "PyMuPDF",
+]
+
+[project.scripts]
+neoview = "pdf_crop_measure:main"
+
+[tool.setuptools]
+py-modules = ["pdf_crop_measure"]
