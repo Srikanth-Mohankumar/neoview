@@ -29,8 +29,8 @@ dependencies = [
 ]
 
 [project.urls]
-Repository = "https://github.com/your-org/neoview"
-Issues = "https://github.com/your-org/neoview/issues"
+Repository = "https://github.com/Srikanth-Mohankumar/neoview"
+Issues = "https://github.com/Srikanth-Mohankumar/neoview/issues"
 
 [project.optional-dependencies]
 dev = [
