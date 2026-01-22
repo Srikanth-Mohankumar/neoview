@@ -30,6 +30,7 @@ class PdfView(QGraphicsView):
     page_changed = Signal(int, int)
     text_info_changed = Signal(str)
     text_selected = Signal(str)
+    document_loaded = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -79,6 +80,7 @@ class PdfView(QGraphicsView):
         self._pan_start: Optional[QPointF] = None
 
         self._pinch_start_zoom: float = 1.0
+        self._rotation: int = 0
 
         self.verticalScrollBar().valueChanged.connect(self._on_scroll)
 
@@ -133,6 +135,10 @@ class PdfView(QGraphicsView):
     def selection_page(self) -> int:
         return self._selection_page
 
+    @property
+    def rotation(self) -> int:
+        return self._rotation
+
     def _update_cursor(self):
         if self._tool == ToolMode.SELECT:
             self.setCursor(Qt.CursorShape.ArrowCursor)
@@ -157,6 +163,7 @@ class PdfView(QGraphicsView):
             self._doc_path = os.path.abspath(path)
             self._clear_selection()
             self._render_all_pages()
+            self.document_loaded.emit()
             return True
         except Exception as exc:
             QMessageBox.critical(self, "Error", f"Cannot open PDF:\n{exc}")
@@ -221,6 +228,7 @@ class PdfView(QGraphicsView):
             self._render_zoom = self._zoom
             self._rebuild_search_highlights()
             self._emit_page_info()
+            self.document_loaded.emit()
             return True
         except Exception:
             if new_doc is not None:
@@ -345,6 +353,18 @@ class PdfView(QGraphicsView):
             self._render_all_pages()
         self.zoom_changed.emit(z)
 
+    def rotate_by(self, delta_degrees: int):
+        self.set_rotation(self._rotation + delta_degrees)
+
+    def set_rotation(self, degrees: int):
+        degrees = degrees % 360
+        if degrees == self._rotation:
+            return
+        self._rotation = degrees
+        self.resetTransform()
+        if self._rotation:
+            self.rotate(self._rotation)
+
     def zoom_by(self, factor: float):
         self.set_zoom(self._zoom * factor)
 
@@ -364,6 +384,12 @@ class PdfView(QGraphicsView):
         scale_w = view_w / page.width()
         scale_h = view_h / page.height()
         self.set_zoom(min(scale_w, scale_h))
+
+    def current_page_size(self) -> Optional[QRectF]:
+        if 0 <= self.current_page < len(self._pages):
+            page = self._pages[self.current_page]
+            return page.page_rect
+        return None
 
     def go_to_page(self, page_num: int):
         if 0 <= page_num < len(self._page_positions):

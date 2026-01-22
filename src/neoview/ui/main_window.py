@@ -6,8 +6,8 @@ import os
 from typing import Optional, List
 
 import fitz
-from PySide6.QtCore import QTimer, QFileSystemWatcher, QRectF
-from PySide6.QtGui import QAction, QKeySequence, QActionGroup, QFont
+from PySide6.QtCore import QTimer, QFileSystemWatcher, QRectF, QSettings, Qt, QSize
+from PySide6.QtGui import QAction, QKeySequence, QActionGroup, QFont, QIcon, QPixmap, QImage
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -18,6 +18,13 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QDialog,
     QLineEdit,
+    QDockWidget,
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QListWidget,
+    QListWidgetItem,
+    QPushButton,
 )
 
 from neoview.resources import load_app_icon
@@ -45,6 +52,9 @@ class MainWindow(QMainWindow):
         self._search_index: int = -1
         self._find_dlg: Optional[FindDialog] = None
         self._find_input: Optional[QLineEdit] = None
+        self._settings = QSettings("NeoView", "NeoView")
+        self._recent_files: List[str] = self._settings.value("recent_files", [], type=list)
+        self._recent_menu: Optional[object] = None
 
         self._watcher = QFileSystemWatcher(self)
         self._watcher.fileChanged.connect(self._on_change)
@@ -72,14 +82,18 @@ class MainWindow(QMainWindow):
         self._view.page_changed.connect(self._on_page_changed)
         self._view.text_info_changed.connect(self._on_text_info)
         self._view.text_selected.connect(self._on_text_selected)
+        self._view.document_loaded.connect(self._refresh_document_info)
 
         self._setup_menus()
         self._setup_toolbar()
         self._setup_statusbar()
+        self._setup_docks()
 
     def _setup_menus(self):
         file_m = self.menuBar().addMenu("&File")
         file_m.addAction(self._action("&Open...", self._open_dialog, QKeySequence.StandardKey.Open))
+        self._recent_menu = file_m.addMenu("Open &Recent")
+        self._rebuild_recent_menu()
         file_m.addAction(self._action("&Reload", self._force_reload, "F5"))
         file_m.addSeparator()
         file_m.addAction(self._action("&Export Selection...", self._export, QKeySequence.StandardKey.Save))
@@ -88,7 +102,7 @@ class MainWindow(QMainWindow):
 
         edit_m = self.menuBar().addMenu("&Edit")
         edit_m.addAction(self._action("&Copy Measurements", self._copy, QKeySequence.StandardKey.Copy))
-        edit_m.addAction(self._action("&Find...", self._show_find, QKeySequence.StandardKey.Find))
+        edit_m.addAction(self._action("&Find...", self._show_find, "Ctrl+Shift+F"))
         edit_m.addAction(self._action("C&lear Selection", self._view.clear_all_selection, "Escape"))
 
         view_m = self.menuBar().addMenu("&View")
@@ -97,6 +111,10 @@ class MainWindow(QMainWindow):
         view_m.addSeparator()
         view_m.addAction(self._action("Fit &Width", self._view.fit_width, "W"))
         view_m.addAction(self._action("Fit &Page", self._view.fit_page, "F"))
+        view_m.addSeparator()
+        view_m.addAction(self._action("Rotate &Left", lambda: self._view.rotate_by(-90), "Ctrl+L"))
+        view_m.addAction(self._action("Rotate &Right", lambda: self._view.rotate_by(90), "Ctrl+R"))
+        view_m.addAction(self._action("Reset &Rotation", lambda: self._view.set_rotation(0), "Ctrl+0"))
 
         go_m = self.menuBar().addMenu("&Go")
         go_m.addAction(self._action("&Previous Page", self._view.prev_page, "PgUp"))
@@ -124,6 +142,12 @@ class MainWindow(QMainWindow):
         self._tool_group.addAction(self._measure_action)
         tools_m.addAction(self._measure_action)
 
+        tools_m.addSeparator()
+        tools_m.addAction(self._action("&Search Panel", self._toggle_search_dock, "Ctrl+F"))
+        tools_m.addAction(self._action("&Outline Panel", self._toggle_outline_dock, "Ctrl+Shift+O"))
+        tools_m.addAction(self._action("&Thumbnails Panel", self._toggle_thumbs_dock, "Ctrl+Shift+T"))
+        tools_m.addAction(self._action("&Page Info Panel", self._toggle_info_dock, "Ctrl+Shift+I"))
+
     def _setup_toolbar(self):
         tb = QToolBar("Main")
         tb.setMovable(False)
@@ -139,6 +163,7 @@ class MainWindow(QMainWindow):
         tb.addAction(self._action("Zoom -", lambda: self._view.zoom_by(0.8)))
         tb.addAction(self._action("Zoom +", lambda: self._view.zoom_by(1.25)))
         tb.addAction(self._action("Fit", self._view.fit_width))
+        tb.addAction(self._action("Rotate", lambda: self._view.rotate_by(90)))
         tb.addSeparator()
 
         self._select_btn = self._action("Select", lambda: self._set_tool(ToolMode.SELECT))
@@ -200,10 +225,195 @@ class MainWindow(QMainWindow):
         self._status.addPermanentWidget(self._size_lbl)
         self._status.addPermanentWidget(self._credit_lbl)
 
+    def _toggle_search_dock(self):
+        visible = not self._search_dock.isVisible()
+        self._search_dock.setVisible(visible)
+        if visible:
+            self._search_input.setFocus()
+
+    def _toggle_outline_dock(self):
+        self._outline_dock.setVisible(not self._outline_dock.isVisible())
+
+    def _toggle_thumbs_dock(self):
+        self._thumbs_dock.setVisible(not self._thumbs_dock.isVisible())
+
+    def _toggle_info_dock(self):
+        self._info_dock.setVisible(not self._info_dock.isVisible())
+
+    def _active_search_text(self) -> str:
+        if hasattr(self, "_search_input") and self._search_input is not None:
+            return self._search_input.text().strip()
+        return self._find_input.text().strip() if self._find_input else ""
+
+    def _rebuild_recent_menu(self):
+        if not self._recent_menu:
+            return
+        self._recent_menu.clear()
+        if not self._recent_files:
+            self._recent_menu.addAction("(Empty)").setEnabled(False)
+            return
+        for path in self._recent_files:
+            act = self._recent_menu.addAction(path)
+            act.triggered.connect(lambda _checked=False, p=path: self._open_file(p))
+
+    def _add_recent_file(self, path: str):
+        if not path:
+            return
+        path = os.path.abspath(path)
+        if path in self._recent_files:
+            self._recent_files.remove(path)
+        self._recent_files.insert(0, path)
+        self._recent_files = self._recent_files[:10]
+        self._settings.setValue("recent_files", self._recent_files)
+        self._rebuild_recent_menu()
+
+    def _refresh_document_info(self):
+        doc = self._view.document
+        if not doc:
+            self._info_title.setText("No document loaded")
+            self._info_pages.setText("")
+            self._info_size.setText("")
+            self._info_meta.setText("")
+            self._outline_list.clear()
+            self._thumbs_list.clear()
+            return
+        title = os.path.basename(self._current_file) if self._current_file else "Untitled"
+        self._info_title.setText(title)
+        self._info_pages.setText(f"Pages: {doc.page_count}")
+        size = self._view.current_page_size()
+        if size:
+            self._info_size.setText(
+                f"Page size: {size.width():.0f} x {size.height():.0f} pt"
+            )
+        meta = doc.metadata or {}
+        meta_bits = []
+        for key in ("title", "author", "subject", "producer"):
+            val = meta.get(key)
+            if val:
+                meta_bits.append(f"{key.title()}: {val}")
+        self._info_meta.setText("\n".join(meta_bits))
+        self._populate_outline()
+        self._populate_thumbnails()
+
+    def _populate_outline(self):
+        self._outline_list.clear()
+        doc = self._view.document
+        if not doc:
+            return
+        toc = doc.get_toc(simple=True)
+        for level, title, page in toc:
+            indent = "  " * max(0, level - 1)
+            item = QListWidgetItem(f"{indent}{title}")
+            item.setData(Qt.ItemDataRole.UserRole, page - 1)
+            self._outline_list.addItem(item)
+
+    def _populate_thumbnails(self):
+        self._thumbs_list.clear()
+        doc = self._view.document
+        if not doc:
+            return
+        for i in range(doc.page_count):
+            page = doc.load_page(i)
+            mat = fitz.Matrix(0.15, 0.15)
+            pix = page.get_pixmap(matrix=mat, alpha=False)
+            img_data = pix.tobytes("ppm")
+            qimg = QImage.fromData(img_data)
+            icon = QIcon(QPixmap.fromImage(qimg))
+            item = QListWidgetItem(f"{i + 1}")
+            item.setIcon(icon)
+            item.setData(Qt.ItemDataRole.UserRole, i)
+            self._thumbs_list.addItem(item)
+
+    def _jump_to_outline_item(self, item: QListWidgetItem):
+        page_idx = item.data(Qt.ItemDataRole.UserRole)
+        if isinstance(page_idx, int):
+            self._view.go_to_page(page_idx)
+
+    def _jump_to_thumb(self, item: QListWidgetItem):
+        page_idx = item.data(Qt.ItemDataRole.UserRole)
+        if isinstance(page_idx, int):
+            self._view.go_to_page(page_idx)
+
+    def _setup_docks(self):
+        self._search_dock = QDockWidget("Search", self)
+        self._search_dock.setAllowedAreas(
+            Qt.DockWidgetArea.LeftDockWidgetArea
+            | Qt.DockWidgetArea.RightDockWidgetArea
+            | Qt.DockWidgetArea.BottomDockWidgetArea
+        )
+        search_widget = QWidget()
+        search_layout = QHBoxLayout(search_widget)
+        search_layout.setContentsMargins(6, 6, 6, 6)
+        self._search_input = QLineEdit()
+        self._search_input.setPlaceholderText("Find text…")
+        self._search_prev_btn = QPushButton("Prev")
+        self._search_next_btn = QPushButton("Next")
+        self._search_count_lbl = QLabel("")
+        search_layout.addWidget(self._search_input)
+        search_layout.addWidget(self._search_prev_btn)
+        search_layout.addWidget(self._search_next_btn)
+        search_layout.addWidget(self._search_count_lbl)
+        self._search_dock.setWidget(search_widget)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self._search_dock)
+        self._search_dock.hide()
+
+        self._search_prev_btn.clicked.connect(self._find_prev)
+        self._search_next_btn.clicked.connect(self._find_next)
+        self._search_input.returnPressed.connect(self._find_next)
+
+        self._outline_dock = QDockWidget("Outline", self)
+        self._outline_dock.setAllowedAreas(
+            Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
+        )
+        self._outline_list = QListWidget()
+        self._outline_dock.setWidget(self._outline_list)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self._outline_dock)
+        self._outline_dock.hide()
+        self._outline_list.itemActivated.connect(self._jump_to_outline_item)
+
+        self._thumbs_dock = QDockWidget("Thumbnails", self)
+        self._thumbs_dock.setAllowedAreas(
+            Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
+        )
+        self._thumbs_list = QListWidget()
+        self._thumbs_list.setIconSize(QSize(120, 160))
+        self._thumbs_list.setResizeMode(QListWidget.ResizeMode.Adjust)
+        self._thumbs_list.setViewMode(QListWidget.ViewMode.IconMode)
+        self._thumbs_list.setMovement(QListWidget.Movement.Static)
+        self._thumbs_dock.setWidget(self._thumbs_list)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._thumbs_dock)
+        self._thumbs_dock.hide()
+        self._thumbs_list.itemActivated.connect(self._jump_to_thumb)
+
+        self._info_dock = QDockWidget("Page Info", self)
+        self._info_dock.setAllowedAreas(
+            Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
+        )
+        info_widget = QWidget()
+        info_layout = QVBoxLayout(info_widget)
+        info_layout.setContentsMargins(8, 8, 8, 8)
+        self._info_title = QLabel("No document loaded")
+        self._info_pages = QLabel("")
+        self._info_size = QLabel("")
+        self._info_meta = QLabel("")
+        self._info_meta.setWordWrap(True)
+        info_layout.addWidget(self._info_title)
+        info_layout.addWidget(self._info_pages)
+        info_layout.addWidget(self._info_size)
+        info_layout.addWidget(self._info_meta)
+        info_layout.addStretch()
+        self._info_dock.setWidget(info_widget)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._info_dock)
+        self._info_dock.hide()
+
     def _on_page_changed(self, current: int, total: int):
         self._page_lbl.setText(f"Page {current}/{total}")
         if self._search_results:
             self._update_search_highlights()
+        if self._view.document:
+            size = self._view.current_page_size()
+            if size:
+                self._info_size.setText(f"Page size: {size.width():.0f} x {size.height():.0f} pt")
 
     def _on_text_info(self, info: str):
         if info:
@@ -219,23 +429,17 @@ class MainWindow(QMainWindow):
             self._status.showMessage("No text in selection", 1500)
 
     def _show_find(self):
-        if not self._find_dlg:
-            dlg = FindDialog(self)
-            dlg.prev_btn.clicked.connect(self._find_prev)
-            dlg.next_btn.clicked.connect(self._find_next)
-            dlg.input.returnPressed.connect(self._find_next)
-            self._find_dlg = dlg
-            self._find_input = dlg.input
-        self._find_dlg.show()
-        self._find_dlg.raise_()
-        self._find_input.setFocus()
-        self._find_input.selectAll()
+        self._search_dock.setVisible(True)
+        self._search_input.setFocus()
+        self._search_input.selectAll()
 
     def _clear_search(self):
         self._search_query = ""
         self._search_results = []
         self._search_index = -1
         self._view.set_search_highlights([])
+        if hasattr(self, "_search_count_lbl"):
+            self._search_count_lbl.setText("")
 
     def _search(self, query: str):
         if not self._view.document:
@@ -248,6 +452,7 @@ class MainWindow(QMainWindow):
         self._search_index = -1
         if not query:
             self._view.set_search_highlights([])
+            self._search_count_lbl.setText("0/0")
             return
         for i in range(self._view.document.page_count):
             page = self._view.document.load_page(i)
@@ -256,6 +461,7 @@ class MainWindow(QMainWindow):
 
         if not self._search_results:
             self._view.set_search_highlights([])
+            self._search_count_lbl.setText("0/0")
 
     def _update_search_highlights(self):
         if not self._search_results:
@@ -278,26 +484,30 @@ class MainWindow(QMainWindow):
         self._status.showMessage(f"Match {self._search_index + 1}/{len(self._search_results)}", 1500)
 
     def _find_next(self):
-        query = self._find_input.text().strip() if self._find_input else ""
+        query = self._active_search_text()
         if not query:
             return
         self._search(query)
         if not self._search_results:
             self._status.showMessage("No matches", 1500)
+            self._search_count_lbl.setText("0/0")
             return
         self._search_index = (self._search_index + 1) % len(self._search_results)
         self._go_to_search_result()
+        self._search_count_lbl.setText(f"{self._search_index + 1}/{len(self._search_results)}")
 
     def _find_prev(self):
-        query = self._find_input.text().strip() if self._find_input else ""
+        query = self._active_search_text()
         if not query:
             return
         self._search(query)
         if not self._search_results:
             self._status.showMessage("No matches", 1500)
+            self._search_count_lbl.setText("0/0")
             return
         self._search_index = (self._search_index - 1) % len(self._search_results)
         self._go_to_search_result()
+        self._search_count_lbl.setText(f"{self._search_index + 1}/{len(self._search_results)}")
 
     def _update_status(self):
         if self._view.document:
@@ -330,6 +540,7 @@ class MainWindow(QMainWindow):
 
         if self._view.open_document(path):
             self._current_file = os.path.abspath(path)
+            self._add_recent_file(self._current_file)
             self._clear_search()
             self.setWindowTitle(f"{APP_NAME} — {os.path.basename(path)}")
             self._view.fit_width()
