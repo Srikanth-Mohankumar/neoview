@@ -1,0 +1,4 @@
+include README.md
+include LICENSE
+include feather-logo.png
+include install_desktop.sh

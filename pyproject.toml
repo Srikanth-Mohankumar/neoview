@@ -7,7 +7,22 @@ name = "neoview"
 version = "0.1.0"
 description = "NeoView PDF viewer with rectangular crop/measure tool"
 readme = "README.md"
+license = {file = "LICENSE"}
+authors = [{name = "NeoView Contributors"}]
 requires-python = ">=3.10"
+keywords = ["pdf", "viewer", "measurement", "crop", "pymupdf", "pyside6"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: End Users/Desktop",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Multimedia :: Graphics :: Viewers",
+  "Topic :: Scientific/Engineering :: Visualization",
+]
 dependencies = [
   "PySide6",
   "PyMuPDF",
@@ -18,3 +33,7 @@ neoview = "pdf_crop_measure:main"
 
 [tool.setuptools]
 py-modules = ["pdf_crop_measure"]
+include-package-data = true
+
+[tool.setuptools.data-files]
+"." = ["feather-logo.png"]

@@ -1,3 +1,0 @@
-[console_scripts]
-pdf-measure = pdf_crop_measure:main
-

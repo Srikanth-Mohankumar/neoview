@@ -1,6 +1,6 @@
-# PDF Crop/Measure Tool
+# NeoView
 
-A production-quality PDF viewer with rectangular crop/measure tool for Ubuntu 22.04 GNOME (Wayland/X11).
+NeoView is a production-quality PDF viewer with a rectangular crop/measure tool for Ubuntu 22.04 GNOME (Wayland/X11).
 
 ## Features
 
@@ -22,10 +22,10 @@ A production-quality PDF viewer with rectangular crop/measure tool for Ubuntu 22
 ## Installation
 
 ```bash
-pip install PySide6 PyMuPDF
+pip install neoview
 ```
 
-### Install as Application (launchable)
+### Install from source (launchable)
 
 ```bash
 pip install .
