@@ -31,6 +31,11 @@ Key advantages:
 pip install neoview
 ```
 
+## Downloads
+
+Prebuilt Windows executable releases are available from the GitHub Releases page for this project.
+Each tagged release will include a `neoview.exe` download.
+
 ### Install from source (launchable)
 
 ```bash

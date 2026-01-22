@@ -3,7 +3,7 @@
 import os
 from PyInstaller.utils.hooks import collect_data_files
 
-project_root = os.path.abspath(os.path.dirname(__file__))
+project_root = os.getcwd()
 
 block_cipher = None
 
@@ -48,5 +48,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=os.path.join(project_root, "src", "neoview", "assets", "feather-logo.png"),
+    icon=os.path.join(project_root, "src", "neoview", "assets", "feather-logo.ico"),
 )
