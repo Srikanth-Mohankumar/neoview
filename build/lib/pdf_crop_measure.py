@@ -65,7 +65,7 @@ from PySide6.QtWidgets import (
     QGraphicsRectItem, QGraphicsPixmapItem, QGraphicsItem,
     QFileDialog, QStatusBar, QToolBar, QLabel, QWidget,
     QMessageBox, QDialog, QVBoxLayout, QHBoxLayout,
-    QComboBox, QPushButton, QScrollArea, QSizePolicy
+    QComboBox, QPushButton, QScrollArea, QSizePolicy, QLineEdit
 )
 
 
@@ -330,6 +330,7 @@ class PdfView(QGraphicsView):
     zoom_changed = Signal(float)
     page_changed = Signal(int, int)  # current_page, total_pages
     text_info_changed = Signal(str)  # font info display
+    text_selected = Signal(str)  # selected text (Select tool)
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -363,6 +364,16 @@ class PdfView(QGraphicsView):
         self._rerender_timer = QTimer(self)
         self._rerender_timer.setSingleShot(True)
         self._rerender_timer.timeout.connect(self._rerender_pages)
+
+        # Text selection (Select tool)
+        self._text_selecting: bool = False
+        self._text_select_start: Optional[QPointF] = None
+        self._text_select_page: int = -1
+        self._text_select_item: Optional[QGraphicsRectItem] = None
+
+        # Search highlights
+        self._search_highlights: List[tuple] = []
+        self._search_items: List[QGraphicsRectItem] = []
         
         # Selection
         self._selection: Optional[SelectionRect] = None
@@ -402,6 +413,9 @@ class PdfView(QGraphicsView):
     @tool.setter
     def tool(self, t: ToolMode):
         self._tool = t
+        if t != ToolMode.SELECT:
+            self.clear_text_selection()
+            self.text_info_changed.emit("")
         self._update_cursor()
     
     @property
@@ -494,6 +508,8 @@ class PdfView(QGraphicsView):
             self._pages.clear()
             self._page_positions.clear()
             self._selection = None
+            self.clear_text_selection()
+            self._clear_search_items()
 
             for item, pos_y in new_pages:
                 self._scene.addItem(item)
@@ -519,6 +535,7 @@ class PdfView(QGraphicsView):
                 self._create_selection_on_page(sel_page, sel_rect)
 
             self._render_zoom = self._zoom
+            self._rebuild_search_highlights()
             self._emit_page_info()
             return True
         except Exception:
@@ -538,6 +555,8 @@ class PdfView(QGraphicsView):
         self._pages.clear()
         self._page_positions.clear()
         self._selection = None
+        self.clear_text_selection()
+        self._clear_search_items()
     
     def _render_all_pages(self):
         """Render all pages in a continuous vertical layout."""
@@ -545,6 +564,8 @@ class PdfView(QGraphicsView):
         self._pages.clear()
         self._page_positions.clear()
         self._selection = None
+        self.clear_text_selection()
+        self._clear_search_items()
         
         if not self._doc:
             return
@@ -574,6 +595,7 @@ class PdfView(QGraphicsView):
         self._scene.setSceneRect(0, 0, max_width, total_height)
         
         self._render_zoom = self._zoom
+        self._rebuild_search_highlights()
         self._emit_page_info()
     
 
@@ -602,6 +624,13 @@ class PdfView(QGraphicsView):
             page = self._pages[self._selection_page]
             self._selection.setPos(page.pos())
             self._selection.setScale(self._zoom)
+
+        if self._text_select_item and 0 <= self._text_select_page < len(self._pages):
+            page = self._pages[self._text_select_page]
+            self._text_select_item.setPos(page.pos())
+            self._text_select_item.setScale(self._zoom)
+
+        self._rebuild_search_highlights()
 
     def _rerender_pages(self):
         if not self._doc:
@@ -675,6 +704,60 @@ class PdfView(QGraphicsView):
     
     def clear_selection(self):
         self._clear_selection()
+
+    def clear_text_selection(self):
+        if self._text_select_item:
+            self._scene.removeItem(self._text_select_item)
+            self._text_select_item = None
+        self._text_select_page = -1
+        self._text_select_start = None
+
+    def clear_all_selection(self):
+        self._clear_selection()
+        self.clear_text_selection()
+
+    def set_search_highlights(self, highlights: List[tuple]):
+        self._search_highlights = highlights
+        self._rebuild_search_highlights()
+
+    def _clear_search_items(self):
+        for item in self._search_items:
+            self._scene.removeItem(item)
+        self._search_items.clear()
+
+    def _rebuild_search_highlights(self):
+        self._clear_search_items()
+        if not self._search_highlights:
+            return
+        for page_idx, rect, is_current in self._search_highlights:
+            if not (0 <= page_idx < len(self._pages)):
+                continue
+            page = self._pages[page_idx]
+            item = QGraphicsRectItem(rect)
+            item.setPos(page.pos())
+            item.setScale(self._zoom)
+            pen = QPen(QColor(255, 200, 0, 220 if is_current else 140))
+            pen.setWidthF(1.0 if is_current else 0.8)
+            pen.setCosmetic(True)
+            item.setPen(pen)
+            item.setBrush(QBrush(QColor(255, 255, 0, 60 if is_current else 35)))
+            item.setZValue(900)
+            self._scene.addItem(item)
+            self._search_items.append(item)
+
+    def extract_text_in_rect(self, page_idx: int, rect: QRectF) -> str:
+        if 0 <= page_idx < len(self._pages):
+            page_item = self._pages[page_idx]
+            r = fitz.Rect(rect.x(), rect.y(), rect.right(), rect.bottom())
+            return page_item._fitz_page.get_textbox(r).strip()
+        return ""
+
+    def scroll_to_rect(self, page_idx: int, rect: fitz.Rect):
+        if 0 <= page_idx < len(self._pages):
+            page = self._pages[page_idx]
+            y = page.pos().y() + rect.y0 * self._zoom - 40
+            self.verticalScrollBar().setValue(int(max(0, y)))
+
     
     def _get_page_at(self, scene_pos: QPointF) -> int:
         """Get page index at scene position."""
@@ -722,18 +805,27 @@ class PdfView(QGraphicsView):
             super().mousePressEvent(e)
             return
         
-        # Select tool = inspect text (font info)
+        # Select tool = text selection
         if self._tool == ToolMode.SELECT:
             page_idx = self._get_page_at(scene_pos)
             if page_idx >= 0:
-                page_pos = self._scene_to_page(scene_pos, page_idx)
-                page_item = self._pages[page_idx]
-                info = page_item.get_text_info_at(page_pos)
-                if info:
-                    text_info = f"Font: {info['font']} | Size: {info['size']:.1f}pt"
-                    self.text_info_changed.emit(text_info)
-                else:
-                    self.text_info_changed.emit("")
+                self.clear_text_selection()
+                self._text_selecting = True
+                self._text_select_page = page_idx
+                self._text_select_start = self._scene_to_page(scene_pos, page_idx)
+                rect = QRectF(self._text_select_start, self._text_select_start)
+                page = self._pages[page_idx]
+                self._text_select_item = QGraphicsRectItem(rect)
+                self._text_select_item.setPos(page.pos())
+                self._text_select_item.setScale(self._zoom)
+                pen = QPen(QColor(0, 0, 0, 180))
+                pen.setWidthF(0.5)
+                pen.setStyle(Qt.PenStyle.DotLine)
+                pen.setCosmetic(True)
+                self._text_select_item.setPen(pen)
+                self._text_select_item.setBrush(QBrush(QColor(0, 0, 0, 25)))
+                self._text_select_item.setZValue(950)
+                self._scene.addItem(self._text_select_item)
             e.accept()
             return
         
@@ -765,7 +857,22 @@ class PdfView(QGraphicsView):
     
     def mouseMoveEvent(self, e: QMouseEvent):
         scene_pos = self.mapToScene(e.position().toPoint())
-        
+
+        # Select tool text drag
+        if self._tool == ToolMode.SELECT and self._text_selecting and self._text_select_item:
+            page_idx = self._text_select_page
+            if page_idx >= 0:
+                local_pos = self._scene_to_page(scene_pos, page_idx)
+                page = self._pages[page_idx]
+                local_pos = QPointF(
+                    max(0, min(local_pos.x(), page.page_rect.width())),
+                    max(0, min(local_pos.y(), page.page_rect.height()))
+                )
+                rect = QRectF(self._text_select_start, local_pos).normalized()
+                self._text_select_item.setRect(rect)
+            e.accept()
+            return
+
         # Measure tool interaction
         if self._tool == ToolMode.MEASURE:
             if self._interacting and self._selection:
@@ -809,6 +916,27 @@ class PdfView(QGraphicsView):
     
     def mouseReleaseEvent(self, e: QMouseEvent):
         if e.button() == Qt.MouseButton.LeftButton:
+            if self._tool == ToolMode.SELECT and self._text_selecting:
+                self._text_selecting = False
+                if self._text_select_item and self._text_select_start is not None:
+                    rect = self._text_select_item.rect()
+                    if rect.width() < 2 and rect.height() < 2:
+                        page_idx = self._text_select_page
+                        if page_idx >= 0:
+                            page_item = self._pages[page_idx]
+                            info = page_item.get_text_info_at(self._text_select_start)
+                            if info:
+                                text_info = f"Font: {info['font']} | Size: {info['size']:.1f}pt"
+                                self.text_info_changed.emit(text_info)
+                            else:
+                                self.text_info_changed.emit("")
+                        self.clear_text_selection()
+                    else:
+                        text = self.extract_text_in_rect(self._text_select_page, rect)
+                        self.text_selected.emit(text)
+                e.accept()
+                return
+
             if self._interacting and self._selection:
                 self._selection.end_drag()
                 self._interacting = False
@@ -925,6 +1053,34 @@ class ExportDialog(QDialog):
         return int(self.dpi.currentText())
 
 
+
+
+class FindDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        self.setWindowTitle("Find")
+
+        layout = QVBoxLayout(self)
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Find:"))
+        self.input = QLineEdit()
+        row.addWidget(self.input)
+        layout.addLayout(row)
+
+        btns = QHBoxLayout()
+        self.prev_btn = QPushButton("Previous")
+        self.next_btn = QPushButton("Next")
+        close_btn = QPushButton("Close")
+        close_btn.setProperty("secondary", True)
+        btns.addStretch()
+        btns.addWidget(self.prev_btn)
+        btns.addWidget(self.next_btn)
+        btns.addWidget(close_btn)
+        layout.addLayout(btns)
+
+        close_btn.clicked.connect(self.close)
+
 # =============================================================================
 # Main Window
 # =============================================================================
@@ -937,9 +1093,15 @@ class MainWindow(QMainWindow):
         if APP_ICON.exists():
             self.setWindowIcon(QIcon(str(APP_ICON)))
         self.resize(1200, 900)
-        
         self._current_file: Optional[str] = None
         self._last_mtime: float = 0
+        self._search_query: str = ""
+        self._search_results: List[tuple] = []
+        self._search_index: int = -1
+        self._find_dlg: Optional[FindDialog] = None
+        self._find_input: Optional[QLineEdit] = None
+
+
         
         # Auto-reload is ALWAYS ENABLED
         self._watcher = QFileSystemWatcher(self)
@@ -969,6 +1131,7 @@ class MainWindow(QMainWindow):
         self._view.zoom_changed.connect(self._update_status)
         self._view.page_changed.connect(self._on_page_changed)
         self._view.text_info_changed.connect(self._on_text_info)
+        self._view.text_selected.connect(self._on_text_selected)
         
         self._setup_menus()
         self._setup_toolbar()
@@ -987,7 +1150,8 @@ class MainWindow(QMainWindow):
         # Edit
         edit_m = self.menuBar().addMenu("&Edit")
         edit_m.addAction(self._action("&Copy Measurements", self._copy, QKeySequence.StandardKey.Copy))
-        edit_m.addAction(self._action("C&lear Selection", self._view.clear_selection, "Escape"))
+        edit_m.addAction(self._action("&Find...", self._show_find, QKeySequence.StandardKey.Find))
+        edit_m.addAction(self._action("C&lear Selection", self._view.clear_all_selection, "Escape"))
         
         # View
         view_m = self.menuBar().addMenu("&View")
@@ -1093,6 +1257,8 @@ class MainWindow(QMainWindow):
     
     def _on_page_changed(self, current: int, total: int):
         self._page_lbl.setText(f"Page {current}/{total}")
+        if self._search_results:
+            self._update_search_highlights()
     
     def _on_text_info(self, info: str):
         """Display font info when Select tool clicks on text."""
@@ -1101,6 +1267,94 @@ class MainWindow(QMainWindow):
         else:
             self._font_lbl.setText("")
     
+    def _on_text_selected(self, text: str):
+        if text:
+            QApplication.clipboard().setText(text)
+            self._status.showMessage("✓ Copied text selection", 1500)
+        else:
+            self._status.showMessage("No text in selection", 1500)
+
+    def _show_find(self):
+        if not self._find_dlg:
+            dlg = FindDialog(self)
+            dlg.prev_btn.clicked.connect(self._find_prev)
+            dlg.next_btn.clicked.connect(self._find_next)
+            dlg.input.returnPressed.connect(self._find_next)
+            self._find_dlg = dlg
+            self._find_input = dlg.input
+        self._find_dlg.show()
+        self._find_dlg.raise_()
+        self._find_input.setFocus()
+        self._find_input.selectAll()
+
+    def _clear_search(self):
+        self._search_query = ""
+        self._search_results = []
+        self._search_index = -1
+        self._view.set_search_highlights([])
+
+    def _search(self, query: str):
+        if not self._view.document:
+            self._clear_search()
+            return
+        if query == self._search_query:
+            return
+        self._search_query = query
+        self._search_results = []
+        self._search_index = -1
+        if not query:
+            self._view.set_search_highlights([])
+            return
+        for i in range(self._view.document.page_count):
+            page = self._view.document.load_page(i)
+            for r in page.search_for(query):
+                self._search_results.append((i, r))
+
+        if not self._search_results:
+            self._view.set_search_highlights([])
+
+    def _update_search_highlights(self):
+        if not self._search_results:
+            self._view.set_search_highlights([])
+            return
+        current_page = self._view.current_page
+        highlights = []
+        for i, (page_idx, rect) in enumerate(self._search_results):
+            if i == self._search_index or page_idx == current_page:
+                qrect = QRectF(rect.x0, rect.y0, rect.width, rect.height)
+                highlights.append((page_idx, qrect, i == self._search_index))
+        self._view.set_search_highlights(highlights)
+
+    def _go_to_search_result(self):
+        if not self._search_results or self._search_index < 0:
+            return
+        page_idx, rect = self._search_results[self._search_index]
+        self._view.scroll_to_rect(page_idx, rect)
+        self._update_search_highlights()
+        self._status.showMessage(f"Match {self._search_index + 1}/{len(self._search_results)}", 1500)
+
+    def _find_next(self):
+        query = (self._find_input.text().strip() if self._find_input else "")
+        if not query:
+            return
+        self._search(query)
+        if not self._search_results:
+            self._status.showMessage("No matches", 1500)
+            return
+        self._search_index = (self._search_index + 1) % len(self._search_results)
+        self._go_to_search_result()
+
+    def _find_prev(self):
+        query = (self._find_input.text().strip() if self._find_input else "")
+        if not query:
+            return
+        self._search(query)
+        if not self._search_results:
+            self._status.showMessage("No matches", 1500)
+            return
+        self._search_index = (self._search_index - 1) % len(self._search_results)
+        self._go_to_search_result()
+
     def _update_status(self):
         if self._view.document:
             name = os.path.basename(self._current_file) if self._current_file else "Untitled"
@@ -1133,6 +1387,7 @@ class MainWindow(QMainWindow):
         
         if self._view.open_document(path):
             self._current_file = os.path.abspath(path)
+            self._clear_search()
             self.setWindowTitle(f"PDF Viewer — {os.path.basename(path)}")
             self._view.fit_width()
             self._update_status()
