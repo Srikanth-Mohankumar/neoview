@@ -57,6 +57,17 @@ Launch:
 neoview
 ```
 
+### Windows .exe build (optional)
+
+If you want a standalone executable on Windows:
+
+```powershell
+py -m pip install .[dev]
+pyinstaller neoview.spec
+```
+
+The executable will be at `dist\\neoview.exe`.
+
 ## Usage
 
 ### Direct Run
