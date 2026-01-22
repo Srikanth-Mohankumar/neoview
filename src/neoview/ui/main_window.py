@@ -7,7 +7,7 @@ from typing import Optional, List
 
 import fitz
 from PySide6.QtCore import QTimer, QFileSystemWatcher, QRectF
-from PySide6.QtGui import QAction, QKeySequence, QActionGroup
+from PySide6.QtGui import QAction, QKeySequence, QActionGroup, QFont
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -185,6 +185,12 @@ class MainWindow(QMainWindow):
         self._tool_lbl = QLabel("")
         self._font_lbl = QLabel("")
         self._size_lbl = QLabel("")
+        self._credit_lbl = QLabel("© Srikanth Mohankumar")
+        credit_font = QFont()
+        credit_font.setPointSize(8)
+        self._credit_lbl.setFont(credit_font)
+        self._credit_lbl.setStyleSheet("color: rgba(0, 0, 0, 120); padding: 0 6px;")
+        self._credit_lbl.setToolTip("Built by Srikanth Mohankumar")
 
         self._status.addWidget(self._file_lbl)
         self._status.addWidget(self._page_lbl)
@@ -192,6 +198,7 @@ class MainWindow(QMainWindow):
         self._status.addWidget(self._tool_lbl)
         self._status.addWidget(self._font_lbl)
         self._status.addPermanentWidget(self._size_lbl)
+        self._status.addPermanentWidget(self._credit_lbl)
 
     def _on_page_changed(self, current: int, total: int):
         self._page_lbl.setText(f"Page {current}/{total}")

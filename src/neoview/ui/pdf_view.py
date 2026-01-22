@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from enum import Enum, auto
-from typing import Optional, List
+from typing import Optional, List, Tuple
 
 import fitz
 from PySide6.QtCore import Qt, QRectF, QPointF, QTimer, Signal
@@ -64,6 +64,7 @@ class PdfView(QGraphicsView):
         self._text_select_start: Optional[QPointF] = None
         self._text_select_page: int = -1
         self._text_select_item: Optional[QGraphicsRectItem] = None
+        self._text_highlight_items: List[Tuple[int, QGraphicsRectItem]] = []
 
         self._search_highlights: List[tuple] = []
         self._search_items: List[QGraphicsRectItem] = []
@@ -309,6 +310,13 @@ class PdfView(QGraphicsView):
             self._text_select_item.setPos(page.pos())
             self._text_select_item.setScale(self._zoom)
 
+        if self._text_highlight_items:
+            for page_idx, item in self._text_highlight_items:
+                if 0 <= page_idx < len(self._pages) and shiboken6.isValid(item):
+                    page = self._pages[page_idx]
+                    item.setPos(page.pos())
+                    item.setScale(self._zoom)
+
         self._rebuild_search_highlights()
 
     def _rerender_pages(self):
@@ -385,15 +393,25 @@ class PdfView(QGraphicsView):
         self._clear_selection()
 
     def clear_text_selection(self):
-        if self._text_select_item and shiboken6.isValid(self._text_select_item):
-            self._scene.removeItem(self._text_select_item)
-        self._text_select_item = None
+        self._clear_text_drag_box()
+        self._clear_text_highlights()
         self._text_select_page = -1
         self._text_select_start = None
 
     def clear_all_selection(self):
         self._clear_selection()
         self.clear_text_selection()
+
+    def _clear_text_drag_box(self):
+        if self._text_select_item and shiboken6.isValid(self._text_select_item):
+            self._scene.removeItem(self._text_select_item)
+        self._text_select_item = None
+
+    def _clear_text_highlights(self):
+        for page_idx, item in self._text_highlight_items:
+            if shiboken6.isValid(item):
+                self._scene.removeItem(item)
+        self._text_highlight_items.clear()
 
     def set_search_highlights(self, highlights: List[tuple]):
         self._search_highlights = highlights
@@ -431,6 +449,39 @@ class PdfView(QGraphicsView):
             r = fitz.Rect(rect.x(), rect.y(), rect.right(), rect.bottom())
             return page_item._fitz_page.get_textbox(r).strip()
         return ""
+
+    def _highlight_text_in_rect(self, page_idx: int, rect: QRectF) -> bool:
+        self._clear_text_highlights()
+        if not (0 <= page_idx < len(self._pages)):
+            return False
+        page_item = self._pages[page_idx]
+        try:
+            blocks = page_item._fitz_page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)["blocks"]
+        except Exception:
+            return False
+
+        page = self._pages[page_idx]
+        for block in blocks:
+            if block.get("type") != 0:
+                continue
+            for line in block.get("lines", []):
+                for span in line.get("spans", []):
+                    bbox = span.get("bbox", (0, 0, 0, 0))
+                    span_rect = QRectF(bbox[0], bbox[1], bbox[2] - bbox[0], bbox[3] - bbox[1])
+                    if not span_rect.intersects(rect):
+                        continue
+                    item = QGraphicsRectItem(span_rect)
+                    item.setPos(page.pos())
+                    item.setScale(self._zoom)
+                    pen = QPen(QColor(255, 200, 0, 200))
+                    pen.setWidthF(0.5)
+                    pen.setCosmetic(True)
+                    item.setPen(pen)
+                    item.setBrush(QBrush(QColor(255, 255, 0, 70)))
+                    item.setZValue(940)
+                    self._scene.addItem(item)
+                    self._text_highlight_items.append((page_idx, item))
+        return bool(self._text_highlight_items)
 
     def scroll_to_rect(self, page_idx: int, rect: fitz.Rect):
         if 0 <= page_idx < len(self._pages):
@@ -597,6 +648,10 @@ class PdfView(QGraphicsView):
                     else:
                         text = self.extract_text_in_rect(self._text_select_page, rect)
                         self.text_selected.emit(text)
+                        self._highlight_text_in_rect(self._text_select_page, rect)
+                        self._clear_text_drag_box()
+                    self._text_select_page = -1
+                    self._text_select_start = None
                 e.accept()
                 return
 

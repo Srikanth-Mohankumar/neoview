@@ -18,17 +18,17 @@ elif [[ -f "${script_dir}/feather-logo.png" ]]; then
   cp "${script_dir}/feather-logo.png" "$icon_path"
 fi
 
-cat > "$desktop_path" <<'EOF'
+cat > "$desktop_path" <<EOT
 [Desktop Entry]
 Type=Application
 Name=NeoView
 Comment=Measure and export regions from PDFs
-Exec=neoview %f
+Exec=${script_dir}/run.sh %f
 Icon=neoview
 Terminal=false
 Categories=Office;Graphics;
 MimeType=application/pdf;
-EOF
+EOT
 
 if command -v update-desktop-database >/dev/null 2>&1; then
   update-desktop-database "$desktop_dir" >/dev/null 2>&1 || true
