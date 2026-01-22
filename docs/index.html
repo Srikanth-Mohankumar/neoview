@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="NeoView - A production-quality PDF viewer with measurement tools for LaTeX workflows. Auto-reload, precise measurements, and PNG export for Linux and Windows.">
+    <meta name="keywords" content="PDF viewer, LaTeX, measurement tool, Linux, Windows, SumatraPDF alternative">
+    <title>NeoView - PDF Viewer with Measurement Tools</title>
+    <link rel="icon" href="assets/feather-logo.png" type="image/png">
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="hero-glow"></div>
+        <div class="container">
+            <div class="hero-content">
+                <div class="logo-wrapper">
+                    <img src="assets/feather-logo.png" alt="NeoView Logo" class="hero-logo">
+                </div>
+                <h1 class="hero-title">
+                    <span class="gradient-text">NeoView</span>
+                </h1>
+                <p class="hero-tagline">Production-quality PDF viewer with precision measurement tools</p>
+                <p class="hero-subtitle">Designed for LaTeX workflows. Auto-reload, measurements in pt/mm/picas, and PNG export.</p>
+                
+                <div class="cta-buttons">
+                    <a href="https://github.com/Srikanth-Mohankumar/neoview/releases/latest/download/neoview.exe" class="btn btn-primary">
+                        <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801"/>
+                        </svg>
+                        Download for Windows
+                    </a>
+                    <a href="#installation" class="btn btn-secondary">
+                        <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M12.504 0c-.155 0-.313.015-.467.045C7.49.456 4 4.475 4 9.308c0 .614.064 1.228.192 1.827l-2.106 3.644c-.106.185-.113.405-.017.596.097.191.278.32.482.345l1.876.228-.016.06c-.034.13-.054.263-.054.4 0 .944.775 1.707 1.728 1.707.318 0 .619-.085.881-.239l2.16 1.25c-.004.048-.008.097-.008.146 0 .944.775 1.707 1.728 1.707.168 0 .33-.024.484-.07.344-.102.637-.305.866-.576l.122.073c-.012.035-.022.07-.033.106-.142.477-.213.974-.213 1.479C12 23.122 13.13 24 14.5 24c1.37 0 2.5-.878 2.5-1.96 0-.148-.016-.296-.047-.44l.51-.294c.506.416 1.137.694 1.837.694 1.592 0 2.7-1.36 2.7-2.853 0-.93-.477-1.781-1.246-2.291l-.002-.015c.137-.385.214-.8.214-1.234 0-1.93-1.507-3.56-3.453-3.756-.11-.007-.22-.01-.33-.01-.74 0-1.444.174-2.075.486l-.24-.125c.032-.11.055-.225.068-.344.02-.18.03-.362.03-.544 0-2.513-1.637-4.684-3.952-5.456-.32-.106-.652-.175-.992-.206C13.102.014 12.803 0 12.504 0"/>
+                        </svg>
+                        Linux / pip install
+                    </a>
+                    <a href="https://github.com/Srikanth-Mohankumar/neoview" class="btn btn-ghost">
+                        <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M12 0C5.374 0 0 5.373 0 12c0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23A11.509 11.509 0 0112 5.803c1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576C20.566 21.797 24 17.3 24 12c0-6.627-5.373-12-12-12z"/>
+                        </svg>
+                        View on GitHub
+                    </a>
+                </div>
+
+                <div class="badges">
+                    <a href="https://pypi.org/project/neoview/" class="badge">
+                        <img src="https://img.shields.io/pypi/v/neoview?style=flat-square&color=f97373" alt="PyPI version">
+                    </a>
+                    <a href="https://github.com/Srikanth-Mohankumar/neoview/blob/main/LICENSE" class="badge">
+                        <img src="https://img.shields.io/badge/license-MIT-f97373?style=flat-square" alt="MIT License">
+                    </a>
+                    <span class="badge">
+                        <img src="https://img.shields.io/badge/python-3.10+-f97373?style=flat-square" alt="Python 3.10+">
+                    </span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Gallery Section -->
+    <section class="gallery" id="gallery">
+        <div class="container">
+            <h2 class="section-title">See NeoView in Action</h2>
+            <p class="section-subtitle">Precision tools for technical PDF workflows</p>
+            
+            <div class="gallery-grid">
+                <div class="gallery-item">
+                    <img src="assets/img1.png" alt="NeoView Measurement Tool" class="gallery-image">
+                    <div class="gallery-caption">
+                        <h4>Precise Measurements</h4>
+                        <p>Rectangle selection with live dimensions in points, picas, and millimeters</p>
+                    </div>
+                </div>
+                <div class="gallery-item">
+                    <img src="assets/img2.png" alt="NeoView Font Inspection" class="gallery-image">
+                    <div class="gallery-caption">
+                        <h4>Font Information</h4>
+                        <p>View font names and sizes for accurate typography verification</p>
+                    </div>
+                </div>
+                <div class="gallery-item">
+                    <img src="assets/img3.png" alt="NeoView Export Tool" class="gallery-image">
+                    <div class="gallery-caption">
+                        <h4>High-Quality Export</h4>
+                        <p>Export selections as PNG at 150, 300, or 600 DPI</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Why NeoView Section -->
+    <section class="advantages" id="advantages">
+        <div class="container">
+            <h2 class="section-title">Why Choose NeoView?</h2>
+            <p class="section-subtitle">Built for professionals who need more than just a PDF viewer</p>
+
+            <!-- Key Advantages -->
+            <div class="advantage-cards">
+                <div class="advantage-card highlight">
+                    <div class="advantage-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <path d="M12 6v6l4 2"/>
+                        </svg>
+                    </div>
+                    <h3>Auto-Reload for LaTeX</h3>
+                    <p>Automatically refreshes when your PDF is rebuilt. No more closing and reopening — just compile and see your changes instantly. <strong>Perfect for LaTeX, Typst, and any PDF workflow.</strong></p>
+                </div>
+
+                <div class="advantage-card highlight">
+                    <div class="advantage-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M4 8h16M4 16h16M8 4v16M16 4v16"/>
+                        </svg>
+                    </div>
+                    <h3>Precision Measurement Tools</h3>
+                    <p>Draw rectangles and get instant measurements in <strong>points (pt), picas, and millimeters</strong>. Essential for layout verification, proofreading, and QA work.</p>
+                </div>
+
+                <div class="advantage-card highlight">
+                    <div class="advantage-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M4 7V4h16v3M9 20h6M12 4v16"/>
+                        </svg>
+                    </div>
+                    <h3>Font & Text Inspection</h3>
+                    <p>Inspect text to see <strong>font names and sizes</strong>. Ideal for verifying typography, checking font embedding, and ensuring design consistency.</p>
+                </div>
+            </div>
+
+            <!-- Comparison Table -->
+            <div class="comparison-section">
+                <h3 class="comparison-title">How NeoView Compares</h3>
+                <div class="comparison-table-wrapper">
+                    <table class="comparison-table">
+                        <thead>
+                            <tr>
+                                <th>Feature</th>
+                                <th class="highlight-col">NeoView</th>
+                                <th>SumatraPDF</th>
+                                <th>Adobe Acrobat</th>
+                                <th>Evince</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Auto-reload on file change</td>
+                                <td class="highlight-col"><span class="check">✓</span></td>
+                                <td><span class="check">✓</span></td>
+                                <td><span class="cross">✗</span></td>
+                                <td><span class="check">✓</span></td>
+                            </tr>
+                            <tr>
+                                <td>Measurement tools (pt/mm)</td>
+                                <td class="highlight-col"><span class="check">✓</span></td>
+                                <td><span class="check">✓</span></td>
+                                <td><span class="check">✓</span></td>
+                                <td><span class="cross">✗</span></td>
+                            </tr>
+                            <tr>
+                                <td>Font name/size inspection</td>
+                                <td class="highlight-col"><span class="check">✓</span></td>
+                                <td><span class="cross">✗</span></td>
+                                <td><span class="check">✓</span></td>
+                                <td><span class="cross">✗</span></td>
+                            </tr>
+                            <tr>
+                                <td>Export selection as PNG</td>
+                                <td class="highlight-col"><span class="check">✓</span></td>
+                                <td><span class="cross">✗</span></td>
+                                <td><span class="check">✓</span></td>
+                                <td><span class="cross">✗</span></td>
+                            </tr>
+                            <tr>
+                                <td>Linux native</td>
+                                <td class="highlight-col"><span class="check">✓</span></td>
+                                <td><span class="cross">✗</span></td>
+                                <td><span class="cross">✗</span></td>
+                                <td><span class="check">✓</span></td>
+                            </tr>
+                            <tr>
+                                <td>Windows native</td>
+                                <td class="highlight-col"><span class="check">✓</span></td>
+                                <td><span class="check">✓</span></td>
+                                <td><span class="check">✓</span></td>
+                                <td><span class="cross">✗</span></td>
+                            </tr>
+                            <tr>
+                                <td>Lightweight & fast</td>
+                                <td class="highlight-col"><span class="check">✓</span></td>
+                                <td><span class="check">✓</span></td>
+                                <td><span class="cross">✗</span></td>
+                                <td><span class="check">✓</span></td>
+                            </tr>
+                            <tr>
+                                <td>Open source</td>
+                                <td class="highlight-col"><span class="check">✓</span></td>
+                                <td><span class="check">✓</span></td>
+                                <td><span class="cross">✗</span></td>
+                                <td><span class="check">✓</span></td>
+                            </tr>
+                            <tr>
+                                <td>Docker/container support</td>
+                                <td class="highlight-col"><span class="check">✓</span></td>
+                                <td><span class="cross">✗</span></td>
+                                <td><span class="cross">✗</span></td>
+                                <td><span class="cross">✗</span></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Complete Features Section -->
+    <section class="features" id="features">
+        <div class="container">
+            <h2 class="section-title">Complete Feature List</h2>
+            <p class="section-subtitle">Everything you need in a professional PDF viewer</p>
+            
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <path d="M12 6v6l4 2"/>
+                        </svg>
+                    </div>
+                    <h3>Auto-Reload</h3>
+                    <p>Watches file for external changes and refreshes automatically. Selection and page position are preserved during reload.</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M4 8h16M4 16h16M8 4v16M16 4v16"/>
+                        </svg>
+                    </div>
+                    <h3>Rectangle Measurement</h3>
+                    <p>Click and drag to create measurement rectangles. Live display in points (pt), picas, and millimeters (mm).</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M4 7V4h16v3M9 20h6M12 4v16"/>
+                        </svg>
+                    </div>
+                    <h3>Font Inspection</h3>
+                    <p>View font names and text sizes. Essential for typography verification and design consistency checks.</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+                        </svg>
+                    </div>
+                    <h3>PNG Export</h3>
+                    <p>Export any selection as high-quality PNG at 150, 300, or 600 DPI. Perfect for documentation and sharing.</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+                            <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/>
+                        </svg>
+                    </div>
+                    <h3>Multi-Page Navigation</h3>
+                    <p>Open and navigate multi-page PDFs with ease. Page Up/Down keys for quick browsing.</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>
+                        </svg>
+                    </div>
+                    <h3>Smooth Zoom</h3>
+                    <p>Pinch gestures, Ctrl+wheel, Fit Width (W), and Actual Size (1). Measurements remain accurate at any zoom.</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="3" y="11" width="18" height="11" rx="2"/>
+                            <path d="M7 11V7a5 5 0 0110 0v4"/>
+                        </svg>
+                    </div>
+                    <h3>Precise Adjustments</h3>
+                    <p>Drag edges and corners to resize selections. Arrow keys for 1pt nudges, Shift+Arrow for 10pt increments.</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="2" y="3" width="20" height="14" rx="2"/>
+                            <path d="M8 21h8M12 17v4"/>
+                        </svg>
+                    </div>
+                    <h3>Cross-Platform</h3>
+                    <p>Windows standalone executable. Linux via pip install. Works with both X11 and Wayland.</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/>
+                        </svg>
+                    </div>
+                    <h3>Docker Ready</h3>
+                    <p>Run in containers with Wayland or X11 forwarding. Perfect for reproducible environments.</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="9" y="9" width="13" height="13" rx="2"/>
+                            <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+                        </svg>
+                    </div>
+                    <h3>Copy Measurements</h3>
+                    <p>Ctrl+C copies measurement values to clipboard. Ready to paste into documents or spreadsheets.</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="3" y="3" width="7" height="7"/>
+                            <rect x="14" y="3" width="7" height="7"/>
+                            <rect x="14" y="14" width="7" height="7"/>
+                            <rect x="3" y="14" width="7" height="7"/>
+                        </svg>
+                    </div>
+                    <h3>Keyboard-Driven</h3>
+                    <p>Comprehensive keyboard shortcuts for all actions. Power users can work without touching the mouse.</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 3v18M3 12h18"/>
+                            <circle cx="12" cy="12" r="9"/>
+                        </svg>
+                    </div>
+                    <h3>Desktop Integration</h3>
+                    <p>Optional Linux desktop launcher with icon. Integrates with your application menu and file associations.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Installation Section -->
+    <section class="installation" id="installation">
+        <div class="container">
+            <h2 class="section-title">Installation</h2>
+            <p class="section-subtitle">Choose your platform</p>
+
+            <div class="tabs">
+                <button class="tab-btn active" data-tab="windows">
+                    <svg class="tab-icon" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801"/>
+                    </svg>
+                    Windows
+                </button>
+                <button class="tab-btn" data-tab="linux">
+                    <svg class="tab-icon" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12.504 0c-.155 0-.313.015-.467.045-4.547.424-8.037 4.443-8.037 9.276 0 .614.064 1.228.192 1.827l-2.106 3.644c-.106.185-.113.405-.017.596.097.191.278.32.482.345l1.876.228-.016.06c-.034.13-.054.263-.054.4 0 .944.775 1.707 1.728 1.707.318 0 .619-.085.881-.239l2.16 1.25c-.004.048-.008.097-.008.146 0 .944.775 1.707 1.728 1.707.168 0 .33-.024.484-.07.344-.102.637-.305.866-.576l.122.073c-.012.035-.022.07-.033.106-.142.477-.213.974-.213 1.479 0 1.082 1.13 1.96 2.5 1.96 1.37 0 2.5-.878 2.5-1.96 0-.148-.016-.296-.047-.44l.51-.294c.506.416 1.137.694 1.837.694 1.592 0 2.7-1.36 2.7-2.853 0-.93-.477-1.781-1.246-2.291l-.002-.015c.137-.385.214-.8.214-1.234 0-1.93-1.507-3.56-3.453-3.756-.11-.007-.22-.01-.33-.01-.74 0-1.444.174-2.075.486l-.24-.125c.032-.11.055-.225.068-.344.02-.18.03-.362.03-.544 0-2.513-1.637-4.684-3.952-5.456-.32-.106-.652-.175-.992-.206-.299-.02-.598-.034-.897-.034"/>
+                    </svg>
+                    Linux
+                </button>
+                <button class="tab-btn" data-tab="docker">
+                    <svg class="tab-icon" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M13.983 11.078h2.119a.186.186 0 00.186-.185V9.006a.186.186 0 00-.186-.186h-2.119a.185.185 0 00-.185.185v1.888c0 .102.083.185.185.185m-2.954-5.43h2.118a.186.186 0 00.186-.186V3.574a.186.186 0 00-.186-.185h-2.118a.185.185 0 00-.185.185v1.888c0 .102.082.185.185.186m0 2.716h2.118a.187.187 0 00.186-.186V6.29a.186.186 0 00-.186-.185h-2.118a.185.185 0 00-.185.185v1.887c0 .102.082.185.185.186m-2.93 0h2.12a.186.186 0 00.184-.186V6.29a.185.185 0 00-.185-.185H8.1a.185.185 0 00-.185.185v1.887c0 .102.083.185.185.186m-2.964 0h2.119a.186.186 0 00.185-.186V6.29a.185.185 0 00-.185-.185H5.136a.186.186 0 00-.186.185v1.887c0 .102.084.185.186.186m5.893 2.715h2.118a.186.186 0 00.186-.185V9.006a.186.186 0 00-.186-.186h-2.118a.185.185 0 00-.185.185v1.888c0 .102.082.185.185.185m-2.93 0h2.12a.185.185 0 00.184-.185V9.006a.185.185 0 00-.184-.186h-2.12a.185.185 0 00-.184.185v1.888c0 .102.083.185.185.185m-2.964 0h2.119a.185.185 0 00.185-.185V9.006a.185.185 0 00-.185-.186h-2.12a.186.186 0 00-.185.186v1.887c0 .102.084.185.186.185m-2.92 0h2.12a.185.185 0 00.184-.185V9.006a.185.185 0 00-.184-.186h-2.12a.185.185 0 00-.184.185v1.888c0 .102.082.185.185.185M23.763 9.89c-.065-.051-.672-.51-1.954-.51-.338.001-.676.03-1.01.087-.248-1.7-1.653-2.53-1.716-2.566l-.344-.199-.226.327c-.284.438-.49.922-.612 1.43-.23.97-.09 1.882.403 2.661-.595.332-1.55.413-1.744.42H.751a.751.751 0 00-.75.748 11.376 11.376 0 00.692 4.062c.545 1.428 1.355 2.48 2.41 3.124 1.18.723 3.1 1.137 5.275 1.137.983.003 1.963-.086 2.93-.266a12.248 12.248 0 003.823-1.389c.98-.567 1.86-1.288 2.61-2.136 1.252-1.418 1.998-2.997 2.553-4.4h.221c1.372 0 2.215-.549 2.68-1.009.309-.293.55-.65.707-1.046l.098-.288z"/>
+                    </svg>
+                    Docker
+                </button>
+            </div>
+
+            <div class="tab-content">
+                <!-- Windows Tab -->
+                <div class="tab-pane active" id="windows">
+                    <div class="install-option">
+                        <h4>Option 1: Download Executable (Recommended)</h4>
+                        <p>Download the standalone executable — no Python required.</p>
+                        <a href="https://github.com/Srikanth-Mohankumar/neoview/releases/latest/download/neoview.exe" class="btn btn-primary btn-small">
+                            Download neoview.exe
+                        </a>
+                    </div>
+                    <div class="install-option">
+                        <h4>Option 2: Install via pip</h4>
+                        <div class="code-block">
+                            <code>py -m pip install neoview</code>
+                            <button class="copy-btn" data-copy="py -m pip install neoview">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="9" y="9" width="13" height="13" rx="2"/>
+                                    <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+                                </svg>
+                            </button>
+                        </div>
+                        <p class="code-note">Then launch with: <code>neoview</code></p>
+                    </div>
+                    <div class="install-option">
+                        <h4>Option 3: Build from Source</h4>
+                        <div class="code-block">
+                            <code>py -m pip install .[dev]<br>pyinstaller neoview.spec</code>
+                            <button class="copy-btn" data-copy="py -m pip install .[dev]&#10;pyinstaller neoview.spec">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="9" y="9" width="13" height="13" rx="2"/>
+                                    <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+                                </svg>
+                            </button>
+                        </div>
+                        <p class="code-note">The executable will be at <code>dist\neoview.exe</code></p>
+                    </div>
+                </div>
+
+                <!-- Linux Tab -->
+                <div class="tab-pane" id="linux">
+                    <div class="install-option">
+                        <h4>Install via pip</h4>
+                        <div class="code-block">
+                            <code>pip install neoview</code>
+                            <button class="copy-btn" data-copy="pip install neoview">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="9" y="9" width="13" height="13" rx="2"/>
+                                    <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+                                </svg>
+                            </button>
+                        </div>
+                        <p class="code-note">Launch with: <code>neoview</code> or <code>neoview /path/to/file.pdf</code></p>
+                    </div>
+                    <div class="install-option">
+                        <h4>Desktop Launcher (Optional)</h4>
+                        <p>Create a desktop shortcut for easy access:</p>
+                        <div class="code-block">
+                            <code>git clone https://github.com/Srikanth-Mohankumar/neoview.git<br>cd neoview<br>pip install .<br>./install_desktop.sh</code>
+                            <button class="copy-btn" data-copy="git clone https://github.com/Srikanth-Mohankumar/neoview.git&#10;cd neoview&#10;pip install .&#10;./install_desktop.sh">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="9" y="9" width="13" height="13" rx="2"/>
+                                    <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="install-option">
+                        <h4>Requirements</h4>
+                        <ul class="requirements-list">
+                            <li>Python 3.10+</li>
+                            <li>PySide6</li>
+                            <li>PyMuPDF</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Docker Tab -->
+                <div class="tab-pane" id="docker">
+                    <div class="install-option">
+                        <h4>Build the Container</h4>
+                        <div class="code-block">
+                            <code>docker build -t pdf-measure .</code>
+                            <button class="copy-btn" data-copy="docker build -t pdf-measure .">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="9" y="9" width="13" height="13" rx="2"/>
+                                    <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="install-option">
+                        <h4>Run with Wayland (Recommended)</h4>
+                        <div class="code-block">
+                            <code>docker run -it --rm \<br>  -e XDG_RUNTIME_DIR=/run/user/$(id -u) \<br>  -e WAYLAND_DISPLAY=$WAYLAND_DISPLAY \<br>  -e QT_QPA_PLATFORM=wayland \<br>  -v $XDG_RUNTIME_DIR/$WAYLAND_DISPLAY:/run/user/$(id -u)/$WAYLAND_DISPLAY \<br>  -v /path/to/pdfs:/pdfs \<br>  pdf-measure /pdfs/document.pdf</code>
+                            <button class="copy-btn" data-copy="docker run -it --rm \&#10;  -e XDG_RUNTIME_DIR=/run/user/$(id -u) \&#10;  -e WAYLAND_DISPLAY=$WAYLAND_DISPLAY \&#10;  -e QT_QPA_PLATFORM=wayland \&#10;  -v $XDG_RUNTIME_DIR/$WAYLAND_DISPLAY:/run/user/$(id -u)/$WAYLAND_DISPLAY \&#10;  -v /path/to/pdfs:/pdfs \&#10;  pdf-measure /pdfs/document.pdf">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="9" y="9" width="13" height="13" rx="2"/>
+                                    <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="install-option">
+                        <h4>Run with X11 (Fallback)</h4>
+                        <div class="code-block">
+                            <code>xhost +local:docker<br>docker run -it --rm \<br>  -e DISPLAY=$DISPLAY \<br>  -e QT_QPA_PLATFORM=xcb \<br>  -v /tmp/.X11-unix:/tmp/.X11-unix \<br>  -v /path/to/pdfs:/pdfs \<br>  pdf-measure /pdfs/document.pdf</code>
+                            <button class="copy-btn" data-copy="xhost +local:docker&#10;docker run -it --rm \&#10;  -e DISPLAY=$DISPLAY \&#10;  -e QT_QPA_PLATFORM=xcb \&#10;  -v /tmp/.X11-unix:/tmp/.X11-unix \&#10;  -v /path/to/pdfs:/pdfs \&#10;  pdf-measure /pdfs/document.pdf">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="9" y="9" width="13" height="13" rx="2"/>
+                                    <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Keyboard Shortcuts Section -->
+    <section class="shortcuts" id="shortcuts">
+        <div class="container">
+            <h2 class="section-title">Keyboard Shortcuts</h2>
+            <p class="section-subtitle">Precision at your fingertips</p>
+
+            <div class="shortcuts-grid">
+                <div class="shortcut-group">
+                    <h4>Navigation</h4>
+                    <div class="shortcut-item">
+                        <kbd>Ctrl</kbd> + <kbd>O</kbd>
+                        <span>Open PDF file</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <kbd>PgUp</kbd> / <kbd>PgDn</kbd>
+                        <span>Previous / Next page</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <kbd>Ctrl</kbd> + <kbd>Q</kbd>
+                        <span>Exit application</span>
+                    </div>
+                </div>
+
+                <div class="shortcut-group">
+                    <h4>Zoom</h4>
+                    <div class="shortcut-item">
+                        <kbd>Ctrl</kbd> + <kbd>Wheel</kbd>
+                        <span>Zoom in/out</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <kbd>W</kbd>
+                        <span>Fit to width</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <kbd>1</kbd>
+                        <span>Actual size (100%)</span>
+                    </div>
+                </div>
+
+                <div class="shortcut-group">
+                    <h4>Selection</h4>
+                    <div class="shortcut-item">
+                        <kbd>Arrow</kbd>
+                        <span>Move selection by 1 pt</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <kbd>Shift</kbd> + <kbd>Arrow</kbd>
+                        <span>Move selection by 10 pt</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <kbd>Escape</kbd>
+                        <span>Clear selection</span>
+                    </div>
+                </div>
+
+                <div class="shortcut-group">
+                    <h4>Resize & Export</h4>
+                    <div class="shortcut-item">
+                        <kbd>Ctrl</kbd> + <kbd>Arrow</kbd>
+                        <span>Resize by 1 pt</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <kbd>Ctrl</kbd> + <kbd>S</kbd>
+                        <span>Export as PNG</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <kbd>Ctrl</kbd> + <kbd>C</kbd>
+                        <span>Copy measurements</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-logo">
+                    <img src="assets/feather-logo.png" alt="NeoView">
+                    <span>NeoView</span>
+                </div>
+                <div class="footer-links">
+                    <a href="https://github.com/Srikanth-Mohankumar/neoview">GitHub</a>
+                    <a href="https://github.com/Srikanth-Mohankumar/neoview/issues">Issues</a>
+                    <a href="https://pypi.org/project/neoview/">PyPI</a>
+                    <a href="https://github.com/Srikanth-Mohankumar/neoview/blob/main/LICENSE">MIT License</a>
+                </div>
+                
+                <div class="footer-developer">
+                    <p class="developer-name">Srikanth Mohankumar</p>
+                    <p class="developer-location">Tamil Nadu, India</p>
+                    <div class="developer-contact">
+                        <a href="mailto:srikanthmohankumar@gmail.com" title="Email">
+                            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/></svg>
+                        </a>
+                        <a href="tel:+918526629711" title="Phone">
+                            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/></svg>
+                        </a>
+                        <a href="https://linkedin.com/in/srikanth-mohankumar" target="_blank" title="LinkedIn">
+                            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg>
+                        </a>
+                        <a href="https://github.com/Srikanth-Mohankumar" target="_blank" title="GitHub">
+                            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.374 0 0 5.373 0 12c0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23A11.509 11.509 0 0112 5.803c1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576C20.566 21.797 24 17.3 24 12c0-6.627-5.373-12-12-12z"/></svg>
+                        </a>
+                    </div>
+                </div>
+
+                <p class="footer-copyright">
+                    Built with ❤️ for the LaTeX community
+                </p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>
