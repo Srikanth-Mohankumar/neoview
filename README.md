@@ -1,6 +1,12 @@
 # NeoView
 
-NeoView is a production-quality PDF viewer with a rectangular crop/measure tool for Linux desktops (Wayland/X11).
+NeoView is a production-quality PDF viewer with a rectangular crop/measure tool for Linux and Windows.
+
+NeoView is designed as a practical alternative to SumatraPDF for Linux users, while adding features useful for technical and LaTeX workflows.
+Key advantages:
+- **Auto-reload**: automatically refreshes PDFs when LaTeX rebuilds, so you don't have to close/reopen the viewer.
+- **Measurement tools**: precise rectangle measurement with units in pt/mm for layout and proofreading.
+- **Export selections**: save regions as PNG at multiple DPI values.
 
 ## Features
 
@@ -37,6 +43,18 @@ Optional desktop launcher (Linux):
 
 ```bash
 ./install_desktop.sh
+```
+
+### Windows notes
+
+If you run on Windows, install with:
+```powershell
+py -m pip install neoview
+```
+
+Launch:
+```powershell
+neoview
 ```
 
 ## Usage
