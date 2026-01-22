@@ -1,6 +1,6 @@
 # NeoView
 
-NeoView is a production-quality PDF viewer with a rectangular crop/measure tool for Ubuntu 22.04 GNOME (Wayland/X11).
+NeoView is a production-quality PDF viewer with a rectangular crop/measure tool for Linux desktops (Wayland/X11).
 
 ## Features
 
@@ -59,6 +59,12 @@ neoview
 
 # Open specific PDF
 neoview /path/to/document.pdf
+```
+
+### Module Run
+
+```bash
+python -m neoview
 ```
 
 ### Container Run
@@ -132,3 +138,10 @@ Enable "Auto-reload on file change" in Options menu to automatically refresh whe
 ## License
 
 MIT
+
+## Development
+
+```bash
+python3 -m pip install -e .[dev]
+pytest
+```

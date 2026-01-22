@@ -12,7 +12,9 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 mkdir -p "$desktop_dir"
 mkdir -p "$icon_dir"
 
-if [[ -f "${script_dir}/feather-logo.png" ]]; then
+if [[ -f "${script_dir}/src/neoview/assets/feather-logo.png" ]]; then
+  cp "${script_dir}/src/neoview/assets/feather-logo.png" "$icon_path"
+elif [[ -f "${script_dir}/feather-logo.png" ]]; then
   cp "${script_dir}/feather-logo.png" "$icon_path"
 fi
 

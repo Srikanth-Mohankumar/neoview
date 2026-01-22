@@ -1,4 +1,7 @@
 include README.md
+include ARCHITECTURE.md
+include CONTRIBUTING.md
 include LICENSE
 include feather-logo.png
 include install_desktop.sh
+recursive-include src/neoview/assets *.png

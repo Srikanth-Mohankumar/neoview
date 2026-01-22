@@ -61,22 +61,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
-RUN pip install --no-cache-dir \
-    PySide6 \
-    PyMuPDF
-
 # Create app directory
 WORKDIR /app
 
 # Copy application
-COPY pdf_crop_measure.py .
+COPY . /app
 
-# Make executable
-RUN chmod +x pdf_crop_measure.py
+# Install app
+RUN pip install --no-cache-dir .
 
 # Set entrypoint
-ENTRYPOINT ["python", "/app/pdf_crop_measure.py"]
+ENTRYPOINT ["neoview"]
 
 # Default: open file dialog (no arguments)
 CMD []

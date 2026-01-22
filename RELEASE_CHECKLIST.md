@@ -5,6 +5,7 @@
 - Confirm project name availability on PyPI (currently `neoview`).
 - Verify the license holder name in `LICENSE`.
 - Ensure the README title/description matches the public repo name.
+- Run the test suite: `pytest`.
 
 ## Build + upload to PyPI
 ```bash

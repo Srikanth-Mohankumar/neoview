@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=64.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -28,12 +28,34 @@ dependencies = [
   "PyMuPDF",
 ]
 
+[project.urls]
+Repository = "https://github.com/your-org/neoview"
+Issues = "https://github.com/your-org/neoview/issues"
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=7.4",
+  "ruff>=0.3.0",
+  "build>=1.0.3",
+]
+
 [project.scripts]
-neoview = "pdf_crop_measure:main"
+neoview = "neoview.app:main"
 
 [tool.setuptools]
-py-modules = ["pdf_crop_measure"]
 include-package-data = true
 
-[tool.setuptools.data-files]
-"." = ["feather-logo.png"]
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.setuptools.package-data]
+neoview = ["assets/*.png"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
