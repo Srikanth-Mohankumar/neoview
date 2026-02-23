@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sys
 
+import fitz
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QApplication
 
@@ -14,6 +15,10 @@ from neoview.ui.main_window import MainWindow, APP_NAME
 
 
 def main() -> None:
+    # Suppress noisy parser diagnostics from malformed third-party PDFs.
+    fitz.TOOLS.mupdf_display_errors(False)
+    fitz.TOOLS.mupdf_display_warnings(False)
+
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setStyleSheet(DARK_STYLE)

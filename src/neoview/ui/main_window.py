@@ -10,6 +10,7 @@ from PySide6.QtCore import QFileSystemWatcher, QRectF, QSettings, QSize, Qt, QTi
 from PySide6.QtGui import QAction, QActionGroup, QIcon, QImage, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
+    QButtonGroup,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -155,7 +156,8 @@ class MainWindow(QMainWindow):
         edit_m = self.menuBar().addMenu("&Edit")
         self._copy_action = self._action("&Copy Measurements", self._copy, QKeySequence.StandardKey.Copy)
         edit_m.addAction(self._copy_action)
-        edit_m.addAction(self._action("&Find...", self._show_find, "Ctrl+Shift+F"))
+        self._find_action = self._action("&Find...", self._show_find, "Ctrl+F")
+        edit_m.addAction(self._find_action)
         edit_m.addAction(self._action("C&lear Selection", self._view.clear_all_selection, "Escape"))
 
         view_m = self.menuBar().addMenu("&View")
@@ -163,7 +165,7 @@ class MainWindow(QMainWindow):
         self._zoom_out_action = self._action("Zoom &Out", lambda: self._view.zoom_by(0.8), QKeySequence.StandardKey.ZoomOut)
         self._fit_width_action = self._action("Fit &Width", self._view.fit_width, "W")
         self._fit_page_action = self._action("Fit &Page", self._view.fit_page, "F")
-        self._actual_size_action = self._action("&Actual Size", lambda: self._view.set_zoom(1.0), "Ctrl+1")
+        self._actual_size_action = self._action("&Actual Size", lambda: self._view.set_zoom(1.0, immediate=True), "Ctrl+1")
 
         view_m.addAction(self._zoom_in_action)
         view_m.addAction(self._zoom_out_action)
@@ -203,7 +205,7 @@ class MainWindow(QMainWindow):
         tools_m.addAction(self._measure_action)
 
         tools_m.addSeparator()
-        tools_m.addAction(self._action("&Search Panel", self._toggle_search_dock, "Ctrl+F"))
+        tools_m.addAction(self._action("&Search Panel", self._toggle_search_dock, "Ctrl+Shift+F"))
         tools_m.addAction(self._action("&Outline Panel", self._toggle_outline_dock, "Ctrl+Shift+O"))
         tools_m.addAction(self._action("&Thumbnails Panel", self._toggle_thumbs_dock, "Ctrl+Shift+T"))
         tools_m.addAction(self._action("&Page Info Panel", self._toggle_info_dock, "Ctrl+Shift+I"))
@@ -298,10 +300,13 @@ class MainWindow(QMainWindow):
         self._search_input.setPlaceholderText("Find text...")
         self._search_prev_btn = QPushButton("Prev")
         self._search_next_btn = QPushButton("Next")
+        self._search_close_btn = QPushButton("Close")
+        self._search_close_btn.setProperty("secondary", True)
         self._search_count_lbl = QLabel("")
         search_layout.addWidget(self._search_input)
         search_layout.addWidget(self._search_prev_btn)
         search_layout.addWidget(self._search_next_btn)
+        search_layout.addWidget(self._search_close_btn)
         search_layout.addWidget(self._search_count_lbl)
         self._search_dock.setWidget(search_widget)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self._search_dock)
@@ -309,6 +314,7 @@ class MainWindow(QMainWindow):
 
         self._search_prev_btn.clicked.connect(self._find_prev)
         self._search_next_btn.clicked.connect(self._find_next)
+        self._search_close_btn.clicked.connect(lambda: self._search_dock.setVisible(False))
         self._search_input.returnPressed.connect(self._find_next)
 
         self._outline_dock = QDockWidget("Outline", self)
@@ -359,6 +365,28 @@ class MainWindow(QMainWindow):
         m_layout.addWidget(self._measure_x)
         m_layout.addWidget(self._measure_y)
 
+        tool_label = QLabel("Tool")
+        tool_label.setObjectName("InfoLabel")
+        m_layout.addWidget(tool_label)
+        tool_row = QHBoxLayout()
+        tool_row.setContentsMargins(0, 0, 0, 0)
+        tool_row.setSpacing(6)
+        self._panel_tool_group = QButtonGroup(self)
+        self._panel_tool_group.setExclusive(True)
+        self._panel_select_btn = QPushButton("Select (1)")
+        self._panel_hand_btn = QPushButton("Hand (2)")
+        self._panel_measure_btn = QPushButton("Measure (3)")
+        for btn, mode in (
+            (self._panel_select_btn, ToolMode.SELECT),
+            (self._panel_hand_btn, ToolMode.HAND),
+            (self._panel_measure_btn, ToolMode.MEASURE),
+        ):
+            btn.setCheckable(True)
+            btn.clicked.connect(lambda _checked=False, m=mode: self._set_tool(m))
+            self._panel_tool_group.addButton(btn)
+            tool_row.addWidget(btn)
+        m_layout.addLayout(tool_row)
+
         font_section = CollapsibleSection("Font Inspector")
         f_layout = font_section.content_layout
         self._font_name = self._info_row(f_layout, "Name", "--")
@@ -392,6 +420,7 @@ class MainWindow(QMainWindow):
         self._search_dock.setVisible(visible)
         if visible:
             self._search_input.setFocus()
+            self._search_input.selectAll()
 
     def _toggle_outline_dock(self):
         self._outline_dock.setVisible(not self._outline_dock.isVisible())
@@ -503,24 +532,28 @@ class MainWindow(QMainWindow):
 
         font_name = "--"
         size_text = "--"
+        style_text = ""
         for part in [p.strip() for p in info.split("|")]:
             lower = part.lower()
             if lower.startswith("font:"):
                 font_name = part.split(":", 1)[1].strip()
             elif lower.startswith("size:"):
                 size_text = part.split(":", 1)[1].strip()
+            elif lower.startswith("style:"):
+                style_text = part.split(":", 1)[1].strip()
 
-        normalized = font_name.lower()
-        styles = []
-        if "bold" in normalized:
-            styles.append("Bold")
-        if "italic" in normalized or "oblique" in normalized:
-            styles.append("Italic")
-        style = " + ".join(styles) if styles else "Regular"
+        if not style_text:
+            normalized = font_name.lower()
+            styles = []
+            if "bold" in normalized:
+                styles.append("Bold")
+            if "italic" in normalized or "oblique" in normalized:
+                styles.append("Italic")
+            style_text = " + ".join(styles) if styles else "Regular"
 
         self._font_name.setText(font_name)
         self._font_size.setText(size_text)
-        self._font_style.setText(style)
+        self._font_style.setText(style_text)
 
     def _on_text_selected(self, text: str):
         if text:
@@ -530,9 +563,7 @@ class MainWindow(QMainWindow):
             self._status.showMessage("No text in selection", 1500)
 
     def _show_find(self):
-        self._search_dock.setVisible(True)
-        self._search_input.setFocus()
-        self._search_input.selectAll()
+        self._toggle_search_dock()
 
     def _clear_search(self):
         self._search_query = ""
@@ -644,6 +675,10 @@ class MainWindow(QMainWindow):
 
         if self._toolbar_select_action:
             self._toolbar_select_action.setChecked(self._view.tool == ToolMode.SELECT)
+        if hasattr(self, "_panel_select_btn"):
+            self._panel_select_btn.setChecked(self._view.tool == ToolMode.SELECT)
+            self._panel_hand_btn.setChecked(self._view.tool == ToolMode.HAND)
+            self._panel_measure_btn.setChecked(self._view.tool == ToolMode.MEASURE)
 
     def _open_dialog(self):
         path, _ = QFileDialog.getOpenFileName(self, "Open PDF", "", "PDF (*.pdf);;All (*)")
@@ -759,6 +794,10 @@ class MainWindow(QMainWindow):
         self._measure_action.setChecked(tool == ToolMode.MEASURE)
         if self._toolbar_select_action:
             self._toolbar_select_action.setChecked(tool == ToolMode.SELECT)
+        if hasattr(self, "_panel_select_btn"):
+            self._panel_select_btn.setChecked(tool == ToolMode.SELECT)
+            self._panel_hand_btn.setChecked(tool == ToolMode.HAND)
+            self._panel_measure_btn.setChecked(tool == ToolMode.MEASURE)
         self._update_status()
 
     def _on_zoom_combo_changed(self, text: str):
@@ -773,7 +812,7 @@ class MainWindow(QMainWindow):
             return
         if value <= 0:
             return
-        self._view.set_zoom(value / 100.0)
+        self._view.set_zoom(value / 100.0, immediate=True)
 
     def _sync_zoom_combo(self):
         if not hasattr(self, "_zoom_combo"):

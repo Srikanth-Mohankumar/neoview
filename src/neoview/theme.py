@@ -184,10 +184,6 @@ QListWidget::item:selected,
 QTreeWidget::item:selected {
     background: #2a3e71;
 }
-QDockWidget {
-    titlebar-close-icon: none;
-    titlebar-normal-icon: none;
-}
 QDockWidget::title {
     background: #101116;
     border: 1px solid #252935;

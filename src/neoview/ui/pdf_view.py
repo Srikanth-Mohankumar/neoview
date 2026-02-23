@@ -146,12 +146,15 @@ class PdfView(QGraphicsView):
         return self._rotation
 
     def _update_cursor(self):
+        if self._tool != ToolMode.HAND:
+            self._panning = False
+            self._pan_start = None
         if self._tool == ToolMode.SELECT:
             self.setCursor(Qt.CursorShape.ArrowCursor)
             self.setDragMode(QGraphicsView.DragMode.NoDrag)
         elif self._tool == ToolMode.HAND:
             self.setCursor(Qt.CursorShape.OpenHandCursor)
-            self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
+            self.setDragMode(QGraphicsView.DragMode.NoDrag)
         elif self._tool == ToolMode.MEASURE:
             self.setCursor(Qt.CursorShape.CrossCursor)
             self.setDragMode(QGraphicsView.DragMode.NoDrag)
@@ -258,11 +261,15 @@ class PdfView(QGraphicsView):
         self._clear_search_items()
         self._hide_measure_badge()
 
-    def _render_all_pages(self):
+    def _render_all_pages(self, keep_selection: bool = False):
+        selected_rect = self.selection_rect if keep_selection else None
+        selected_page = self._selection_page if keep_selection else -1
+
         self._scene.clear()
         self._pages.clear()
         self._page_positions.clear()
         self._selection = None
+        self._selection_page = -1
         self.clear_text_selection()
         self._clear_search_items()
         self._hide_measure_badge()
@@ -291,6 +298,9 @@ class PdfView(QGraphicsView):
         total_height = y
         max_width = max((p.page_rect.width() for p in self._pages), default=600) * self._zoom
         self._scene.setSceneRect(0, 0, max_width, total_height)
+
+        if selected_rect and 0 <= selected_page < len(self._pages):
+            self._create_selection_on_page(selected_page, selected_rect)
 
         self._render_zoom = self._zoom
         self._rebuild_search_highlights()
@@ -343,7 +353,7 @@ class PdfView(QGraphicsView):
             return
 
         scroll_pos = self.verticalScrollBar().value()
-        self._render_all_pages()
+        self._render_all_pages(keep_selection=True)
         self.verticalScrollBar().setValue(scroll_pos)
 
     def _emit_page_info(self):
@@ -353,14 +363,18 @@ class PdfView(QGraphicsView):
         self._emit_page_info()
         self._update_measure_badge()
 
-    def set_zoom(self, z: float):
+    def set_zoom(self, z: float, immediate: bool = False):
         z = max(0.25, min(z, 5.0))
         if abs(z - self._zoom) < 0.01:
             return
         self._zoom = z
         if self._pages:
             self._layout_pages()
-            self._rerender_timer.start(150)
+            if immediate:
+                self._rerender_timer.stop()
+                self._rerender_pages()
+            else:
+                self._rerender_timer.start(75)
         else:
             self._render_all_pages()
         self.zoom_changed.emit(z)
@@ -385,7 +399,7 @@ class PdfView(QGraphicsView):
             return
         page_width = self._pages[0].page_rect.width()
         view_width = self.viewport().width() - 40
-        self.set_zoom(view_width / page_width)
+        self.set_zoom(view_width / page_width, immediate=True)
 
     def fit_page(self):
         if not self._pages:
@@ -395,7 +409,7 @@ class PdfView(QGraphicsView):
         view_h = self.viewport().height() - 40
         scale_w = view_w / page.width()
         scale_h = view_h / page.height()
-        self.set_zoom(min(scale_w, scale_h))
+        self.set_zoom(min(scale_w, scale_h), immediate=True)
 
     def current_page_size(self) -> Optional[QRectF]:
         if 0 <= self.current_page < len(self._pages):
@@ -598,7 +612,10 @@ class PdfView(QGraphicsView):
         scene_pos = self.mapToScene(e.position().toPoint())
 
         if self._tool == ToolMode.HAND:
-            super().mousePressEvent(e)
+            self._panning = True
+            self._pan_start = e.position()
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            e.accept()
             return
 
         if self._tool == ToolMode.SELECT:
@@ -649,6 +666,14 @@ class PdfView(QGraphicsView):
 
     def mouseMoveEvent(self, e: QMouseEvent):
         scene_pos = self.mapToScene(e.position().toPoint())
+
+        if self._tool == ToolMode.HAND and self._panning and self._pan_start is not None:
+            delta = e.position() - self._pan_start
+            self._pan_start = e.position()
+            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - int(delta.x()))
+            self.verticalScrollBar().setValue(self.verticalScrollBar().value() - int(delta.y()))
+            e.accept()
+            return
 
         if self._tool == ToolMode.SELECT and self._text_selecting and self._text_select_item:
             page_idx = self._text_select_page
@@ -706,6 +731,13 @@ class PdfView(QGraphicsView):
 
     def mouseReleaseEvent(self, e: QMouseEvent):
         if e.button() == Qt.MouseButton.LeftButton:
+            if self._tool == ToolMode.HAND and self._panning:
+                self._panning = False
+                self._pan_start = None
+                self.setCursor(Qt.CursorShape.OpenHandCursor)
+                e.accept()
+                return
+
             if self._tool == ToolMode.SELECT and self._text_selecting:
                 self._text_selecting = False
                 if self._text_select_item and self._text_select_start is not None:
@@ -717,6 +749,9 @@ class PdfView(QGraphicsView):
                             info = page_item.get_text_info_at(self._text_select_start)
                             if info:
                                 text_info = f"Font: {info['font']} | Size: {info['size']:.1f}pt"
+                                style = info.get("style")
+                                if style:
+                                    text_info += f" | Style: {style}"
                                 self.text_info_changed.emit(text_info)
                             else:
                                 self.text_info_changed.emit("")
