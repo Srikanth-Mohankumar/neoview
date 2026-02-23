@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from typing import Optional
 
 import fitz
@@ -14,12 +15,15 @@ class PageItem(QGraphicsPixmapItem):
     """A single PDF page rendered at optimized quality."""
 
     RENDER_SCALE = 2.0
+    CACHE_LIMIT = 96
+    _PIXMAP_CACHE: "OrderedDict[tuple, QPixmap]" = OrderedDict()
 
     def __init__(self, page: fitz.Page, scale: float, page_index: int):
         super().__init__()
         self.page_index = page_index
         self.page_rect = QRectF(0, 0, page.rect.width, page.rect.height)
         self._fitz_page = page
+        self.render_zoom: float = scale
         self._shadow = QGraphicsDropShadowEffect()
         self._shadow.setBlurRadius(24.0)
         self._shadow.setOffset(0.0, 4.0)
@@ -27,7 +31,37 @@ class PageItem(QGraphicsPixmapItem):
         self.setGraphicsEffect(self._shadow)
         self._render(page, scale)
 
+    @classmethod
+    def _cache_key(cls, page: fitz.Page, scale: float) -> tuple:
+        doc = getattr(page, "parent", None)
+        doc_name = getattr(doc, "name", "") or f"doc-{id(doc)}"
+        page_num = getattr(page, "number", -1)
+        return (doc_name, page_num, round(scale, 2), cls.RENDER_SCALE)
+
+    @classmethod
+    def _cache_get(cls, key: tuple) -> Optional[QPixmap]:
+        pixmap = cls._PIXMAP_CACHE.get(key)
+        if pixmap is None:
+            return None
+        cls._PIXMAP_CACHE.move_to_end(key)
+        return pixmap
+
+    @classmethod
+    def _cache_put(cls, key: tuple, pixmap: QPixmap):
+        cls._PIXMAP_CACHE[key] = pixmap
+        cls._PIXMAP_CACHE.move_to_end(key)
+        while len(cls._PIXMAP_CACHE) > cls.CACHE_LIMIT:
+            cls._PIXMAP_CACHE.popitem(last=False)
+
     def _render(self, page: fitz.Page, scale: float):
+        self.render_zoom = scale
+        key = self._cache_key(page, scale)
+        cached = self._cache_get(key)
+        if cached is not None:
+            self.setPixmap(cached)
+            self.setScale(1.0 / self.RENDER_SCALE)
+            return
+
         render_scale = scale * self.RENDER_SCALE
         mat = fitz.Matrix(render_scale, render_scale)
         pix = page.get_pixmap(matrix=mat, alpha=False)
@@ -35,6 +69,13 @@ class PageItem(QGraphicsPixmapItem):
         pixmap = QPixmap.fromImage(img.copy())
         self.setPixmap(pixmap)
         self.setScale(1.0 / self.RENDER_SCALE)
+        self._cache_put(key, pixmap)
+
+    def rerender(self, scale: float) -> bool:
+        if abs(scale - self.render_zoom) < 0.01:
+            return False
+        self._render(self._fitz_page, scale)
+        return True
 
     def get_text_info_at(self, page_point: QPointF) -> Optional[dict]:
         """Get font info for text at the given page coordinate."""

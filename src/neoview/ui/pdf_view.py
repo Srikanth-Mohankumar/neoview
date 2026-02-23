@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from bisect import bisect_right
 import os
 from enum import Enum, auto
 from typing import Dict, List, Optional, Tuple
@@ -9,7 +10,7 @@ from typing import Dict, List, Optional, Tuple
 import fitz
 from PySide6.QtCore import QPoint, QPointF, QRectF, QTimer, QUrl, Signal, Qt
 from PySide6.QtGui import QBrush, QColor, QDesktopServices, QKeyEvent, QMouseEvent, QPainter, QPen, QWheelEvent
-from PySide6.QtWidgets import QGraphicsRectItem, QGraphicsScene, QGraphicsView, QLabel, QMessageBox, QStyle
+from PySide6.QtWidgets import QGraphicsRectItem, QGraphicsScene, QGraphicsView, QLabel, QMessageBox, QStyle, QToolTip
 import shiboken6
 
 from neoview.ui.selection import SelectionRect
@@ -25,6 +26,11 @@ class ToolMode(Enum):
 class PdfView(QGraphicsView):
     """Full-featured PDF viewer with tools."""
 
+    ZOOM_MODE_CUSTOM = "custom"
+    ZOOM_MODE_FIT_WIDTH = "fit_width"
+    ZOOM_MODE_FIT_PAGE = "fit_page"
+    ZOOM_MODE_ACTUAL_SIZE = "actual_size"
+
     selection_changed = Signal()
     zoom_changed = Signal(float)
     page_changed = Signal(int, int)
@@ -38,6 +44,8 @@ class PdfView(QGraphicsView):
         self.setAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents, True)
         self.grabGesture(Qt.GestureType.PinchGesture)
         self.viewport().setAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents, True)
+        self.setMouseTracking(True)
+        self.viewport().setMouseTracking(True)
 
         self.setRenderHint(QPainter.RenderHint.Antialiasing)
         self.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
@@ -45,6 +53,9 @@ class PdfView(QGraphicsView):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.setBackgroundBrush(QBrush(QColor("#141417")))
         self.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
+        self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.SmartViewportUpdate)
+        self.verticalScrollBar().setSingleStep(36)
+        self.horizontalScrollBar().setSingleStep(36)
 
         self._scene = QGraphicsScene(self)
         self.setScene(self._scene)
@@ -54,7 +65,7 @@ class PdfView(QGraphicsView):
         self._pages: List[PageItem] = []
         self._page_positions: List[float] = []
         self._zoom: float = 1.0
-        self._render_zoom: float = self._zoom
+        self._zoom_mode: str = self.ZOOM_MODE_CUSTOM
         self._tool: ToolMode = ToolMode.HAND
 
         self._rerender_timer = QTimer(self)
@@ -73,6 +84,7 @@ class PdfView(QGraphicsView):
         self._hover_link: Optional[Dict] = None
         self._pressed_link: Optional[Dict] = None
         self._pressed_pos: Optional[QPointF] = None
+        self._link_highlight_item: Optional[QGraphicsRectItem] = None
 
         self._selection: Optional[SelectionRect] = None
         self._selection_page: int = -1
@@ -127,6 +139,10 @@ class PdfView(QGraphicsView):
             self.clear_text_selection()
             self.text_info_changed.emit("")
         self._update_cursor()
+
+    @property
+    def zoom_mode(self) -> str:
+        return self._zoom_mode
 
     @property
     def page_count(self) -> int:
@@ -252,7 +268,6 @@ class PdfView(QGraphicsView):
                 self._create_selection_on_page(sel_page, sel_rect)
 
             self._cache_page_links()
-            self._render_zoom = self._zoom
             self._rebuild_search_highlights()
             self._update_measure_badge()
             self._emit_page_info()
@@ -275,6 +290,7 @@ class PdfView(QGraphicsView):
         self._pages.clear()
         self._page_positions.clear()
         self._page_links.clear()
+        self._link_highlight_item = None
         self._hover_link = None
         self._pressed_link = None
         self._pressed_pos = None
@@ -292,6 +308,7 @@ class PdfView(QGraphicsView):
         self._pages.clear()
         self._page_positions.clear()
         self._page_links.clear()
+        self._link_highlight_item = None
         self._hover_link = None
         self._pressed_link = None
         self._pressed_pos = None
@@ -331,7 +348,6 @@ class PdfView(QGraphicsView):
             self._create_selection_on_page(selected_page, selected_rect)
 
         self._cache_page_links()
-        self._render_zoom = self._zoom
         self._rebuild_search_highlights()
         self._update_measure_badge()
         self._emit_page_info()
@@ -343,10 +359,10 @@ class PdfView(QGraphicsView):
 
         gap = 20
         y = gap
-        scale_factor = self._zoom / self._render_zoom if self._render_zoom else 1.0
 
         for p in self._pages:
-            p.setScale(scale_factor / PageItem.RENDER_SCALE)
+            render_zoom = p.render_zoom if p.render_zoom > 0 else self._zoom
+            p.setScale((self._zoom / render_zoom) / PageItem.RENDER_SCALE)
             p.setPos(0, y)
             y += p.page_rect.height() * self._zoom + gap
 
@@ -397,13 +413,60 @@ class PdfView(QGraphicsView):
                 pass
             self._page_links.append(links)
 
+    def _visible_page_indices(self, overscan: int = 0) -> List[int]:
+        if not self._pages:
+            return []
+        visible_rect = self.mapToScene(self.viewport().rect()).boundingRect()
+        top = visible_rect.top()
+        bottom = visible_rect.bottom()
+        visible: List[int] = []
+
+        start_idx = max(0, bisect_right(self._page_positions, top) - 1)
+        for idx in range(start_idx, len(self._pages)):
+            page = self._pages[idx]
+            page_top = page.pos().y()
+            page_bottom = page_top + page.page_rect.height() * self._zoom
+            if page_top > bottom:
+                break
+            if page_bottom < top:
+                continue
+            visible.append(idx)
+
+        if not visible:
+            current = self.current_page
+            if 0 <= current < len(self._pages):
+                visible = [current]
+
+        if overscan <= 0:
+            return visible
+
+        expanded = set()
+        for idx in visible:
+            start = max(0, idx - overscan)
+            end = min(len(self._pages) - 1, idx + overscan)
+            expanded.update(range(start, end + 1))
+        return sorted(expanded)
+
+    def _visible_page_needs_rerender(self) -> bool:
+        for idx in self._visible_page_indices():
+            page = self._pages[idx]
+            if abs(page.render_zoom - self._zoom) >= 0.01:
+                return True
+        return False
+
     def _rerender_pages(self):
-        if not self._doc:
+        if not self._pages:
             return
 
-        scroll_pos = self.verticalScrollBar().value()
-        self._render_all_pages(keep_selection=True)
-        self.verticalScrollBar().setValue(scroll_pos)
+        rerendered = False
+        for idx in self._visible_page_indices(overscan=2):
+            page = self._pages[idx]
+            if page.rerender(self._zoom):
+                page.setScale(1.0 / PageItem.RENDER_SCALE)
+                rerendered = True
+
+        if rerendered:
+            self.viewport().update()
 
     def _emit_page_info(self):
         self.page_changed.emit(self.current_page + 1, self.page_count)
@@ -412,19 +475,32 @@ class PdfView(QGraphicsView):
         self._emit_page_info()
         self._update_measure_badge()
         self._hide_link_badge()
+        if self._visible_page_needs_rerender():
+            self._rerender_timer.start(40)
 
-    def set_zoom(self, z: float, immediate: bool = False):
+    def set_zoom(self, z: float, immediate: bool = False, zoom_mode: str = ZOOM_MODE_CUSTOM):
         z = max(0.25, min(z, 5.0))
+        if zoom_mode not in {
+            self.ZOOM_MODE_CUSTOM,
+            self.ZOOM_MODE_FIT_WIDTH,
+            self.ZOOM_MODE_FIT_PAGE,
+            self.ZOOM_MODE_ACTUAL_SIZE,
+        }:
+            zoom_mode = self.ZOOM_MODE_CUSTOM
+
         if abs(z - self._zoom) < 0.01:
+            self._zoom_mode = zoom_mode
             return
+
         self._zoom = z
+        self._zoom_mode = zoom_mode
         if self._pages:
             self._layout_pages()
             if immediate:
                 self._rerender_timer.stop()
                 self._rerender_pages()
             else:
-                self._rerender_timer.start(75)
+                self._rerender_timer.start(55)
         else:
             self._render_all_pages()
         self.zoom_changed.emit(z)
@@ -442,14 +518,14 @@ class PdfView(QGraphicsView):
             self.rotate(self._rotation)
 
     def zoom_by(self, factor: float):
-        self.set_zoom(self._zoom * factor)
+        self.set_zoom(self._zoom * factor, zoom_mode=self.ZOOM_MODE_CUSTOM)
 
     def fit_width(self):
         if not self._pages:
             return
         page_width = self._pages[0].page_rect.width()
         view_width = self.viewport().width() - 40
-        self.set_zoom(view_width / page_width, immediate=True)
+        self.set_zoom(view_width / page_width, immediate=True, zoom_mode=self.ZOOM_MODE_FIT_WIDTH)
 
     def fit_page(self):
         if not self._pages:
@@ -459,7 +535,10 @@ class PdfView(QGraphicsView):
         view_h = self.viewport().height() - 40
         scale_w = view_w / page.width()
         scale_h = view_h / page.height()
-        self.set_zoom(min(scale_w, scale_h), immediate=True)
+        self.set_zoom(min(scale_w, scale_h), immediate=True, zoom_mode=self.ZOOM_MODE_FIT_PAGE)
+
+    def actual_size(self):
+        self.set_zoom(1.0, immediate=True, zoom_mode=self.ZOOM_MODE_ACTUAL_SIZE)
 
     def current_page_size(self) -> Optional[QRectF]:
         if 0 <= self.current_page < len(self._pages):
@@ -626,6 +705,9 @@ class PdfView(QGraphicsView):
     def _hide_link_badge(self):
         self._hover_link = None
         self._link_badge.hide()
+        if self._link_highlight_item and shiboken6.isValid(self._link_highlight_item):
+            self._link_highlight_item.hide()
+        QToolTip.hideText()
 
     def _clear_link_press(self):
         self._pressed_link = None
@@ -673,6 +755,56 @@ class PdfView(QGraphicsView):
                 return {"page_idx": page_idx, "rect": rect, "link": link}
         return None
 
+    def _ensure_link_highlight_item(self) -> QGraphicsRectItem:
+        if self._link_highlight_item and shiboken6.isValid(self._link_highlight_item):
+            return self._link_highlight_item
+
+        item = QGraphicsRectItem()
+        pen = QPen(QColor(91, 141, 246, 215))
+        pen.setWidthF(1.0)
+        pen.setCosmetic(True)
+        item.setPen(pen)
+        item.setBrush(QBrush(QColor(91, 141, 246, 45)))
+        item.setZValue(980)
+        self._scene.addItem(item)
+        self._link_highlight_item = item
+        return item
+
+    def _show_link_highlight(self, link_info: Dict):
+        page_idx = link_info.get("page_idx", -1)
+        if not (0 <= page_idx < len(self._pages)):
+            return
+        rect = link_info.get("rect")
+        if not isinstance(rect, QRectF):
+            return
+
+        page = self._pages[page_idx]
+        highlight = self._ensure_link_highlight_item()
+        scene_rect = QRectF(
+            page.pos().x() + rect.x() * self._zoom,
+            page.pos().y() + rect.y() * self._zoom,
+            rect.width() * self._zoom,
+            rect.height() * self._zoom,
+        )
+        highlight.setRect(scene_rect)
+        highlight.show()
+
+    def _link_tooltip_text(self, link: Dict) -> str:
+        uri = str(link.get("uri") or "").strip()
+        if uri:
+            if uri.startswith("#"):
+                return f"Navigate to destination {uri}"
+            return uri
+
+        page_idx = link.get("page")
+        if isinstance(page_idx, int) and page_idx >= 0:
+            target_y = self._extract_target_y(link.get("to"))
+            if target_y is not None:
+                return f"Go to page {page_idx + 1} at y={target_y:.0f}"
+            return f"Go to page {page_idx + 1}"
+
+        return "Follow link"
+
     def _update_link_hover(self, scene_pos: QPointF, viewport_pos: QPoint):
         if self._tool not in (ToolMode.HAND, ToolMode.SELECT):
             self._hide_link_badge()
@@ -697,6 +829,11 @@ class PdfView(QGraphicsView):
         self._link_badge.move(x, y)
         self._link_badge.show()
         self._link_badge.raise_()
+        self._show_link_highlight(link_info)
+
+        tooltip = self._link_tooltip_text(link_info.get("link", {}))
+        if tooltip:
+            QToolTip.showText(self.viewport().mapToGlobal(viewport_pos + QPoint(14, 16)), tooltip, self.viewport())
 
     def _activate_link(self, link_info: Dict):
         if not link_info:
@@ -964,8 +1101,17 @@ class PdfView(QGraphicsView):
     def wheelEvent(self, e: QWheelEvent):
         if e.modifiers() & Qt.KeyboardModifier.ControlModifier:
             delta = e.angleDelta().y()
+            if delta == 0 and not e.pixelDelta().isNull():
+                delta = e.pixelDelta().y()
             if delta != 0:
-                self.zoom_by(1.1 if delta > 0 else 1 / 1.1)
+                anchor = e.position().toPoint()
+                before = self.mapToScene(anchor)
+                factor = 1.08 ** (delta / 120.0)
+                self.zoom_by(factor)
+                after = self.mapToScene(anchor)
+                shift = after - before
+                self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() + int(shift.x()))
+                self.verticalScrollBar().setValue(self.verticalScrollBar().value() + int(shift.y()))
             e.accept()
             return
         super().wheelEvent(e)
@@ -1030,11 +1176,25 @@ class PdfView(QGraphicsView):
                 elif state == Qt.GestureState.GestureUpdated:
                     total = pinch.totalScaleFactor()
                     if total and total > 0:
-                        self.set_zoom(self._pinch_start_zoom * total)
+                        self.set_zoom(self._pinch_start_zoom * total, zoom_mode=self.ZOOM_MODE_CUSTOM)
                 return True
         return super().event(e)
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
+        if self._pages and self._zoom_mode in (self.ZOOM_MODE_FIT_WIDTH, self.ZOOM_MODE_FIT_PAGE):
+            if self._zoom_mode == self.ZOOM_MODE_FIT_WIDTH:
+                page_width = self._pages[0].page_rect.width()
+                view_width = self.viewport().width() - 40
+                self.set_zoom(view_width / page_width, zoom_mode=self.ZOOM_MODE_FIT_WIDTH)
+            else:
+                page = self._pages[0].page_rect
+                view_w = self.viewport().width() - 40
+                view_h = self.viewport().height() - 40
+                self.set_zoom(min(view_w / page.width(), view_h / page.height()), zoom_mode=self.ZOOM_MODE_FIT_PAGE)
         self._update_measure_badge()
         self._hide_link_badge()
+
+    def leaveEvent(self, e):
+        self._hide_link_badge()
+        super().leaveEvent(e)

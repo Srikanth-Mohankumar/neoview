@@ -183,13 +183,47 @@ def test_restore_document_session_applies_zoom_and_page(monkeypatch):
 
     applied_zoom = []
     jumps = []
-    monkeypatch.setattr(win._view, "set_zoom", lambda z, immediate=False: applied_zoom.append((z, immediate)))
+    monkeypatch.setattr(
+        win._view,
+        "set_zoom",
+        lambda z, immediate=False, zoom_mode=PdfView.ZOOM_MODE_CUSTOM: applied_zoom.append(
+            (z, immediate, zoom_mode)
+        ),
+    )
     monkeypatch.setattr(win._view, "go_to_page", lambda p: jumps.append(p))
 
     restored = win._restore_document_session("/tmp/demo.pdf")
     QApplication.processEvents()
 
     assert restored is True
-    assert applied_zoom == [(1.4, True)]
+    assert applied_zoom == [(1.4, True, PdfView.ZOOM_MODE_CUSTOM)]
     assert jumps == [2]
+    win.close()
+
+
+def test_restore_document_session_applies_fit_width_mode(monkeypatch):
+    class DummyDoc:
+        page_count = 3
+
+        def close(self):
+            return None
+
+    win = MainWindow()
+    win._view._doc = DummyDoc()
+    win._current_file = "/tmp/demo.pdf"
+    win._document_sessions = {
+        "/tmp/demo.pdf": {"page": 1, "zoom": 1.0, "zoom_mode": PdfView.ZOOM_MODE_FIT_WIDTH}
+    }
+
+    fit_calls = []
+    jumps = []
+    monkeypatch.setattr(win._view, "fit_width", lambda: fit_calls.append(True))
+    monkeypatch.setattr(win._view, "go_to_page", lambda p: jumps.append(p))
+
+    restored = win._restore_document_session("/tmp/demo.pdf")
+    QApplication.processEvents()
+
+    assert restored is True
+    assert fit_calls == [True]
+    assert jumps == [1]
     win.close()

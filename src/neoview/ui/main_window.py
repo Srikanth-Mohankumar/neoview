@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from collections import deque
 import json
 import os
 from typing import Dict, List, Optional
 
 import fitz
-from PySide6.QtCore import QFileSystemWatcher, QRectF, QSettings, QSize, Qt, QTimer
+from PySide6.QtCore import QFileSystemWatcher, QPoint, QRectF, QSettings, QSize, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QIcon, QImage, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -100,9 +101,13 @@ class MainWindow(QMainWindow):
         self._settings = QSettings("NeoView", "NeoView")
         self._recent_files: List[str] = self._settings.value("recent_files", [], type=list)
         self._recent_menu: Optional[object] = None
-        self._document_sessions: Dict[str, Dict[str, float]] = self._load_json_setting("documents/session", {})
+        self._document_sessions: Dict[str, Dict[str, object]] = self._load_json_setting("documents/session", {})
         self._zoom_combo_updating = False
         self._auto_reload_enabled = self._settings.value("view/auto_reload", True, type=bool)
+        self._thumb_source_key: str = ""
+        self._thumb_icon_cache: Dict[tuple, QIcon] = {}
+        self._thumb_queue: deque[int] = deque()
+        self._thumb_queued: set[int] = set()
 
         self._watcher = QFileSystemWatcher(self)
         self._watcher.fileChanged.connect(self._on_change)
@@ -119,6 +124,9 @@ class MainWindow(QMainWindow):
         self._session_save_timer = QTimer(self)
         self._session_save_timer.setSingleShot(True)
         self._session_save_timer.timeout.connect(self._save_current_document_session)
+        self._thumb_timer = QTimer(self)
+        self._thumb_timer.setSingleShot(True)
+        self._thumb_timer.timeout.connect(self._render_thumbnail_batch)
 
         self._setup_ui()
         self._restore_persistent_ui()
@@ -174,7 +182,7 @@ class MainWindow(QMainWindow):
         self._zoom_out_action = self._action("Zoom &Out", lambda: self._view.zoom_by(0.8), QKeySequence.StandardKey.ZoomOut)
         self._fit_width_action = self._action("Fit &Width", self._view.fit_width, "W")
         self._fit_page_action = self._action("Fit &Page", self._view.fit_page, "F")
-        self._actual_size_action = self._action("&Actual Size", lambda: self._view.set_zoom(1.0, immediate=True), "Ctrl+1")
+        self._actual_size_action = self._action("&Actual Size", self._view.actual_size, "Ctrl+1")
 
         view_m.addAction(self._zoom_in_action)
         view_m.addAction(self._zoom_out_action)
@@ -223,10 +231,20 @@ class MainWindow(QMainWindow):
         self._zoom_out_action.setIcon(self._icon("zoom-out", QStyle.StandardPixmap.SP_ArrowDown))
         self._zoom_in_action.setIcon(self._icon("zoom-in", QStyle.StandardPixmap.SP_ArrowUp))
         self._fit_width_action.setIcon(self._icon("zoom-fit-width", QStyle.StandardPixmap.SP_TitleBarMaxButton))
-        self._actual_size_action.setIcon(self._icon("zoom-original", QStyle.StandardPixmap.SP_BrowserReload))
-        self._select_action.setIcon(self._icon("edit-select", QStyle.StandardPixmap.SP_ArrowRight))
+        self._fit_page_action.setIcon(self._icon("zoom-fit-best", QStyle.StandardPixmap.SP_DesktopIcon))
+        self._actual_size_action.setIcon(self._icon("zoom-original", QStyle.StandardPixmap.SP_ComputerIcon))
+        self._select_action.setIcon(self._icon("cursor-arrow", QStyle.StandardPixmap.SP_ArrowRight))
         self._copy_action.setIcon(self._icon("edit-copy", QStyle.StandardPixmap.SP_FileIcon))
         self._export_action.setIcon(self._icon("document-save", QStyle.StandardPixmap.SP_DialogSaveButton))
+
+        self._open_action.setToolTip("Open PDF (Ctrl+O)")
+        self._zoom_out_action.setToolTip("Zoom out")
+        self._zoom_in_action.setToolTip("Zoom in")
+        self._fit_width_action.setToolTip("Fit width (W)")
+        self._actual_size_action.setToolTip("Actual size (Ctrl+1)")
+        self._select_action.setToolTip("Select tool (1)")
+        self._copy_action.setToolTip("Copy measurements (Ctrl+C)")
+        self._export_action.setToolTip("Export selection")
 
     def _setup_toolbar(self):
         tb = QToolBar("Main")
@@ -241,7 +259,7 @@ class MainWindow(QMainWindow):
 
         self._recent_btn = QToolButton(self)
         self._recent_btn.setIcon(self._icon("document-open-recent", QStyle.StandardPixmap.SP_FileDialogDetailedView))
-        self._recent_btn.setToolTip("Open Recent")
+        self._recent_btn.setToolTip("Open recent file")
         self._recent_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self._recent_btn.setMenu(self._recent_menu)
         tb.addWidget(self._recent_btn)
@@ -264,21 +282,21 @@ class MainWindow(QMainWindow):
         tb.addSeparator()
 
         # Tools section
-        self._toolbar_select_action = QAction(self._icon("edit-select", QStyle.StandardPixmap.SP_ArrowRight), "Select", self)
-        self._toolbar_select_action.setToolTip("Select Tool")
+        self._toolbar_select_action = QAction(self._icon("cursor-arrow", QStyle.StandardPixmap.SP_ArrowRight), "Select", self)
+        self._toolbar_select_action.setToolTip("Select tool (1)")
         self._toolbar_select_action.setCheckable(True)
         self._toolbar_select_action.triggered.connect(lambda: self._set_tool(ToolMode.SELECT))
         tb.addAction(self._toolbar_select_action)
 
-        export_toolbar_action = QAction(self._icon("document-save", QStyle.StandardPixmap.SP_DialogSaveButton), "Export", self)
-        export_toolbar_action.setToolTip("Export Selection")
-        export_toolbar_action.triggered.connect(self._export)
-        tb.addAction(export_toolbar_action)
+        self._toolbar_export_action = QAction(self._icon("document-save", QStyle.StandardPixmap.SP_DialogSaveButton), "Export", self)
+        self._toolbar_export_action.setToolTip("Export selection")
+        self._toolbar_export_action.triggered.connect(self._export)
+        tb.addAction(self._toolbar_export_action)
 
-        copy_toolbar_action = QAction(self._icon("edit-copy", QStyle.StandardPixmap.SP_FileIcon), "Copy Measurements", self)
-        copy_toolbar_action.setToolTip("Copy Measurements")
-        copy_toolbar_action.triggered.connect(self._copy)
-        tb.addAction(copy_toolbar_action)
+        self._toolbar_copy_action = QAction(self._icon("edit-copy", QStyle.StandardPixmap.SP_FileIcon), "Copy Measurements", self)
+        self._toolbar_copy_action.setToolTip("Copy measurements (Ctrl+C)")
+        self._toolbar_copy_action.triggered.connect(self._copy)
+        tb.addAction(self._toolbar_copy_action)
 
     def _setup_statusbar(self):
         self._status = QStatusBar()
@@ -354,6 +372,8 @@ class MainWindow(QMainWindow):
         self.splitDockWidget(self._outline_dock, self._thumbs_dock, Qt.Orientation.Vertical)
         self._thumbs_dock.hide()
         self._thumbs_list.itemActivated.connect(self._jump_to_thumb)
+        self._thumbs_list.verticalScrollBar().valueChanged.connect(self._schedule_thumbnail_render)
+        self._thumbs_dock.visibilityChanged.connect(lambda _visible: self._schedule_thumbnail_render())
 
         self._info_dock = QDockWidget("Inspector", self)
         self._info_dock.setObjectName("InspectorDock")
@@ -517,6 +537,7 @@ class MainWindow(QMainWindow):
         self._document_sessions[path] = {
             "page": int(self._view.current_page),
             "zoom": float(self._view.zoom),
+            "zoom_mode": self._view.zoom_mode,
         }
 
         while len(self._document_sessions) > 50:
@@ -538,7 +559,16 @@ class MainWindow(QMainWindow):
         except (TypeError, ValueError):
             return False
 
-        self._view.set_zoom(zoom, immediate=True)
+        zoom_mode = str(state.get("zoom_mode", PdfView.ZOOM_MODE_CUSTOM))
+        if zoom_mode == PdfView.ZOOM_MODE_FIT_WIDTH:
+            self._view.fit_width()
+        elif zoom_mode == PdfView.ZOOM_MODE_FIT_PAGE:
+            self._view.fit_page()
+        elif zoom_mode == PdfView.ZOOM_MODE_ACTUAL_SIZE:
+            self._view.actual_size()
+        else:
+            self._view.set_zoom(zoom, immediate=True, zoom_mode=PdfView.ZOOM_MODE_CUSTOM)
+
         if 0 <= page < self._view.page_count:
             QTimer.singleShot(0, lambda p=page: self._view.go_to_page(p))
         return True
@@ -574,10 +604,12 @@ class MainWindow(QMainWindow):
             self._page_count_lbl.setText("Pages: 0")
             self._outline_list.clear()
             self._thumbs_list.clear()
+            self._clear_thumbnail_queue()
             self._update_measurements_panel(None)
             return
 
-        name = os.path.basename(self._current_file) if self._current_file else "Untitled"
+        source_path = self._view.doc_path or self._current_file
+        name = os.path.basename(source_path) if source_path else "Untitled"
         self._doc_name.setText(name)
         self._doc_page.setText(f"{self._view.current_page + 1} / {doc.page_count}")
         self._doc_zoom.setText(f"{self._view.zoom * 100:.0f}%")
@@ -598,21 +630,117 @@ class MainWindow(QMainWindow):
             self._outline_list.addItem(item)
 
     def _populate_thumbnails(self):
+        self._clear_thumbnail_queue()
         self._thumbs_list.clear()
         doc = self._view.document
         if not doc:
             return
+
+        source_path = self._view.doc_path or self._current_file
+        self._thumb_source_key = os.path.abspath(source_path) if source_path else f"doc-{id(doc)}"
+        self._thumb_icon_cache = {k: v for k, v in self._thumb_icon_cache.items() if k[0] == self._thumb_source_key}
+
         for i in range(doc.page_count):
-            page = doc.load_page(i)
-            mat = fitz.Matrix(0.15, 0.15)
-            pix = page.get_pixmap(matrix=mat, alpha=False)
-            img_data = pix.tobytes("ppm")
-            qimg = QImage.fromData(img_data)
-            icon = QIcon(QPixmap.fromImage(qimg))
             item = QListWidgetItem(f"{i + 1}")
-            item.setIcon(icon)
+            cached = self._thumb_icon_cache.get((self._thumb_source_key, i))
+            if cached is not None:
+                item.setIcon(cached)
+            else:
+                item.setIcon(self._icon("image-x-generic", QStyle.StandardPixmap.SP_FileIcon))
             item.setData(Qt.ItemDataRole.UserRole, i)
             self._thumbs_list.addItem(item)
+
+        self._schedule_thumbnail_render()
+
+    def _clear_thumbnail_queue(self):
+        self._thumb_timer.stop()
+        self._thumb_queue.clear()
+        self._thumb_queued.clear()
+        if not self._view.document:
+            self._thumb_source_key = ""
+
+    def _enqueue_thumbnail(self, page_idx: int, front: bool = False):
+        if page_idx < 0 or page_idx >= self._thumbs_list.count():
+            return
+        if page_idx in self._thumb_queued:
+            return
+        cache_key = (self._thumb_source_key, page_idx)
+        if cache_key in self._thumb_icon_cache:
+            return
+        if front:
+            self._thumb_queue.appendleft(page_idx)
+        else:
+            self._thumb_queue.append(page_idx)
+        self._thumb_queued.add(page_idx)
+
+    def _schedule_thumbnail_render(self):
+        doc = self._view.document
+        if not doc or self._thumbs_list.count() == 0:
+            return
+
+        count = self._thumbs_list.count()
+        viewport = self._thumbs_list.viewport()
+        top_idx = self._thumbs_list.indexAt(QPoint(8, 8))
+        bottom_idx = self._thumbs_list.indexAt(QPoint(8, max(8, viewport.height() - 8)))
+        visible_start = top_idx.row() if top_idx.isValid() else 0
+        visible_end = bottom_idx.row() if bottom_idx.isValid() else min(count - 1, visible_start + 8)
+        start = max(0, visible_start - 6)
+        end = min(count - 1, visible_end + 6)
+
+        for idx in range(visible_end, visible_start - 1, -1):
+            self._enqueue_thumbnail(idx, front=True)
+        for idx in range(start, visible_start):
+            self._enqueue_thumbnail(idx)
+        for idx in range(visible_end + 1, end + 1):
+            self._enqueue_thumbnail(idx)
+
+        current_idx = self._view.current_page
+        self._enqueue_thumbnail(current_idx, front=True)
+
+        if self._thumb_queue and not self._thumb_timer.isActive():
+            self._thumb_timer.start(8)
+
+    def _render_thumbnail_batch(self):
+        doc = self._view.document
+        if not doc or self._thumbs_list.count() == 0:
+            self._clear_thumbnail_queue()
+            return
+
+        rendered = 0
+        while self._thumb_queue and rendered < 4:
+            page_idx = self._thumb_queue.popleft()
+            self._thumb_queued.discard(page_idx)
+            if page_idx < 0 or page_idx >= doc.page_count:
+                continue
+
+            cache_key = (self._thumb_source_key, page_idx)
+            icon = self._thumb_icon_cache.get(cache_key)
+            if icon is None:
+                try:
+                    page = doc.load_page(page_idx)
+                    pix = page.get_pixmap(matrix=fitz.Matrix(0.15, 0.15), alpha=False)
+                    image = QImage(
+                        pix.samples,
+                        pix.width,
+                        pix.height,
+                        pix.stride,
+                        QImage.Format.Format_RGB888,
+                    ).copy()
+                    icon = QIcon(QPixmap.fromImage(image))
+                    self._thumb_icon_cache[cache_key] = icon
+                except Exception:
+                    icon = self._icon("image-x-generic", QStyle.StandardPixmap.SP_FileIcon)
+
+            item = self._thumbs_list.item(page_idx)
+            if item is not None:
+                item.setIcon(icon)
+            rendered += 1
+
+        if len(self._thumb_icon_cache) > 600:
+            self._thumb_icon_cache = dict(list(self._thumb_icon_cache.items())[-600:])
+
+        if self._thumb_queue:
+            self._thumb_timer.start(8)
 
     def _jump_to_outline_item(self, item: QListWidgetItem):
         page_idx = item.data(Qt.ItemDataRole.UserRole)
@@ -627,6 +755,13 @@ class MainWindow(QMainWindow):
     def _on_page_changed(self, current: int, total: int):
         self._doc_page.setText(f"{current} / {total}")
         self._page_count_lbl.setText(f"Pages: {total}")
+        if total == self._thumbs_list.count() and total > 0:
+            idx = current - 1
+            if 0 <= idx < total:
+                self._thumbs_list.blockSignals(True)
+                self._thumbs_list.setCurrentRow(idx)
+                self._thumbs_list.blockSignals(False)
+        self._schedule_thumbnail_render()
         if self._search_results:
             self._update_search_highlights()
 
@@ -923,7 +1058,7 @@ class MainWindow(QMainWindow):
             return
         if value <= 0:
             return
-        self._view.set_zoom(value / 100.0, immediate=True)
+        self._view.set_zoom(value / 100.0, immediate=True, zoom_mode=PdfView.ZOOM_MODE_CUSTOM)
 
     def _sync_zoom_combo(self):
         if not hasattr(self, "_zoom_combo"):
