@@ -20,12 +20,12 @@ class SelectionRect(QGraphicsRectItem):
         self._page_rect = page_rect
         self._rect = self._clamp(rect.normalized())
 
-        pen = QPen(QColor(0, 0, 0, 200))
+        pen = QPen(QColor(91, 141, 246, 220))
         pen.setWidthF(0.5)
         pen.setStyle(Qt.PenStyle.DotLine)
         pen.setCosmetic(True)
         self.setPen(pen)
-        self.setBrush(QBrush(QColor(0, 0, 0, 18)))
+        self.setBrush(QBrush(QColor(91, 141, 246, 36)))
         self.setZValue(1000)
         self.setAcceptHoverEvents(True)
 

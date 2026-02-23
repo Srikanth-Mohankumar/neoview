@@ -9,7 +9,7 @@ from typing import Optional, List, Tuple
 import fitz
 from PySide6.QtCore import Qt, QRectF, QPointF, QTimer, Signal
 from PySide6.QtGui import QPainter, QPen, QBrush, QColor, QWheelEvent, QKeyEvent, QMouseEvent
-from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsRectItem, QMessageBox
+from PySide6.QtWidgets import QGraphicsRectItem, QGraphicsScene, QGraphicsView, QLabel, QMessageBox
 import shiboken6
 
 from neoview.ui.selection import SelectionRect
@@ -43,7 +43,7 @@ class PdfView(QGraphicsView):
         self.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.setBackgroundBrush(QBrush(QColor(64, 64, 64)))
+        self.setBackgroundBrush(QBrush(QColor("#141417")))
         self.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
 
         self._scene = QGraphicsScene(self)
@@ -82,7 +82,13 @@ class PdfView(QGraphicsView):
         self._pinch_start_zoom: float = 1.0
         self._rotation: int = 0
 
+        self._measure_badge = QLabel(self.viewport())
+        self._measure_badge.setObjectName("FloatingMeasureBadge")
+        self._measure_badge.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self._measure_badge.hide()
+
         self.verticalScrollBar().valueChanged.connect(self._on_scroll)
+        self.horizontalScrollBar().valueChanged.connect(self._on_scroll)
 
         self._update_cursor()
 
@@ -227,6 +233,7 @@ class PdfView(QGraphicsView):
 
             self._render_zoom = self._zoom
             self._rebuild_search_highlights()
+            self._update_measure_badge()
             self._emit_page_info()
             self.document_loaded.emit()
             return True
@@ -249,6 +256,7 @@ class PdfView(QGraphicsView):
         self._selection = None
         self.clear_text_selection()
         self._clear_search_items()
+        self._hide_measure_badge()
 
     def _render_all_pages(self):
         self._scene.clear()
@@ -257,6 +265,7 @@ class PdfView(QGraphicsView):
         self._selection = None
         self.clear_text_selection()
         self._clear_search_items()
+        self._hide_measure_badge()
 
         if not self._doc:
             return
@@ -285,6 +294,7 @@ class PdfView(QGraphicsView):
 
         self._render_zoom = self._zoom
         self._rebuild_search_highlights()
+        self._update_measure_badge()
         self._emit_page_info()
 
     def _layout_pages(self):
@@ -326,6 +336,7 @@ class PdfView(QGraphicsView):
                     item.setScale(self._zoom)
 
         self._rebuild_search_highlights()
+        self._update_measure_badge()
 
     def _rerender_pages(self):
         if not self._doc:
@@ -340,6 +351,7 @@ class PdfView(QGraphicsView):
 
     def _on_scroll(self):
         self._emit_page_info()
+        self._update_measure_badge()
 
     def set_zoom(self, z: float):
         z = max(0.25, min(z, 5.0))
@@ -413,6 +425,7 @@ class PdfView(QGraphicsView):
                 self._scene.removeItem(self._selection)
             self._selection = None
             self._selection_page = -1
+            self._hide_measure_badge()
             self.selection_changed.emit()
 
     def clear_selection(self):
@@ -540,7 +553,42 @@ class PdfView(QGraphicsView):
         self._selection.setScale(self._zoom)
         self._scene.addItem(self._selection)
         self._selection_page = page_idx
+        self._update_measure_badge()
         self.selection_changed.emit()
+
+    def _hide_measure_badge(self):
+        self._measure_badge.hide()
+
+    def _update_measure_badge(self):
+        if not self._selection or not (0 <= self._selection_page < len(self._pages)):
+            self._hide_measure_badge()
+            return
+
+        rect = self._selection.pdf_rect
+        text = (
+            f"W {rect.width():.1f}  "
+            f"H {rect.height():.1f}  "
+            f"X {rect.x():.1f}  "
+            f"Y {rect.y():.1f}"
+        )
+        self._measure_badge.setText(text)
+        self._measure_badge.adjustSize()
+
+        page = self._pages[self._selection_page]
+        anchor_scene = page.pos() + QPointF(rect.left() * self._zoom, rect.top() * self._zoom)
+        anchor = self.mapFromScene(anchor_scene)
+
+        margin = 8
+        x = anchor.x()
+        y = anchor.y() - self._measure_badge.height() - 8
+        max_x = self.viewport().width() - self._measure_badge.width() - margin
+
+        x = max(margin, min(x, max_x))
+        y = max(margin, y)
+
+        self._measure_badge.move(int(x), int(y))
+        self._measure_badge.show()
+        self._measure_badge.raise_()
 
     def mousePressEvent(self, e: QMouseEvent):
         if e.button() != Qt.MouseButton.LeftButton:
@@ -565,12 +613,12 @@ class PdfView(QGraphicsView):
                 self._text_select_item = QGraphicsRectItem(rect)
                 self._text_select_item.setPos(page.pos())
                 self._text_select_item.setScale(self._zoom)
-                pen = QPen(QColor(0, 0, 0, 180))
+                pen = QPen(QColor(91, 141, 246, 220))
                 pen.setWidthF(0.5)
                 pen.setStyle(Qt.PenStyle.DotLine)
                 pen.setCosmetic(True)
                 self._text_select_item.setPen(pen)
-                self._text_select_item.setBrush(QBrush(QColor(0, 0, 0, 25)))
+                self._text_select_item.setBrush(QBrush(QColor(91, 141, 246, 40)))
                 self._text_select_item.setZValue(950)
                 self._scene.addItem(self._text_select_item)
             e.accept()
@@ -620,6 +668,7 @@ class PdfView(QGraphicsView):
             if self._interacting and self._selection:
                 local_pos = self._scene_to_page(scene_pos, self._selection_page)
                 self._selection.update_drag(local_pos)
+                self._update_measure_badge()
                 self.selection_changed.emit()
                 e.accept()
                 return
@@ -640,6 +689,7 @@ class PdfView(QGraphicsView):
                     else:
                         self._selection.pdf_rect = rect
 
+                    self._update_measure_badge()
                     self.selection_changed.emit()
                 e.accept()
                 return
@@ -717,6 +767,7 @@ class PdfView(QGraphicsView):
                     self._selection.resize_by(-step, 0)
                 else:
                     self._selection.nudge(-step, 0)
+                self._update_measure_badge()
                 self.selection_changed.emit()
                 e.accept()
                 return
@@ -725,6 +776,7 @@ class PdfView(QGraphicsView):
                     self._selection.resize_by(step, 0)
                 else:
                     self._selection.nudge(step, 0)
+                self._update_measure_badge()
                 self.selection_changed.emit()
                 e.accept()
                 return
@@ -733,6 +785,7 @@ class PdfView(QGraphicsView):
                     self._selection.resize_by(0, -step)
                 else:
                     self._selection.nudge(0, -step)
+                self._update_measure_badge()
                 self.selection_changed.emit()
                 e.accept()
                 return
@@ -741,6 +794,7 @@ class PdfView(QGraphicsView):
                     self._selection.resize_by(0, step)
                 else:
                     self._selection.nudge(0, step)
+                self._update_measure_badge()
                 self.selection_changed.emit()
                 e.accept()
                 return
@@ -764,3 +818,7 @@ class PdfView(QGraphicsView):
                         self.set_zoom(self._pinch_start_zoom * total)
                 return True
         return super().event(e)
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._update_measure_badge()

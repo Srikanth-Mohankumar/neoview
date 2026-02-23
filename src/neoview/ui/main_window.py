@@ -3,37 +3,79 @@
 from __future__ import annotations
 
 import os
-from typing import Optional, List
+from typing import List, Optional
 
 import fitz
-from PySide6.QtCore import QTimer, QFileSystemWatcher, QRectF, QSettings, Qt, QSize
-from PySide6.QtGui import QAction, QKeySequence, QActionGroup, QFont, QIcon, QPixmap, QImage
+from PySide6.QtCore import QFileSystemWatcher, QRectF, QSettings, QSize, Qt, QTimer
+from PySide6.QtGui import QAction, QActionGroup, QIcon, QImage, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
-    QMainWindow,
-    QFileDialog,
-    QStatusBar,
-    QToolBar,
-    QLabel,
-    QMessageBox,
+    QCheckBox,
+    QComboBox,
     QDialog,
-    QLineEdit,
     QDockWidget,
-    QWidget,
-    QVBoxLayout,
+    QFileDialog,
+    QFrame,
     QHBoxLayout,
+    QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMainWindow,
+    QMessageBox,
     QPushButton,
+    QStatusBar,
+    QStyle,
+    QToolBar,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
 )
 
 from neoview.resources import load_app_icon
-from neoview.ui.pdf_view import PdfView, ToolMode
 from neoview.ui.dialogs import ExportDialog, FindDialog
+from neoview.ui.pdf_view import PdfView, ToolMode
 from neoview.utils.units import format_size
 
 
 APP_NAME = "NeoView"
+
+
+class CollapsibleSection(QWidget):
+    """Simple expandable/collapsible content section."""
+
+    def __init__(self, title: str, parent=None):
+        super().__init__(parent)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        self._header = QToolButton(self)
+        self._header.setText(title)
+        self._header.setObjectName("InspectorSectionHeader")
+        self._header.setCheckable(True)
+        self._header.setChecked(True)
+        self._header.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self._header.setArrowType(Qt.ArrowType.DownArrow)
+        self._header.clicked.connect(self._on_toggled)
+
+        self._content = QWidget()
+        self._content.setObjectName("InspectorSectionContent")
+        self._content_layout = QVBoxLayout(self._content)
+        self._content_layout.setContentsMargins(0, 2, 0, 6)
+        self._content_layout.setSpacing(6)
+
+        root.addWidget(self._header)
+        root.addWidget(self._content)
+
+    @property
+    def content_layout(self) -> QVBoxLayout:
+        return self._content_layout
+
+    def _on_toggled(self, expanded: bool):
+        self._header.setArrowType(Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow)
+        self._content.setVisible(expanded)
 
 
 class MainWindow(QMainWindow):
@@ -45,6 +87,7 @@ class MainWindow(QMainWindow):
         if not icon.isNull():
             self.setWindowIcon(icon)
         self.resize(1200, 900)
+
         self._current_file: Optional[str] = None
         self._last_mtime: float = 0
         self._search_query: str = ""
@@ -55,6 +98,8 @@ class MainWindow(QMainWindow):
         self._settings = QSettings("NeoView", "NeoView")
         self._recent_files: List[str] = self._settings.value("recent_files", [], type=list)
         self._recent_menu: Optional[object] = None
+        self._zoom_combo_updating = False
+        self._auto_reload_enabled = True
 
         self._watcher = QFileSystemWatcher(self)
         self._watcher.fileChanged.connect(self._on_change)
@@ -88,29 +133,44 @@ class MainWindow(QMainWindow):
         self._setup_toolbar()
         self._setup_statusbar()
         self._setup_docks()
+        self._update_status()
 
     def _setup_menus(self):
         file_m = self.menuBar().addMenu("&File")
-        file_m.addAction(self._action("&Open...", self._open_dialog, QKeySequence.StandardKey.Open))
+        self._open_action = self._action("&Open...", self._open_dialog, QKeySequence.StandardKey.Open)
+        file_m.addAction(self._open_action)
+
         self._recent_menu = file_m.addMenu("Open &Recent")
         self._rebuild_recent_menu()
-        file_m.addAction(self._action("&Reload", self._force_reload, "F5"))
+
+        self._reload_action = self._action("&Reload", self._force_reload, "F5")
+        file_m.addAction(self._reload_action)
         file_m.addSeparator()
-        file_m.addAction(self._action("&Export Selection...", self._export, QKeySequence.StandardKey.Save))
+
+        self._export_action = self._action("&Export Selection...", self._export, QKeySequence.StandardKey.Save)
+        file_m.addAction(self._export_action)
         file_m.addSeparator()
         file_m.addAction(self._action("E&xit", self.close, QKeySequence.StandardKey.Quit))
 
         edit_m = self.menuBar().addMenu("&Edit")
-        edit_m.addAction(self._action("&Copy Measurements", self._copy, QKeySequence.StandardKey.Copy))
+        self._copy_action = self._action("&Copy Measurements", self._copy, QKeySequence.StandardKey.Copy)
+        edit_m.addAction(self._copy_action)
         edit_m.addAction(self._action("&Find...", self._show_find, "Ctrl+Shift+F"))
         edit_m.addAction(self._action("C&lear Selection", self._view.clear_all_selection, "Escape"))
 
         view_m = self.menuBar().addMenu("&View")
-        view_m.addAction(self._action("Zoom &In", lambda: self._view.zoom_by(1.25), QKeySequence.StandardKey.ZoomIn))
-        view_m.addAction(self._action("Zoom &Out", lambda: self._view.zoom_by(0.8), QKeySequence.StandardKey.ZoomOut))
+        self._zoom_in_action = self._action("Zoom &In", lambda: self._view.zoom_by(1.25), QKeySequence.StandardKey.ZoomIn)
+        self._zoom_out_action = self._action("Zoom &Out", lambda: self._view.zoom_by(0.8), QKeySequence.StandardKey.ZoomOut)
+        self._fit_width_action = self._action("Fit &Width", self._view.fit_width, "W")
+        self._fit_page_action = self._action("Fit &Page", self._view.fit_page, "F")
+        self._actual_size_action = self._action("&Actual Size", lambda: self._view.set_zoom(1.0), "Ctrl+1")
+
+        view_m.addAction(self._zoom_in_action)
+        view_m.addAction(self._zoom_out_action)
         view_m.addSeparator()
-        view_m.addAction(self._action("Fit &Width", self._view.fit_width, "W"))
-        view_m.addAction(self._action("Fit &Page", self._view.fit_page, "F"))
+        view_m.addAction(self._fit_width_action)
+        view_m.addAction(self._fit_page_action)
+        view_m.addAction(self._actual_size_action)
         view_m.addSeparator()
         view_m.addAction(self._action("Rotate &Left", lambda: self._view.rotate_by(-90), "Ctrl+L"))
         view_m.addAction(self._action("Rotate &Right", lambda: self._view.rotate_by(90), "Ctrl+R"))
@@ -148,82 +208,184 @@ class MainWindow(QMainWindow):
         tools_m.addAction(self._action("&Thumbnails Panel", self._toggle_thumbs_dock, "Ctrl+Shift+T"))
         tools_m.addAction(self._action("&Page Info Panel", self._toggle_info_dock, "Ctrl+Shift+I"))
 
+        self._open_action.setIcon(self._icon("document-open", QStyle.StandardPixmap.SP_DialogOpenButton))
+        self._zoom_out_action.setIcon(self._icon("zoom-out", QStyle.StandardPixmap.SP_ArrowDown))
+        self._zoom_in_action.setIcon(self._icon("zoom-in", QStyle.StandardPixmap.SP_ArrowUp))
+        self._fit_width_action.setIcon(self._icon("zoom-fit-width", QStyle.StandardPixmap.SP_TitleBarMaxButton))
+        self._actual_size_action.setIcon(self._icon("zoom-original", QStyle.StandardPixmap.SP_BrowserReload))
+        self._select_action.setIcon(self._icon("edit-select", QStyle.StandardPixmap.SP_ArrowRight))
+        self._copy_action.setIcon(self._icon("edit-copy", QStyle.StandardPixmap.SP_FileIcon))
+        self._export_action.setIcon(self._icon("document-save", QStyle.StandardPixmap.SP_DialogSaveButton))
+
     def _setup_toolbar(self):
         tb = QToolBar("Main")
         tb.setMovable(False)
+        tb.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        tb.setIconSize(QSize(16, 16))
         self.addToolBar(tb)
 
-        tb.addAction(self._action("Open", self._open_dialog))
+        # File section
+        tb.addAction(self._open_action)
+
+        self._recent_btn = QToolButton(self)
+        self._recent_btn.setIcon(self._icon("document-open-recent", QStyle.StandardPixmap.SP_FileDialogDetailedView))
+        self._recent_btn.setToolTip("Open Recent")
+        self._recent_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self._recent_btn.setMenu(self._recent_menu)
+        tb.addWidget(self._recent_btn)
         tb.addSeparator()
 
-        tb.addAction(self._action("Prev", self._view.prev_page))
-        tb.addAction(self._action("Next", self._view.next_page))
+        # View section
+        tb.addAction(self._zoom_out_action)
+
+        self._zoom_combo = QComboBox(self)
+        self._zoom_combo.setEditable(True)
+        self._zoom_combo.setMinimumWidth(84)
+        self._zoom_combo.addItems(["50%", "75%", "100%", "125%", "150%", "200%", "300%"])
+        self._zoom_combo.setCurrentText("100%")
+        self._zoom_combo.currentTextChanged.connect(self._on_zoom_combo_changed)
+        tb.addWidget(self._zoom_combo)
+
+        tb.addAction(self._zoom_in_action)
+        tb.addAction(self._fit_width_action)
+        tb.addAction(self._actual_size_action)
         tb.addSeparator()
 
-        tb.addAction(self._action("Zoom -", lambda: self._view.zoom_by(0.8)))
-        tb.addAction(self._action("Zoom +", lambda: self._view.zoom_by(1.25)))
-        tb.addAction(self._action("Fit", self._view.fit_width))
-        tb.addAction(self._action("Rotate", lambda: self._view.rotate_by(90)))
-        tb.addSeparator()
+        # Tools section
+        self._toolbar_select_action = QAction(self._icon("edit-select", QStyle.StandardPixmap.SP_ArrowRight), "Select", self)
+        self._toolbar_select_action.setToolTip("Select Tool")
+        self._toolbar_select_action.setCheckable(True)
+        self._toolbar_select_action.triggered.connect(lambda: self._set_tool(ToolMode.SELECT))
+        tb.addAction(self._toolbar_select_action)
 
-        self._select_btn = self._action("Select", lambda: self._set_tool(ToolMode.SELECT))
-        self._select_btn.setCheckable(True)
-        tb.addAction(self._select_btn)
+        export_toolbar_action = QAction(self._icon("document-save", QStyle.StandardPixmap.SP_DialogSaveButton), "Export", self)
+        export_toolbar_action.setToolTip("Export Selection")
+        export_toolbar_action.triggered.connect(self._export)
+        tb.addAction(export_toolbar_action)
 
-        self._hand_btn = self._action("Hand", lambda: self._set_tool(ToolMode.HAND))
-        self._hand_btn.setCheckable(True)
-        self._hand_btn.setChecked(True)
-        tb.addAction(self._hand_btn)
-
-        self._measure_btn = self._action("Measure", lambda: self._set_tool(ToolMode.MEASURE))
-        self._measure_btn.setCheckable(True)
-        tb.addAction(self._measure_btn)
-
-        tb.addSeparator()
-        tb.addAction(self._action("Copy", self._copy))
-        tb.addAction(self._action("Export", self._export))
-
-    def _action(self, text: str, slot, shortcut=None) -> QAction:
-        action = QAction(text, self)
-        action.triggered.connect(slot)
-        if shortcut:
-            action.setShortcut(shortcut)
-        return action
-
-    def _set_tool(self, tool: ToolMode):
-        self._view.tool = tool
-        self._select_btn.setChecked(tool == ToolMode.SELECT)
-        self._hand_btn.setChecked(tool == ToolMode.HAND)
-        self._measure_btn.setChecked(tool == ToolMode.MEASURE)
-        self._select_action.setChecked(tool == ToolMode.SELECT)
-        self._hand_action.setChecked(tool == ToolMode.HAND)
-        self._measure_action.setChecked(tool == ToolMode.MEASURE)
-        self._update_status()
+        copy_toolbar_action = QAction(self._icon("edit-copy", QStyle.StandardPixmap.SP_FileIcon), "Copy Measurements", self)
+        copy_toolbar_action.setToolTip("Copy Measurements")
+        copy_toolbar_action.triggered.connect(self._copy)
+        tb.addAction(copy_toolbar_action)
 
     def _setup_statusbar(self):
         self._status = QStatusBar()
         self.setStatusBar(self._status)
 
-        self._file_lbl = QLabel("No file")
-        self._page_lbl = QLabel("")
-        self._zoom_lbl = QLabel("")
-        self._tool_lbl = QLabel("")
-        self._font_lbl = QLabel("")
-        self._size_lbl = QLabel("")
-        self._credit_lbl = QLabel("© Srikanth Mohankumar")
-        credit_font = QFont()
-        credit_font.setPointSize(8)
-        self._credit_lbl.setFont(credit_font)
-        self._credit_lbl.setStyleSheet("color: rgba(0, 0, 0, 120); padding: 0 6px;")
-        self._credit_lbl.setToolTip("Built by Srikanth Mohankumar")
+        self._status_dot = QLabel("")
+        self._status_dot.setObjectName("StatusDot")
 
+        self._file_lbl = QLabel("No file")
+        self._page_count_lbl = QLabel("Pages: 0")
+        self._zoom_lbl = QLabel("--")
+
+        self._status.addWidget(self._status_dot)
         self._status.addWidget(self._file_lbl)
-        self._status.addWidget(self._page_lbl)
-        self._status.addWidget(self._zoom_lbl)
-        self._status.addWidget(self._tool_lbl)
-        self._status.addWidget(self._font_lbl)
-        self._status.addPermanentWidget(self._size_lbl)
-        self._status.addPermanentWidget(self._credit_lbl)
+        self._status.addWidget(self._page_count_lbl)
+        self._status.addPermanentWidget(self._zoom_lbl)
+
+    def _setup_docks(self):
+        self._search_dock = QDockWidget("Search", self)
+        self._search_dock.setAllowedAreas(
+            Qt.DockWidgetArea.LeftDockWidgetArea
+            | Qt.DockWidgetArea.RightDockWidgetArea
+            | Qt.DockWidgetArea.BottomDockWidgetArea
+        )
+        search_widget = QWidget()
+        search_layout = QHBoxLayout(search_widget)
+        search_layout.setContentsMargins(6, 6, 6, 6)
+        self._search_input = QLineEdit()
+        self._search_input.setPlaceholderText("Find text...")
+        self._search_prev_btn = QPushButton("Prev")
+        self._search_next_btn = QPushButton("Next")
+        self._search_count_lbl = QLabel("")
+        search_layout.addWidget(self._search_input)
+        search_layout.addWidget(self._search_prev_btn)
+        search_layout.addWidget(self._search_next_btn)
+        search_layout.addWidget(self._search_count_lbl)
+        self._search_dock.setWidget(search_widget)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self._search_dock)
+        self._search_dock.hide()
+
+        self._search_prev_btn.clicked.connect(self._find_prev)
+        self._search_next_btn.clicked.connect(self._find_next)
+        self._search_input.returnPressed.connect(self._find_next)
+
+        self._outline_dock = QDockWidget("Outline", self)
+        self._outline_dock.setAllowedAreas(
+            Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
+        )
+        self._outline_list = QListWidget()
+        self._outline_dock.setWidget(self._outline_list)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self._outline_dock)
+        self._outline_dock.hide()
+        self._outline_list.itemActivated.connect(self._jump_to_outline_item)
+
+        self._thumbs_dock = QDockWidget("Thumbnails", self)
+        self._thumbs_dock.setAllowedAreas(
+            Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
+        )
+        self._thumbs_list = QListWidget()
+        self._thumbs_list.setIconSize(QSize(120, 160))
+        self._thumbs_list.setResizeMode(QListWidget.ResizeMode.Adjust)
+        self._thumbs_list.setViewMode(QListWidget.ViewMode.IconMode)
+        self._thumbs_list.setMovement(QListWidget.Movement.Static)
+        self._thumbs_dock.setWidget(self._thumbs_list)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._thumbs_dock)
+        self._thumbs_dock.hide()
+        self._thumbs_list.itemActivated.connect(self._jump_to_thumb)
+
+        self._info_dock = QDockWidget("Inspector", self)
+        self._info_dock.setAllowedAreas(Qt.DockWidgetArea.RightDockWidgetArea)
+        self._info_dock.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
+
+        inspector_widget = QWidget()
+        inspector_widget.setObjectName("InspectorPanel")
+        inspector_widget.setMinimumWidth(240)
+        inspector_widget.setMaximumWidth(240)
+
+        inspector_layout = QVBoxLayout(inspector_widget)
+        inspector_layout.setContentsMargins(12, 12, 12, 12)
+        inspector_layout.setSpacing(0)
+
+        measure_section = CollapsibleSection("Measurements")
+        m_layout = measure_section.content_layout
+        self._measure_w = self._kv_value("W")
+        self._measure_h = self._kv_value("H")
+        self._measure_x = self._kv_value("X")
+        self._measure_y = self._kv_value("Y")
+        m_layout.addWidget(self._measure_w)
+        m_layout.addWidget(self._measure_h)
+        m_layout.addWidget(self._measure_x)
+        m_layout.addWidget(self._measure_y)
+
+        font_section = CollapsibleSection("Font Inspector")
+        f_layout = font_section.content_layout
+        self._font_name = self._info_row(f_layout, "Name", "--")
+        self._font_size = self._info_row(f_layout, "Size", "--")
+        self._font_style = self._info_row(f_layout, "Style", "--")
+
+        document_section = CollapsibleSection("Document")
+        d_layout = document_section.content_layout
+        self._doc_name = self._info_row(d_layout, "File", "No file")
+        self._doc_page = self._info_row(d_layout, "Page", "0 / 0")
+        self._doc_zoom = self._info_row(d_layout, "Zoom", "100%")
+        self._reload_toggle = QCheckBox("Auto reload")
+        self._reload_toggle.setChecked(True)
+        self._reload_toggle.toggled.connect(self._toggle_auto_reload)
+        d_layout.addWidget(self._reload_toggle)
+
+        inspector_layout.addWidget(measure_section)
+        inspector_layout.addWidget(self._divider())
+        inspector_layout.addWidget(font_section)
+        inspector_layout.addWidget(self._divider())
+        inspector_layout.addWidget(document_section)
+        inspector_layout.addStretch()
+
+        self._info_dock.setWidget(inspector_widget)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._info_dock)
+        self._info_dock.setMinimumWidth(240)
+        self._info_dock.setMaximumWidth(240)
 
     def _toggle_search_dock(self):
         visible = not self._search_dock.isVisible()
@@ -270,28 +432,20 @@ class MainWindow(QMainWindow):
     def _refresh_document_info(self):
         doc = self._view.document
         if not doc:
-            self._info_title.setText("No document loaded")
-            self._info_pages.setText("")
-            self._info_size.setText("")
-            self._info_meta.setText("")
+            self._doc_name.setText("No file")
+            self._doc_page.setText("0 / 0")
+            self._doc_zoom.setText("--")
+            self._page_count_lbl.setText("Pages: 0")
             self._outline_list.clear()
             self._thumbs_list.clear()
+            self._update_measurements_panel(None)
             return
-        title = os.path.basename(self._current_file) if self._current_file else "Untitled"
-        self._info_title.setText(title)
-        self._info_pages.setText(f"Pages: {doc.page_count}")
-        size = self._view.current_page_size()
-        if size:
-            self._info_size.setText(
-                f"Page size: {size.width():.0f} x {size.height():.0f} pt"
-            )
-        meta = doc.metadata or {}
-        meta_bits = []
-        for key in ("title", "author", "subject", "producer"):
-            val = meta.get(key)
-            if val:
-                meta_bits.append(f"{key.title()}: {val}")
-        self._info_meta.setText("\n".join(meta_bits))
+
+        name = os.path.basename(self._current_file) if self._current_file else "Untitled"
+        self._doc_name.setText(name)
+        self._doc_page.setText(f"{self._view.current_page + 1} / {doc.page_count}")
+        self._doc_zoom.setText(f"{self._view.zoom * 100:.0f}%")
+        self._page_count_lbl.setText(f"Pages: {doc.page_count}")
         self._populate_outline()
         self._populate_thumbnails()
 
@@ -334,92 +488,39 @@ class MainWindow(QMainWindow):
         if isinstance(page_idx, int):
             self._view.go_to_page(page_idx)
 
-    def _setup_docks(self):
-        self._search_dock = QDockWidget("Search", self)
-        self._search_dock.setAllowedAreas(
-            Qt.DockWidgetArea.LeftDockWidgetArea
-            | Qt.DockWidgetArea.RightDockWidgetArea
-            | Qt.DockWidgetArea.BottomDockWidgetArea
-        )
-        search_widget = QWidget()
-        search_layout = QHBoxLayout(search_widget)
-        search_layout.setContentsMargins(6, 6, 6, 6)
-        self._search_input = QLineEdit()
-        self._search_input.setPlaceholderText("Find text…")
-        self._search_prev_btn = QPushButton("Prev")
-        self._search_next_btn = QPushButton("Next")
-        self._search_count_lbl = QLabel("")
-        search_layout.addWidget(self._search_input)
-        search_layout.addWidget(self._search_prev_btn)
-        search_layout.addWidget(self._search_next_btn)
-        search_layout.addWidget(self._search_count_lbl)
-        self._search_dock.setWidget(search_widget)
-        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self._search_dock)
-        self._search_dock.hide()
-
-        self._search_prev_btn.clicked.connect(self._find_prev)
-        self._search_next_btn.clicked.connect(self._find_next)
-        self._search_input.returnPressed.connect(self._find_next)
-
-        self._outline_dock = QDockWidget("Outline", self)
-        self._outline_dock.setAllowedAreas(
-            Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
-        )
-        self._outline_list = QListWidget()
-        self._outline_dock.setWidget(self._outline_list)
-        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self._outline_dock)
-        self._outline_dock.hide()
-        self._outline_list.itemActivated.connect(self._jump_to_outline_item)
-
-        self._thumbs_dock = QDockWidget("Thumbnails", self)
-        self._thumbs_dock.setAllowedAreas(
-            Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
-        )
-        self._thumbs_list = QListWidget()
-        self._thumbs_list.setIconSize(QSize(120, 160))
-        self._thumbs_list.setResizeMode(QListWidget.ResizeMode.Adjust)
-        self._thumbs_list.setViewMode(QListWidget.ViewMode.IconMode)
-        self._thumbs_list.setMovement(QListWidget.Movement.Static)
-        self._thumbs_dock.setWidget(self._thumbs_list)
-        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._thumbs_dock)
-        self._thumbs_dock.hide()
-        self._thumbs_list.itemActivated.connect(self._jump_to_thumb)
-
-        self._info_dock = QDockWidget("Page Info", self)
-        self._info_dock.setAllowedAreas(
-            Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
-        )
-        info_widget = QWidget()
-        info_layout = QVBoxLayout(info_widget)
-        info_layout.setContentsMargins(8, 8, 8, 8)
-        self._info_title = QLabel("No document loaded")
-        self._info_pages = QLabel("")
-        self._info_size = QLabel("")
-        self._info_meta = QLabel("")
-        self._info_meta.setWordWrap(True)
-        info_layout.addWidget(self._info_title)
-        info_layout.addWidget(self._info_pages)
-        info_layout.addWidget(self._info_size)
-        info_layout.addWidget(self._info_meta)
-        info_layout.addStretch()
-        self._info_dock.setWidget(info_widget)
-        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._info_dock)
-        self._info_dock.hide()
-
     def _on_page_changed(self, current: int, total: int):
-        self._page_lbl.setText(f"Page {current}/{total}")
+        self._doc_page.setText(f"{current} / {total}")
+        self._page_count_lbl.setText(f"Pages: {total}")
         if self._search_results:
             self._update_search_highlights()
-        if self._view.document:
-            size = self._view.current_page_size()
-            if size:
-                self._info_size.setText(f"Page size: {size.width():.0f} x {size.height():.0f} pt")
 
     def _on_text_info(self, info: str):
-        if info:
-            self._font_lbl.setText(f"Font: {info}")
-        else:
-            self._font_lbl.setText("")
+        if not info:
+            self._font_name.setText("--")
+            self._font_size.setText("--")
+            self._font_style.setText("--")
+            return
+
+        font_name = "--"
+        size_text = "--"
+        for part in [p.strip() for p in info.split("|")]:
+            lower = part.lower()
+            if lower.startswith("font:"):
+                font_name = part.split(":", 1)[1].strip()
+            elif lower.startswith("size:"):
+                size_text = part.split(":", 1)[1].strip()
+
+        normalized = font_name.lower()
+        styles = []
+        if "bold" in normalized:
+            styles.append("Bold")
+        if "italic" in normalized or "oblique" in normalized:
+            styles.append("Italic")
+        style = " + ".join(styles) if styles else "Regular"
+
+        self._font_name.setText(font_name)
+        self._font_size.setText(size_text)
+        self._font_style.setText(style)
 
     def _on_text_selected(self, text: str):
         if text:
@@ -512,23 +613,37 @@ class MainWindow(QMainWindow):
     def _update_status(self):
         if self._view.document:
             name = os.path.basename(self._current_file) if self._current_file else "Untitled"
-            self._file_lbl.setText(f"{name}")
-            self._zoom_lbl.setText(f"{self._view.zoom * 100:.0f}%")
+            zoom_text = f"{self._view.zoom * 100:.0f}%"
 
-            tool_names = {ToolMode.SELECT: "Select", ToolMode.HAND: "Hand", ToolMode.MEASURE: "Measure"}
-            self._tool_lbl.setText(tool_names[self._view.tool])
+            self._status_dot.setProperty("offline", False)
+            self._status_dot.style().unpolish(self._status_dot)
+            self._status_dot.style().polish(self._status_dot)
 
-            sel = self._view.selection_rect
-            if sel:
-                self._size_lbl.setText(format_size(sel.width(), sel.height()))
-            else:
-                self._size_lbl.setText("")
+            self._file_lbl.setText(name)
+            self._zoom_lbl.setText(zoom_text)
+            self._doc_name.setText(name)
+            self._doc_zoom.setText(zoom_text)
+            self._doc_page.setText(f"{self._view.current_page + 1} / {self._view.page_count}")
+            self._page_count_lbl.setText(f"Pages: {self._view.page_count}")
+
+            self._sync_zoom_combo()
+            self._update_measurements_panel(self._view.selection_rect)
         else:
+            self._status_dot.setProperty("offline", True)
+            self._status_dot.style().unpolish(self._status_dot)
+            self._status_dot.style().polish(self._status_dot)
+
             self._file_lbl.setText("No file")
-            self._page_lbl.setText("")
-            self._zoom_lbl.setText("")
-            self._tool_lbl.setText("")
-            self._size_lbl.setText("")
+            self._page_count_lbl.setText("Pages: 0")
+            self._zoom_lbl.setText("--")
+            self._doc_name.setText("No file")
+            self._doc_page.setText("0 / 0")
+            self._doc_zoom.setText("--")
+            self._sync_zoom_combo()
+            self._update_measurements_panel(None)
+
+        if self._toolbar_select_action:
+            self._toolbar_select_action.setChecked(self._view.tool == ToolMode.SELECT)
 
     def _open_dialog(self):
         path, _ = QFileDialog.getOpenFileName(self, "Open PDF", "", "PDF (*.pdf);;All (*)")
@@ -542,7 +657,7 @@ class MainWindow(QMainWindow):
             self._current_file = os.path.abspath(path)
             self._add_recent_file(self._current_file)
             self._clear_search()
-            self.setWindowTitle(f"{APP_NAME} — {os.path.basename(path)}")
+            self.setWindowTitle(f"{APP_NAME} - {os.path.basename(path)}")
             self._view.fit_width()
             self._update_status()
             self._update_mtime()
@@ -556,7 +671,7 @@ class MainWindow(QMainWindow):
                 self._watcher.removePath(d)
 
     def _start_watch(self):
-        if self._current_file:
+        if self._current_file and self._auto_reload_enabled:
             self._watcher.addPath(self._current_file)
             self._watcher.addPath(os.path.dirname(self._current_file))
 
@@ -568,10 +683,12 @@ class MainWindow(QMainWindow):
             pass
 
     def _on_change(self, _path: str):
+        if not self._auto_reload_enabled:
+            return
         self._reload_timer.start(200)
 
     def _poll_check(self):
-        if not self._current_file:
+        if not self._auto_reload_enabled or not self._current_file:
             return
         try:
             if os.path.exists(self._current_file):
@@ -594,7 +711,7 @@ class MainWindow(QMainWindow):
         if self._view.reload_document():
             self._update_mtime()
             self._status.showMessage("Reloaded", 1000)
-            if self._current_file not in self._watcher.files():
+            if self._auto_reload_enabled and self._current_file not in self._watcher.files():
                 self._watcher.addPath(self._current_file)
 
     def _force_reload(self):
@@ -634,6 +751,92 @@ class MainWindow(QMainWindow):
             self._status.showMessage(f"Saved {os.path.basename(path)}", 2000)
         except Exception as exc:
             QMessageBox.critical(self, "Error", str(exc))
+
+    def _set_tool(self, tool: ToolMode):
+        self._view.tool = tool
+        self._select_action.setChecked(tool == ToolMode.SELECT)
+        self._hand_action.setChecked(tool == ToolMode.HAND)
+        self._measure_action.setChecked(tool == ToolMode.MEASURE)
+        if self._toolbar_select_action:
+            self._toolbar_select_action.setChecked(tool == ToolMode.SELECT)
+        self._update_status()
+
+    def _on_zoom_combo_changed(self, text: str):
+        if self._zoom_combo_updating:
+            return
+        raw = text.strip().replace("%", "")
+        if not raw:
+            return
+        try:
+            value = float(raw)
+        except ValueError:
+            return
+        if value <= 0:
+            return
+        self._view.set_zoom(value / 100.0)
+
+    def _sync_zoom_combo(self):
+        if not hasattr(self, "_zoom_combo"):
+            return
+        self._zoom_combo_updating = True
+        self._zoom_combo.setCurrentText(f"{self._view.zoom * 100:.0f}%" if self._view.document else "100%")
+        self._zoom_combo_updating = False
+
+    def _toggle_auto_reload(self, enabled: bool):
+        self._auto_reload_enabled = bool(enabled)
+        if self._auto_reload_enabled:
+            self._start_watch()
+        else:
+            self._stop_watch()
+
+    def _update_measurements_panel(self, sel: Optional[QRectF]):
+        if not sel:
+            self._measure_w.setText("W  --")
+            self._measure_h.setText("H  --")
+            self._measure_x.setText("X  --")
+            self._measure_y.setText("Y  --")
+            return
+        self._measure_w.setText(f"W  {sel.width():.1f} pt")
+        self._measure_h.setText(f"H  {sel.height():.1f} pt")
+        self._measure_x.setText(f"X  {sel.x():.1f} pt")
+        self._measure_y.setText(f"Y  {sel.y():.1f} pt")
+
+    def _icon(self, name: str, fallback: QStyle.StandardPixmap) -> QIcon:
+        icon = QIcon.fromTheme(name)
+        if not icon.isNull():
+            return icon
+        return self.style().standardIcon(fallback)
+
+    def _action(self, text: str, slot, shortcut=None) -> QAction:
+        action = QAction(text, self)
+        action.triggered.connect(slot)
+        if shortcut:
+            action.setShortcut(shortcut)
+        return action
+
+    def _divider(self) -> QFrame:
+        line = QFrame()
+        line.setProperty("separator", True)
+        line.setFrameShape(QFrame.Shape.HLine)
+        line.setFrameShadow(QFrame.Shadow.Plain)
+        return line
+
+    def _kv_value(self, label: str) -> QLabel:
+        value = QLabel(f"{label}  --")
+        value.setObjectName("MonoValue")
+        return value
+
+    def _info_row(self, parent_layout: QVBoxLayout, label: str, value: str) -> QLabel:
+        row = QHBoxLayout()
+        key = QLabel(f"{label}:")
+        key.setObjectName("InfoLabel")
+        val = QLabel(value)
+        val.setObjectName("InfoValue")
+        row.addWidget(key)
+        row.addStretch()
+        row.addWidget(val)
+        parent_layout.addLayout(row)
+        return val
 
     def closeEvent(self, e):
         self._view.close_document()

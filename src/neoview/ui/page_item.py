@@ -6,8 +6,8 @@ from typing import Optional
 
 import fitz
 from PySide6.QtCore import QRectF, QPointF
-from PySide6.QtGui import QPixmap, QImage
-from PySide6.QtWidgets import QGraphicsPixmapItem
+from PySide6.QtGui import QColor, QImage, QPixmap
+from PySide6.QtWidgets import QGraphicsDropShadowEffect, QGraphicsPixmapItem
 
 
 class PageItem(QGraphicsPixmapItem):
@@ -20,6 +20,11 @@ class PageItem(QGraphicsPixmapItem):
         self.page_index = page_index
         self.page_rect = QRectF(0, 0, page.rect.width, page.rect.height)
         self._fitz_page = page
+        self._shadow = QGraphicsDropShadowEffect()
+        self._shadow.setBlurRadius(24.0)
+        self._shadow.setOffset(0.0, 4.0)
+        self._shadow.setColor(QColor(0, 0, 0, 140))
+        self.setGraphicsEffect(self._shadow)
         self._render(page, scale)
 
     def _render(self, page: fitz.Page, scale: float):
