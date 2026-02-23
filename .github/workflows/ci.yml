@@ -2,17 +2,29 @@ name: CI
 
 on:
   push:
+    branches: ["main"]
+    tags: ["v*"]
   pull_request:
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
+  quality:
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
-    env:
-      QT_QPA_PLATFORM: offscreen
+        include:
+          - os: ubuntu-latest
+            python-version: "3.10"
+            run-lint: true
+          - os: ubuntu-latest
+            python-version: "3.11"
+            run-lint: false
+          - os: ubuntu-latest
+            python-version: "3.12"
+            run-lint: false
+          - os: windows-latest
+            python-version: "3.10"
+            run-lint: false
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -21,10 +33,13 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e .[dev]
+          python -m pip install -e .[dev] twine
       - name: Lint
+        if: matrix.run-lint == true
         run: ruff check .
       - name: Tests
         run: pytest
       - name: Build
         run: python -m build
+      - name: Verify artifacts
+        run: python -m twine check dist/*

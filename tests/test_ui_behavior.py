@@ -158,3 +158,38 @@ def test_link_activation_internal_page_with_y_method_target(monkeypatch):
 
     assert jumps == [1]
     assert view.verticalScrollBar().value() == 238
+
+
+def test_json_settings_round_trip():
+    win = MainWindow()
+    payload = {"demo.pdf": {"page": 3, "zoom": 1.25}}
+    win._save_json_setting("tests/session", payload)
+    loaded = win._load_json_setting("tests/session", {})
+    assert loaded == payload
+    win.close()
+
+
+def test_restore_document_session_applies_zoom_and_page(monkeypatch):
+    class DummyDoc:
+        page_count = 5
+
+        def close(self):
+            return None
+
+    win = MainWindow()
+    win._view._doc = DummyDoc()
+    win._current_file = "/tmp/demo.pdf"
+    win._document_sessions = {"/tmp/demo.pdf": {"page": 2, "zoom": 1.4}}
+
+    applied_zoom = []
+    jumps = []
+    monkeypatch.setattr(win._view, "set_zoom", lambda z, immediate=False: applied_zoom.append((z, immediate)))
+    monkeypatch.setattr(win._view, "go_to_page", lambda p: jumps.append(p))
+
+    restored = win._restore_document_session("/tmp/demo.pdf")
+    QApplication.processEvents()
+
+    assert restored is True
+    assert applied_zoom == [(1.4, True)]
+    assert jumps == [2]
+    win.close()

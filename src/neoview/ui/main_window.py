@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import os
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import fitz
 from PySide6.QtCore import QFileSystemWatcher, QRectF, QSettings, QSize, Qt, QTimer
@@ -99,8 +100,9 @@ class MainWindow(QMainWindow):
         self._settings = QSettings("NeoView", "NeoView")
         self._recent_files: List[str] = self._settings.value("recent_files", [], type=list)
         self._recent_menu: Optional[object] = None
+        self._document_sessions: Dict[str, Dict[str, float]] = self._load_json_setting("documents/session", {})
         self._zoom_combo_updating = False
-        self._auto_reload_enabled = True
+        self._auto_reload_enabled = self._settings.value("view/auto_reload", True, type=bool)
 
         self._watcher = QFileSystemWatcher(self)
         self._watcher.fileChanged.connect(self._on_change)
@@ -114,7 +116,12 @@ class MainWindow(QMainWindow):
         self._poll_timer.timeout.connect(self._poll_check)
         self._poll_timer.start(500)
 
+        self._session_save_timer = QTimer(self)
+        self._session_save_timer.setSingleShot(True)
+        self._session_save_timer.timeout.connect(self._save_current_document_session)
+
         self._setup_ui()
+        self._restore_persistent_ui()
 
         if pdf_path:
             self._open_file(pdf_path)
@@ -125,7 +132,9 @@ class MainWindow(QMainWindow):
 
         self._view.selection_changed.connect(self._update_status)
         self._view.zoom_changed.connect(self._update_status)
+        self._view.zoom_changed.connect(self._schedule_session_save)
         self._view.page_changed.connect(self._on_page_changed)
+        self._view.page_changed.connect(lambda _current, _total: self._schedule_session_save())
         self._view.text_info_changed.connect(self._on_text_info)
         self._view.text_selected.connect(self._on_text_selected)
         self._view.document_loaded.connect(self._refresh_document_info)
@@ -221,6 +230,7 @@ class MainWindow(QMainWindow):
 
     def _setup_toolbar(self):
         tb = QToolBar("Main")
+        tb.setObjectName("MainToolbar")
         tb.setMovable(False)
         tb.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         tb.setIconSize(QSize(16, 16))
@@ -288,6 +298,7 @@ class MainWindow(QMainWindow):
 
     def _setup_docks(self):
         self._search_dock = QDockWidget("Search", self)
+        self._search_dock.setObjectName("SearchDock")
         self._search_dock.setAllowedAreas(
             Qt.DockWidgetArea.LeftDockWidgetArea
             | Qt.DockWidgetArea.RightDockWidgetArea
@@ -318,6 +329,7 @@ class MainWindow(QMainWindow):
         self._search_input.returnPressed.connect(self._find_next)
 
         self._outline_dock = QDockWidget("Outline", self)
+        self._outline_dock.setObjectName("OutlineDock")
         self._outline_dock.setAllowedAreas(
             Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
         )
@@ -328,6 +340,7 @@ class MainWindow(QMainWindow):
         self._outline_list.itemActivated.connect(self._jump_to_outline_item)
 
         self._thumbs_dock = QDockWidget("Thumbnails", self)
+        self._thumbs_dock.setObjectName("ThumbnailsDock")
         self._thumbs_dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea)
         self._thumbs_list = QListWidget()
         self._thumbs_list.setIconSize(QSize(120, 160))
@@ -343,6 +356,7 @@ class MainWindow(QMainWindow):
         self._thumbs_list.itemActivated.connect(self._jump_to_thumb)
 
         self._info_dock = QDockWidget("Inspector", self)
+        self._info_dock.setObjectName("InspectorDock")
         self._info_dock.setAllowedAreas(Qt.DockWidgetArea.RightDockWidgetArea)
         self._info_dock.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
 
@@ -419,23 +433,115 @@ class MainWindow(QMainWindow):
     def _toggle_search_dock(self):
         visible = not self._search_dock.isVisible()
         self._search_dock.setVisible(visible)
+        self._settings.setValue("window/show_search", visible)
         if visible:
             self._search_input.setFocus()
             self._search_input.selectAll()
 
     def _toggle_outline_dock(self):
-        self._outline_dock.setVisible(not self._outline_dock.isVisible())
+        visible = not self._outline_dock.isVisible()
+        self._outline_dock.setVisible(visible)
+        self._settings.setValue("window/show_outline", visible)
 
     def _toggle_thumbs_dock(self):
-        self._thumbs_dock.setVisible(not self._thumbs_dock.isVisible())
+        visible = not self._thumbs_dock.isVisible()
+        self._thumbs_dock.setVisible(visible)
+        self._settings.setValue("window/show_thumbnails", visible)
 
     def _toggle_info_dock(self):
-        self._info_dock.setVisible(not self._info_dock.isVisible())
+        visible = not self._info_dock.isVisible()
+        self._info_dock.setVisible(visible)
+        self._settings.setValue("window/show_inspector", visible)
 
     def _active_search_text(self) -> str:
         if hasattr(self, "_search_input") and self._search_input is not None:
             return self._search_input.text().strip()
         return self._find_input.text().strip() if self._find_input else ""
+
+    def _load_json_setting(self, key: str, default):
+        raw = self._settings.value(key, "")
+        if not raw:
+            return default
+        if isinstance(raw, (dict, list)):
+            return raw
+        try:
+            return json.loads(str(raw))
+        except (TypeError, ValueError):
+            return default
+
+    def _save_json_setting(self, key: str, value):
+        self._settings.setValue(key, json.dumps(value))
+
+    def _restore_persistent_ui(self):
+        geometry = self._settings.value("window/geometry")
+        if geometry:
+            self.restoreGeometry(geometry)
+
+        state = self._settings.value("window/state")
+        if state:
+            self.restoreState(state)
+        else:
+            self._search_dock.setVisible(self._settings.value("window/show_search", False, type=bool))
+            self._outline_dock.setVisible(self._settings.value("window/show_outline", False, type=bool))
+            self._thumbs_dock.setVisible(self._settings.value("window/show_thumbnails", False, type=bool))
+            self._info_dock.setVisible(self._settings.value("window/show_inspector", True, type=bool))
+
+        self._auto_reload_enabled = self._settings.value("view/auto_reload", True, type=bool)
+        self._reload_toggle.blockSignals(True)
+        self._reload_toggle.setChecked(self._auto_reload_enabled)
+        self._reload_toggle.blockSignals(False)
+
+        saved_tool = self._settings.value("view/tool", ToolMode.HAND.name, type=str)
+        if saved_tool in ToolMode.__members__:
+            self._set_tool(ToolMode[saved_tool])
+
+    def _save_persistent_ui(self):
+        self._settings.setValue("window/geometry", self.saveGeometry())
+        self._settings.setValue("window/state", self.saveState())
+        self._settings.setValue("window/show_search", self._search_dock.isVisible())
+        self._settings.setValue("window/show_outline", self._outline_dock.isVisible())
+        self._settings.setValue("window/show_thumbnails", self._thumbs_dock.isVisible())
+        self._settings.setValue("window/show_inspector", self._info_dock.isVisible())
+        self._settings.setValue("view/auto_reload", self._auto_reload_enabled)
+        self._settings.setValue("view/tool", self._view.tool.name)
+
+    def _schedule_session_save(self):
+        if self._current_file and self._view.document:
+            self._session_save_timer.start(300)
+
+    def _save_current_document_session(self):
+        if not self._current_file or not self._view.document:
+            return
+
+        path = os.path.abspath(self._current_file)
+        self._document_sessions[path] = {
+            "page": int(self._view.current_page),
+            "zoom": float(self._view.zoom),
+        }
+
+        while len(self._document_sessions) > 50:
+            first_key = next(iter(self._document_sessions))
+            del self._document_sessions[first_key]
+
+        self._save_json_setting("documents/session", self._document_sessions)
+
+    def _restore_document_session(self, path: str) -> bool:
+        if not path:
+            return False
+        state = self._document_sessions.get(os.path.abspath(path))
+        if not state:
+            return False
+
+        try:
+            zoom = float(state.get("zoom", 1.0))
+            page = int(state.get("page", 0))
+        except (TypeError, ValueError):
+            return False
+
+        self._view.set_zoom(zoom, immediate=True)
+        if 0 <= page < self._view.page_count:
+            QTimer.singleShot(0, lambda p=page: self._view.go_to_page(p))
+        return True
 
     def _rebuild_recent_menu(self):
         if not self._recent_menu:
@@ -687,6 +793,7 @@ class MainWindow(QMainWindow):
             self._open_file(path)
 
     def _open_file(self, path: str):
+        self._save_current_document_session()
         self._stop_watch()
 
         if self._view.open_document(path):
@@ -694,10 +801,12 @@ class MainWindow(QMainWindow):
             self._add_recent_file(self._current_file)
             self._clear_search()
             self.setWindowTitle(f"{APP_NAME} - {os.path.basename(path)}")
-            self._view.fit_width()
+            if not self._restore_document_session(self._current_file):
+                self._view.fit_width()
             self._update_status()
             self._update_mtime()
             self._start_watch()
+            self._schedule_session_save()
 
     def _stop_watch(self):
         if self._current_file:
@@ -799,6 +908,7 @@ class MainWindow(QMainWindow):
             self._panel_select_btn.setChecked(tool == ToolMode.SELECT)
             self._panel_hand_btn.setChecked(tool == ToolMode.HAND)
             self._panel_measure_btn.setChecked(tool == ToolMode.MEASURE)
+        self._settings.setValue("view/tool", tool.name)
         self._update_status()
 
     def _on_zoom_combo_changed(self, text: str):
@@ -824,6 +934,7 @@ class MainWindow(QMainWindow):
 
     def _toggle_auto_reload(self, enabled: bool):
         self._auto_reload_enabled = bool(enabled)
+        self._settings.setValue("view/auto_reload", self._auto_reload_enabled)
         if self._auto_reload_enabled:
             self._start_watch()
         else:
@@ -879,5 +990,8 @@ class MainWindow(QMainWindow):
         return val
 
     def closeEvent(self, e):
+        self._session_save_timer.stop()
+        self._save_current_document_session()
+        self._save_persistent_ui()
         self._view.close_document()
         super().closeEvent(e)

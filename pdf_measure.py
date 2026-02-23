@@ -1,11 +1,10 @@
 import sys
-import math
 import fitz  # PyMuPDF
 
 from PySide6.QtCore import Qt, QRectF, QPointF
 from PySide6.QtGui import QPixmap, QImage, QPainter, QPen
 from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QLabel, QFileDialog, QScrollArea, QWidget
+    QApplication, QMainWindow, QScrollArea, QWidget
 )
 
 
