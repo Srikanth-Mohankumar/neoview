@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import os
 from enum import Enum, auto
-from typing import Optional, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import fitz
-from PySide6.QtCore import Qt, QRectF, QPointF, QTimer, Signal
-from PySide6.QtGui import QPainter, QPen, QBrush, QColor, QWheelEvent, QKeyEvent, QMouseEvent
-from PySide6.QtWidgets import QGraphicsRectItem, QGraphicsScene, QGraphicsView, QLabel, QMessageBox
+from PySide6.QtCore import QPoint, QPointF, QRectF, QTimer, QUrl, Signal, Qt
+from PySide6.QtGui import QBrush, QColor, QDesktopServices, QKeyEvent, QMouseEvent, QPainter, QPen, QWheelEvent
+from PySide6.QtWidgets import QGraphicsRectItem, QGraphicsScene, QGraphicsView, QLabel, QMessageBox, QStyle
 import shiboken6
 
 from neoview.ui.selection import SelectionRect
@@ -69,6 +69,10 @@ class PdfView(QGraphicsView):
 
         self._search_highlights: List[tuple] = []
         self._search_items: List[QGraphicsRectItem] = []
+        self._page_links: List[List[Tuple[QRectF, Dict]]] = []
+        self._hover_link: Optional[Dict] = None
+        self._pressed_link: Optional[Dict] = None
+        self._pressed_pos: Optional[QPointF] = None
 
         self._selection: Optional[SelectionRect] = None
         self._selection_page: int = -1
@@ -86,6 +90,14 @@ class PdfView(QGraphicsView):
         self._measure_badge.setObjectName("FloatingMeasureBadge")
         self._measure_badge.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self._measure_badge.hide()
+        self._link_badge = QLabel(self.viewport())
+        self._link_badge.setObjectName("LinkBadge")
+        self._link_badge.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self._link_badge.setFixedSize(18, 18)
+        link_icon = self.style().standardIcon(QStyle.StandardPixmap.SP_FileLinkIcon)
+        self._link_badge.setPixmap(link_icon.pixmap(12, 12))
+        self._link_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._link_badge.hide()
 
         self.verticalScrollBar().valueChanged.connect(self._on_scroll)
         self.horizontalScrollBar().valueChanged.connect(self._on_scroll)
@@ -211,9 +223,14 @@ class PdfView(QGraphicsView):
             self._scene.clear()
             self._pages.clear()
             self._page_positions.clear()
+            self._page_links.clear()
+            self._hover_link = None
+            self._pressed_link = None
+            self._pressed_pos = None
             self._selection = None
             self.clear_text_selection()
             self._clear_search_items()
+            self._hide_link_badge()
 
             for item, pos_y in new_pages:
                 self._scene.addItem(item)
@@ -234,6 +251,7 @@ class PdfView(QGraphicsView):
             if sel_rect and 0 <= sel_page < self.page_count:
                 self._create_selection_on_page(sel_page, sel_rect)
 
+            self._cache_page_links()
             self._render_zoom = self._zoom
             self._rebuild_search_highlights()
             self._update_measure_badge()
@@ -256,10 +274,15 @@ class PdfView(QGraphicsView):
         self._scene.clear()
         self._pages.clear()
         self._page_positions.clear()
+        self._page_links.clear()
+        self._hover_link = None
+        self._pressed_link = None
+        self._pressed_pos = None
         self._selection = None
         self.clear_text_selection()
         self._clear_search_items()
         self._hide_measure_badge()
+        self._hide_link_badge()
 
     def _render_all_pages(self, keep_selection: bool = False):
         selected_rect = self.selection_rect if keep_selection else None
@@ -268,11 +291,16 @@ class PdfView(QGraphicsView):
         self._scene.clear()
         self._pages.clear()
         self._page_positions.clear()
+        self._page_links.clear()
+        self._hover_link = None
+        self._pressed_link = None
+        self._pressed_pos = None
         self._selection = None
         self._selection_page = -1
         self.clear_text_selection()
         self._clear_search_items()
         self._hide_measure_badge()
+        self._hide_link_badge()
 
         if not self._doc:
             return
@@ -302,6 +330,7 @@ class PdfView(QGraphicsView):
         if selected_rect and 0 <= selected_page < len(self._pages):
             self._create_selection_on_page(selected_page, selected_rect)
 
+        self._cache_page_links()
         self._render_zoom = self._zoom
         self._rebuild_search_highlights()
         self._update_measure_badge()
@@ -348,6 +377,26 @@ class PdfView(QGraphicsView):
         self._rebuild_search_highlights()
         self._update_measure_badge()
 
+    def _cache_page_links(self):
+        self._page_links = []
+        for page_item in self._pages:
+            links: List[Tuple[QRectF, Dict]] = []
+            try:
+                for link in page_item._fitz_page.get_links():
+                    src = link.get("from")
+                    if not src:
+                        continue
+                    rect = QRectF(src.x0, src.y0, src.width, src.height)
+                    if rect.width() <= 0 or rect.height() <= 0:
+                        continue
+                    kind = link.get("kind")
+                    has_internal_target = isinstance(link.get("page"), int) or bool(link.get("to"))
+                    if kind in (fitz.LINK_URI, fitz.LINK_GOTO, fitz.LINK_NAMED) or has_internal_target:
+                        links.append((rect, link))
+            except Exception:
+                pass
+            self._page_links.append(links)
+
     def _rerender_pages(self):
         if not self._doc:
             return
@@ -362,6 +411,7 @@ class PdfView(QGraphicsView):
     def _on_scroll(self):
         self._emit_page_info()
         self._update_measure_badge()
+        self._hide_link_badge()
 
     def set_zoom(self, z: float, immediate: bool = False):
         z = max(0.25, min(z, 5.0))
@@ -573,6 +623,115 @@ class PdfView(QGraphicsView):
     def _hide_measure_badge(self):
         self._measure_badge.hide()
 
+    def _hide_link_badge(self):
+        self._hover_link = None
+        self._link_badge.hide()
+
+    def _clear_link_press(self):
+        self._pressed_link = None
+        self._pressed_pos = None
+
+    def _same_link(self, first: Dict, second: Dict) -> bool:
+        f = first.get("link", {})
+        s = second.get("link", {})
+        return (
+            f.get("uri") == s.get("uri")
+            and f.get("page") == s.get("page")
+            and f.get("to") == s.get("to")
+            and f.get("kind") == s.get("kind")
+        )
+
+    def _extract_target_y(self, target) -> Optional[float]:
+        if target is None:
+            return None
+        if isinstance(target, (tuple, list)) and len(target) >= 2:
+            try:
+                return float(target[1])
+            except (TypeError, ValueError):
+                return None
+
+        y_attr = getattr(target, "y", None)
+        if callable(y_attr):
+            try:
+                return float(y_attr())
+            except (TypeError, ValueError):
+                return None
+        if y_attr is not None:
+            try:
+                return float(y_attr)
+            except (TypeError, ValueError):
+                return None
+        return None
+
+    def _link_at_scene_pos(self, scene_pos: QPointF) -> Optional[Dict]:
+        page_idx = self._get_page_at(scene_pos)
+        if page_idx < 0 or page_idx >= len(self._page_links):
+            return None
+        page_pos = self._scene_to_page(scene_pos, page_idx)
+        for rect, link in self._page_links[page_idx]:
+            if rect.contains(page_pos):
+                return {"page_idx": page_idx, "rect": rect, "link": link}
+        return None
+
+    def _update_link_hover(self, scene_pos: QPointF, viewport_pos: QPoint):
+        if self._tool not in (ToolMode.HAND, ToolMode.SELECT):
+            self._hide_link_badge()
+            return
+        if self._text_selecting or self._creating or self._interacting or self._panning:
+            self._hide_link_badge()
+            return
+
+        link_info = self._link_at_scene_pos(scene_pos)
+        if not link_info:
+            self._hide_link_badge()
+            if self._tool == ToolMode.HAND:
+                self.setCursor(Qt.CursorShape.OpenHandCursor)
+            else:
+                self.setCursor(Qt.CursorShape.ArrowCursor)
+            return
+
+        self._hover_link = link_info
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        x = min(viewport_pos.x() + 12, self.viewport().width() - self._link_badge.width() - 6)
+        y = max(6, viewport_pos.y() - self._link_badge.height() - 8)
+        self._link_badge.move(x, y)
+        self._link_badge.show()
+        self._link_badge.raise_()
+
+    def _activate_link(self, link_info: Dict):
+        if not link_info:
+            return
+        link = link_info["link"]
+        self._hide_link_badge()
+
+        kind = link.get("kind")
+        uri = link.get("uri")
+        if uri:
+            if kind == fitz.LINK_URI and not str(uri).startswith("#"):
+                QDesktopServices.openUrl(QUrl(uri))
+                return
+            if self._doc:
+                try:
+                    page_id, _x, y = self._doc.resolve_link(uri)
+                except Exception:
+                    page_id, y = None, None
+                if isinstance(page_id, int) and 0 <= page_id < self.page_count:
+                    self.go_to_page(page_id)
+                    if y is not None and 0 <= page_id < len(self._pages):
+                        page = self._pages[page_id]
+                        dest_y = page.pos().y() + float(y) * self._zoom - 30
+                        self.verticalScrollBar().setValue(int(max(0, dest_y)))
+                    return
+
+        page_idx = link.get("page")
+        if isinstance(page_idx, int) and 0 <= page_idx < self.page_count:
+            self.go_to_page(page_idx)
+            target_y = self._extract_target_y(link.get("to"))
+            if target_y is not None and 0 <= page_idx < len(self._pages):
+                page = self._pages[page_idx]
+                y = page.pos().y() + target_y * self._zoom - 30
+                self.verticalScrollBar().setValue(int(max(0, y)))
+
     def _update_measure_badge(self):
         if not self._selection or not (0 <= self._selection_page < len(self._pages)):
             self._hide_measure_badge()
@@ -609,7 +768,15 @@ class PdfView(QGraphicsView):
             super().mousePressEvent(e)
             return
 
+        self._clear_link_press()
         scene_pos = self.mapToScene(e.position().toPoint())
+        self._update_link_hover(scene_pos, e.position().toPoint())
+
+        if self._hover_link and self._tool in (ToolMode.HAND, ToolMode.SELECT):
+            self._pressed_link = self._hover_link
+            self._pressed_pos = QPointF(e.position())
+            e.accept()
+            return
 
         if self._tool == ToolMode.HAND:
             self._panning = True
@@ -666,6 +833,7 @@ class PdfView(QGraphicsView):
 
     def mouseMoveEvent(self, e: QMouseEvent):
         scene_pos = self.mapToScene(e.position().toPoint())
+        self._update_link_hover(scene_pos, e.position().toPoint())
 
         if self._tool == ToolMode.HAND and self._panning and self._pan_start is not None:
             delta = e.position() - self._pan_start
@@ -731,10 +899,22 @@ class PdfView(QGraphicsView):
 
     def mouseReleaseEvent(self, e: QMouseEvent):
         if e.button() == Qt.MouseButton.LeftButton:
+            if self._pressed_link and self._pressed_pos is not None:
+                moved = e.position() - self._pressed_pos
+                moved_too_far = abs(moved.x()) + abs(moved.y()) > 6
+                current_link = self._link_at_scene_pos(self.mapToScene(e.position().toPoint()))
+                same_link = current_link is not None and self._same_link(self._pressed_link, current_link)
+                if not moved_too_far and same_link:
+                    self._activate_link(current_link)
+                self._clear_link_press()
+                e.accept()
+                return
+
             if self._tool == ToolMode.HAND and self._panning:
                 self._panning = False
                 self._pan_start = None
                 self.setCursor(Qt.CursorShape.OpenHandCursor)
+                self._hide_link_badge()
                 e.accept()
                 return
 
@@ -857,3 +1037,4 @@ class PdfView(QGraphicsView):
     def resizeEvent(self, e):
         super().resizeEvent(e)
         self._update_measure_badge()
+        self._hide_link_badge()

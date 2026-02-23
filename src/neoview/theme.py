@@ -268,6 +268,11 @@ QLabel#FloatingMeasureBadge {
     font-size: 12px;
     font-weight: 700;
 }
+QLabel#LinkBadge {
+    background: rgba(8, 10, 16, 230);
+    border: 1px solid rgba(91, 141, 246, 180);
+    border-radius: 9px;
+}
 """
 
 # Backward compatibility for older imports.

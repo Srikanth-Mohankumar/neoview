@@ -328,16 +328,17 @@ class MainWindow(QMainWindow):
         self._outline_list.itemActivated.connect(self._jump_to_outline_item)
 
         self._thumbs_dock = QDockWidget("Thumbnails", self)
-        self._thumbs_dock.setAllowedAreas(
-            Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
-        )
+        self._thumbs_dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea)
         self._thumbs_list = QListWidget()
         self._thumbs_list.setIconSize(QSize(120, 160))
         self._thumbs_list.setResizeMode(QListWidget.ResizeMode.Adjust)
         self._thumbs_list.setViewMode(QListWidget.ViewMode.IconMode)
         self._thumbs_list.setMovement(QListWidget.Movement.Static)
         self._thumbs_dock.setWidget(self._thumbs_list)
-        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._thumbs_dock)
+        self._thumbs_dock.setMinimumWidth(180)
+        self._thumbs_dock.setMaximumWidth(520)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self._thumbs_dock)
+        self.splitDockWidget(self._outline_dock, self._thumbs_dock, Qt.Orientation.Vertical)
         self._thumbs_dock.hide()
         self._thumbs_list.itemActivated.connect(self._jump_to_thumb)
 
