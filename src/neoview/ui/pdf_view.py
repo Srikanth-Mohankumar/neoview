@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from bisect import bisect_right
 import os
+import re
+from urllib.parse import unquote
 from enum import Enum, auto
 from typing import Dict, List, Optional, Tuple
 
@@ -745,6 +747,115 @@ class PdfView(QGraphicsView):
                 return None
         return None
 
+    def _page_height(self, page_idx: int) -> Optional[float]:
+        if not (0 <= page_idx < len(self._pages)):
+            return None
+        page = self._pages[page_idx]
+        rect = getattr(page, "page_rect", None)
+        if rect is not None:
+            height_attr = getattr(rect, "height", None)
+            if callable(height_attr):
+                try:
+                    return float(height_attr())
+                except Exception:
+                    pass
+            if height_attr is not None:
+                try:
+                    return float(height_attr)
+                except Exception:
+                    pass
+            try:
+                return float(rect[3] - rect[1])
+            except Exception:
+                pass
+        fitz_page = getattr(page, "_fitz_page", None)
+        if fitz_page is not None:
+            try:
+                return float(fitz_page.rect.height)
+            except Exception:
+                pass
+        return None
+
+    def _scroll_to_destination(self, page_idx: int, target_y: Optional[float], *, y_is_pdf_coords: bool = False):
+        if not isinstance(page_idx, int) or not (0 <= page_idx < self.page_count):
+            return
+        self.go_to_page(page_idx)
+        if target_y is None or not (0 <= page_idx < len(self._pages)):
+            return
+
+        y_value = float(target_y)
+        if y_is_pdf_coords:
+            page_height = self._page_height(page_idx)
+            if page_height is not None:
+                y_value = page_height - y_value
+
+        if y_value < 0:
+            y_value = 0.0
+        page_height = self._page_height(page_idx)
+        if page_height is not None:
+            y_value = min(y_value, page_height)
+
+        page = self._pages[page_idx]
+        dest_y = page.pos().y() + y_value * self._zoom - 30
+        self.verticalScrollBar().setValue(int(max(0, dest_y)))
+
+    def _parse_dest_string_y(self, dest: str) -> Optional[float]:
+        if not isinstance(dest, str):
+            return None
+        # PDF destination strings commonly look like "/XYZ left top zoom".
+        match = re.search(r"/XYZ\s+[-+]?\d*\.?\d+\s+([-+]?\d*\.?\d+)", dest)
+        if not match:
+            return None
+        try:
+            return float(match.group(1))
+        except (TypeError, ValueError):
+            return None
+
+    def _resolve_named_destination(self, name: str) -> Tuple[Optional[int], Optional[float]]:
+        if not self._doc:
+            return (None, None)
+        key = str(name or "").strip()
+        if not key:
+            return (None, None)
+        if key.startswith("#"):
+            key = key[1:]
+        if key.lower().startswith("nameddest="):
+            key = key.split("=", 1)[1]
+        key = unquote(key).strip()
+        if not key:
+            return (None, None)
+
+        try:
+            names = self._doc.resolve_names()
+        except Exception:
+            return (None, None)
+        if not isinstance(names, dict):
+            return (None, None)
+
+        target = names.get(key)
+        if not isinstance(target, dict):
+            return (None, None)
+
+        page_idx = target.get("page")
+        if not isinstance(page_idx, int) or page_idx < 0:
+            return (None, None)
+
+        target_y = self._extract_target_y(target.get("to"))
+        if target_y is None:
+            target_y = self._parse_dest_string_y(str(target.get("dest", "")))
+        return (page_idx, target_y)
+
+    def _resolve_uri_destination(self, uri: str) -> Tuple[Optional[int], Optional[float]]:
+        if not self._doc:
+            return (None, None)
+        try:
+            page_id, _x, y = self._doc.resolve_link(uri)
+        except Exception:
+            return (None, None)
+        if isinstance(page_id, int) and 0 <= page_id < self.page_count:
+            return (page_id, y)
+        return (None, None)
+
     def _link_at_scene_pos(self, scene_pos: QPointF) -> Optional[Dict]:
         page_idx = self._get_page_at(scene_pos)
         if page_idx < 0 or page_idx >= len(self._page_links):
@@ -795,6 +906,10 @@ class PdfView(QGraphicsView):
             if uri.startswith("#"):
                 return f"Navigate to destination {uri}"
             return uri
+
+        name = str(link.get("nameddest") or link.get("name") or "").strip()
+        if name:
+            return f"Navigate to destination #{name}"
 
         page_idx = link.get("page")
         if isinstance(page_idx, int) and page_idx >= 0:
@@ -847,27 +962,49 @@ class PdfView(QGraphicsView):
             if kind == fitz.LINK_URI and not str(uri).startswith("#"):
                 QDesktopServices.openUrl(QUrl(uri))
                 return
-            if self._doc:
-                try:
-                    page_id, _x, y = self._doc.resolve_link(uri)
-                except Exception:
-                    page_id, y = None, None
-                if isinstance(page_id, int) and 0 <= page_id < self.page_count:
-                    self.go_to_page(page_id)
-                    if y is not None and 0 <= page_id < len(self._pages):
-                        page = self._pages[page_id]
-                        dest_y = page.pos().y() + float(y) * self._zoom - 30
-                        self.verticalScrollBar().setValue(int(max(0, dest_y)))
+            page_id, y = self._resolve_uri_destination(str(uri))
+            if isinstance(page_id, int):
+                # resolve_link() already returns coordinates in viewer-space.
+                self._scroll_to_destination(page_id, y, y_is_pdf_coords=False)
+                return
+            if str(uri).startswith("#"):
+                page_idx, target_y = self._resolve_named_destination(str(uri))
+                if isinstance(page_idx, int):
+                    # resolve_names() reports PDF-space Y.
+                    self._scroll_to_destination(page_idx, target_y, y_is_pdf_coords=True)
                     return
+
+        if kind == fitz.LINK_NAMED:
+            named_key = str(link.get("nameddest") or link.get("name") or "").strip()
+            if named_key:
+                named_lower = named_key.lower()
+                if named_lower == "nextpage":
+                    self.next_page()
+                    return
+                if named_lower == "prevpage":
+                    self.prev_page()
+                    return
+                if named_lower == "firstpage":
+                    self.first_page()
+                    return
+                if named_lower == "lastpage":
+                    self.last_page()
+                    return
+
+                page_idx, target_y = self._resolve_uri_destination(f"#nameddest={named_key}")
+                if isinstance(page_idx, int):
+                    self._scroll_to_destination(page_idx, target_y, y_is_pdf_coords=False)
+                    return
+
+            page_idx, target_y = self._resolve_named_destination(named_key)
+            if isinstance(page_idx, int):
+                self._scroll_to_destination(page_idx, target_y, y_is_pdf_coords=True)
+                return
 
         page_idx = link.get("page")
         if isinstance(page_idx, int) and 0 <= page_idx < self.page_count:
-            self.go_to_page(page_idx)
             target_y = self._extract_target_y(link.get("to"))
-            if target_y is not None and 0 <= page_idx < len(self._pages):
-                page = self._pages[page_idx]
-                y = page.pos().y() + target_y * self._zoom - 30
-                self.verticalScrollBar().setValue(int(max(0, y)))
+            self._scroll_to_destination(page_idx, target_y, y_is_pdf_coords=False)
 
     def _update_measure_badge(self):
         if not self._selection or not (0 <= self._selection_page < len(self._pages)):

@@ -1,5 +1,5 @@
 import fitz
-from PySide6.QtCore import QPointF
+from PySide6.QtCore import QPointF, QRectF
 from PySide6.QtWidgets import QApplication
 
 from neoview.ui.main_window import MainWindow
@@ -12,6 +12,7 @@ def test_find_panel_toggle():
     win.show()
     QApplication.processEvents()
 
+    win._search_dock.hide()
     assert win._search_dock.isHidden()
     win._show_find()
     QApplication.processEvents()
@@ -158,6 +159,99 @@ def test_link_activation_internal_page_with_y_method_target(monkeypatch):
 
     assert jumps == [1]
     assert view.verticalScrollBar().value() == 238
+
+
+def test_link_activation_named_destination_uses_pdf_y_coordinates(monkeypatch):
+    class DummyDoc:
+        page_count = 3
+
+        def resolve_names(self):
+            return {"destA": {"page": 1, "to": (0.0, 740.0), "zoom": 0.0}}
+
+    class DummyPage:
+        def __init__(self, y):
+            self._y = y
+            self.page_rect = QRectF(0.0, 0.0, 595.0, 842.0)
+
+        def pos(self):
+            return QPointF(0.0, self._y)
+
+    view = PdfView()
+    view._doc = DummyDoc()
+    view._pages = [DummyPage(0.0), DummyPage(900.0), DummyPage(1800.0)]
+    view._zoom = 1.0
+    view.verticalScrollBar().setRange(0, 10000)
+
+    jumps = []
+    monkeypatch.setattr(view, "go_to_page", lambda idx: jumps.append(idx))
+
+    view._activate_link({"link": {"kind": fitz.LINK_NAMED, "name": "destA"}})
+
+    # PDF y=740 on an 842pt page maps to top-origin y=102.
+    assert jumps == [1]
+    assert view.verticalScrollBar().value() == 972
+
+
+def test_link_activation_hash_uri_uses_resolve_link_coordinates(monkeypatch):
+    class DummyDoc:
+        page_count = 2
+
+        def resolve_link(self, _uri):
+            return (1, 0.0, 700.0)
+
+    class DummyPage:
+        def __init__(self, y):
+            self._y = y
+            self.page_rect = QRectF(0.0, 0.0, 595.0, 842.0)
+
+        def pos(self):
+            return QPointF(0.0, self._y)
+
+    view = PdfView()
+    view._doc = DummyDoc()
+    view._pages = [DummyPage(0.0), DummyPage(900.0)]
+    view._zoom = 1.0
+    view.verticalScrollBar().setRange(0, 10000)
+
+    jumps = []
+    monkeypatch.setattr(view, "go_to_page", lambda idx: jumps.append(idx))
+
+    view._activate_link({"link": {"kind": fitz.LINK_GOTO, "uri": "#page=2&zoom=100,0,700"}})
+
+    # Must use resolve_link y directly (no PDF-space inversion).
+    assert jumps == [1]
+    assert view.verticalScrollBar().value() == 1570
+
+
+def test_link_activation_nameddest_key_resolves(monkeypatch):
+    class DummyDoc:
+        page_count = 2
+
+        def resolve_names(self):
+            return {"TargetA": {"page": 1, "to": (0.0, 800.0), "zoom": 0.0}}
+
+    class DummyPage:
+        def __init__(self, y):
+            self._y = y
+            self.page_rect = QRectF(0.0, 0.0, 595.0, 842.0)
+
+        def pos(self):
+            return QPointF(0.0, self._y)
+
+    view = PdfView()
+    view._doc = DummyDoc()
+    view._pages = [DummyPage(0.0), DummyPage(900.0)]
+    view._zoom = 1.0
+    view.verticalScrollBar().setRange(0, 10000)
+
+    jumps = []
+    monkeypatch.setattr(view, "go_to_page", lambda idx: jumps.append(idx))
+
+    view._activate_link({"link": {"kind": fitz.LINK_NAMED, "nameddest": "TargetA"}})
+
+    # resolve_names y=800 (PDF coords) -> top-origin y=42.
+    assert jumps == [1]
+    assert view.verticalScrollBar().value() == 912
 
 
 def test_json_settings_round_trip():
