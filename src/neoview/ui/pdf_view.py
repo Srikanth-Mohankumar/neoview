@@ -15,6 +15,7 @@ from PySide6.QtGui import QBrush, QColor, QDesktopServices, QKeyEvent, QMouseEve
 from PySide6.QtWidgets import QGraphicsRectItem, QGraphicsScene, QGraphicsView, QLabel, QMessageBox, QStyle, QToolTip
 import shiboken6
 
+from neoview.models.view_state import AnnotationRecord
 from neoview.ui.selection import SelectionRect
 from neoview.ui.page_item import PageItem
 
@@ -38,6 +39,7 @@ class PdfView(QGraphicsView):
     page_changed = Signal(int, int)
     text_info_changed = Signal(str)
     text_selected = Signal(str)
+    annotation_clicked = Signal(str)
     document_loaded = Signal()
 
     def __init__(self, parent=None):
@@ -82,6 +84,9 @@ class PdfView(QGraphicsView):
 
         self._search_highlights: List[tuple] = []
         self._search_items: List[QGraphicsRectItem] = []
+        self._annotations: List[AnnotationRecord] = []
+        self._annotation_items: List[Tuple[int, QGraphicsRectItem]] = []
+        self._annotation_index: Dict[str, AnnotationRecord] = {}
         self._page_links: List[List[Tuple[QRectF, Dict]]] = []
         self._hover_link: Optional[Dict] = None
         self._pressed_link: Optional[Dict] = None
@@ -242,6 +247,7 @@ class PdfView(QGraphicsView):
             self._pages.clear()
             self._page_positions.clear()
             self._page_links.clear()
+            self._annotation_items.clear()
             self._hover_link = None
             self._pressed_link = None
             self._pressed_pos = None
@@ -270,6 +276,7 @@ class PdfView(QGraphicsView):
                 self._create_selection_on_page(sel_page, sel_rect)
 
             self._cache_page_links()
+            self._rebuild_annotation_items()
             self._rebuild_search_highlights()
             self._update_measure_badge()
             self._emit_page_info()
@@ -292,6 +299,9 @@ class PdfView(QGraphicsView):
         self._pages.clear()
         self._page_positions.clear()
         self._page_links.clear()
+        self._annotations.clear()
+        self._annotation_index.clear()
+        self._annotation_items.clear()
         self._link_highlight_item = None
         self._hover_link = None
         self._pressed_link = None
@@ -310,6 +320,7 @@ class PdfView(QGraphicsView):
         self._pages.clear()
         self._page_positions.clear()
         self._page_links.clear()
+        self._annotation_items.clear()
         self._link_highlight_item = None
         self._hover_link = None
         self._pressed_link = None
@@ -350,6 +361,7 @@ class PdfView(QGraphicsView):
             self._create_selection_on_page(selected_page, selected_rect)
 
         self._cache_page_links()
+        self._rebuild_annotation_items()
         self._rebuild_search_highlights()
         self._update_measure_badge()
         self._emit_page_info()
@@ -387,6 +399,13 @@ class PdfView(QGraphicsView):
 
         if self._text_highlight_items:
             for page_idx, item in self._text_highlight_items:
+                if 0 <= page_idx < len(self._pages) and shiboken6.isValid(item):
+                    page = self._pages[page_idx]
+                    item.setPos(page.pos())
+                    item.setScale(self._zoom)
+
+        if self._annotation_items:
+            for page_idx, item in self._annotation_items:
                 if 0 <= page_idx < len(self._pages) and shiboken6.isValid(item):
                     page = self._pages[page_idx]
                     item.setPos(page.pos())
@@ -606,6 +625,80 @@ class PdfView(QGraphicsView):
             if shiboken6.isValid(item):
                 self._scene.removeItem(item)
         self._search_items.clear()
+
+    def _clear_annotation_items(self):
+        for _page_idx, item in self._annotation_items:
+            if shiboken6.isValid(item):
+                self._scene.removeItem(item)
+        self._annotation_items.clear()
+
+    def set_annotations(self, annotations: List[AnnotationRecord]):
+        self._annotations = list(annotations or [])
+        self._annotation_index = {item.id: item for item in self._annotations if item.id}
+        self._rebuild_annotation_items()
+
+    def scroll_to_page_y(self, page_idx: int, y: float):
+        self._scroll_to_destination(page_idx, y, y_is_pdf_coords=False)
+
+    def _annotation_hit_at_scene_pos(self, scene_pos: QPointF) -> Optional[str]:
+        for item in self._scene.items(scene_pos):
+            if not isinstance(item, QGraphicsRectItem):
+                continue
+            ann_id = item.data(0)
+            if ann_id:
+                return str(ann_id)
+        return None
+
+    def _rebuild_annotation_items(self):
+        self._clear_annotation_items()
+        if not self._annotations or not self._pages:
+            return
+
+        for ann in self._annotations:
+            if not (0 <= ann.page < len(self._pages)):
+                continue
+            x, y, w, h = ann.rect
+            base_rect = QRectF(float(x), float(y), max(0.0, float(w)), max(0.0, float(h)))
+            if base_rect.width() <= 0 and base_rect.height() <= 0:
+                continue
+
+            page = self._pages[ann.page]
+            color = QColor(ann.color or "#f7c948")
+            opacity = max(0.0, min(1.0, ann.opacity))
+
+            if ann.type == "highlight":
+                item = QGraphicsRectItem(base_rect)
+                pen = QPen(QColor(color.red(), color.green(), color.blue(), 180))
+                pen.setWidthF(0.6)
+                pen.setCosmetic(True)
+                item.setPen(pen)
+                item.setBrush(QBrush(QColor(color.red(), color.green(), color.blue(), int(255 * opacity))))
+            elif ann.type == "underline":
+                line_h = max(1.2, min(3.2, base_rect.height() * 0.12))
+                line_rect = QRectF(base_rect.x(), base_rect.bottom() - line_h, base_rect.width(), line_h)
+                item = QGraphicsRectItem(line_rect)
+                item.setPen(Qt.PenStyle.NoPen)
+                item.setBrush(QBrush(QColor(color.red(), color.green(), color.blue(), 235)))
+            else:
+                # Note icon marker anchored near annotation rect.
+                icon_size = 12.0
+                note_rect = QRectF(base_rect.x(), base_rect.y(), icon_size, icon_size)
+                item = QGraphicsRectItem(note_rect)
+                pen = QPen(QColor(250, 250, 250, 220))
+                pen.setWidthF(0.8)
+                pen.setCosmetic(True)
+                item.setPen(pen)
+                item.setBrush(QBrush(QColor(color.red(), color.green(), color.blue(), 230)))
+                if ann.contents:
+                    item.setToolTip(ann.contents)
+
+            item.setData(0, ann.id)
+            item.setData(1, ann.type)
+            item.setPos(page.pos())
+            item.setScale(self._zoom)
+            item.setZValue(880)
+            self._scene.addItem(item)
+            self._annotation_items.append((ann.page, item))
 
     def _rebuild_search_highlights(self):
         self._clear_search_items()
@@ -1045,6 +1138,12 @@ class PdfView(QGraphicsView):
         self._clear_link_press()
         scene_pos = self.mapToScene(e.position().toPoint())
         self._update_link_hover(scene_pos, e.position().toPoint())
+
+        ann_id = self._annotation_hit_at_scene_pos(scene_pos)
+        if ann_id:
+            self.annotation_clicked.emit(ann_id)
+            e.accept()
+            return
 
         if self._hover_link and self._tool in (ToolMode.HAND, ToolMode.SELECT):
             self._pressed_link = self._hover_link

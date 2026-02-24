@@ -1,5 +1,7 @@
 import fitz
-from PySide6.QtCore import QPointF, QRectF
+import time
+from PySide6.QtCore import QPointF, QRect, QRectF, Qt
+from PySide6.QtGui import QWindowStateChangeEvent
 from PySide6.QtWidgets import QApplication
 
 from neoview.ui.main_window import MainWindow
@@ -320,4 +322,164 @@ def test_restore_document_session_applies_fit_width_mode(monkeypatch):
     assert restored is True
     assert fit_calls == [True]
     assert jumps == [1]
+    win.close()
+
+
+def test_on_change_ignores_unrelated_paths(monkeypatch):
+    win = MainWindow()
+    win._current_file = "/tmp/active.pdf"
+    win._auto_reload_enabled = True
+    win._last_mtime = 1.0
+
+    starts = []
+    monkeypatch.setattr(win, "_file_mtime", lambda _path: 2.0)
+    monkeypatch.setattr(win._reload_timer, "start", lambda ms: starts.append(ms))
+
+    win._on_change("/tmp/other.pdf")
+    assert starts == []
+    win.close()
+
+
+def test_on_change_schedules_reload_for_current_file(monkeypatch):
+    win = MainWindow()
+    win._current_file = "/tmp/active.pdf"
+    win._auto_reload_enabled = True
+    win._last_mtime = 1.0
+
+    starts = []
+    monkeypatch.setattr(win, "_file_mtime", lambda _path: 2.0)
+    monkeypatch.setattr(win._reload_timer, "start", lambda ms: starts.append(ms))
+
+    win._on_change("/tmp/active.pdf")
+    assert starts == [200]
+    win.close()
+
+
+def test_do_reload_skips_when_file_not_modified(monkeypatch):
+    win = MainWindow()
+    ctx = win.current_context()
+    ctx.file_path = "/tmp/demo.pdf"
+    win._last_mtime = 10.0
+
+    monkeypatch.setattr("neoview.ui.main_window.os.path.exists", lambda _path: True)
+    monkeypatch.setattr(win, "_file_mtime", lambda _path: 10.0)
+    reload_calls = []
+    monkeypatch.setattr(win.current_view(), "reload_document", lambda: reload_calls.append(True) or True)
+
+    win._do_reload()
+    assert reload_calls == []
+    win.close()
+
+
+def test_force_reload_runs_even_when_mtime_is_unchanged(monkeypatch):
+    win = MainWindow()
+    ctx = win.current_context()
+    ctx.file_path = "/tmp/demo.pdf"
+    win._last_mtime = 10.0
+    win._auto_reload_enabled = False
+
+    monkeypatch.setattr("neoview.ui.main_window.os.path.exists", lambda _path: True)
+    monkeypatch.setattr("neoview.ui.main_window.os.path.getsize", lambda _path: 2048)
+    monkeypatch.setattr(win, "_file_mtime", lambda _path: 10.0)
+
+    reload_calls = []
+    monkeypatch.setattr(win.current_view(), "reload_document", lambda: reload_calls.append(True) or True)
+
+    win._do_reload(force=True)
+    assert reload_calls == [True]
+    assert win._last_mtime == 10.0
+    win.close()
+
+
+def test_toggle_fullscreen_enters_fullscreen(monkeypatch):
+    win = MainWindow()
+    calls = []
+
+    monkeypatch.setattr(win, "isFullScreen", lambda: False)
+    monkeypatch.setattr(win, "showFullScreen", lambda: calls.append("full"))
+
+    win._toggle_fullscreen()
+    assert calls == ["full"]
+    win.close()
+
+
+def test_toggle_fullscreen_exits_to_maximized_when_requested(monkeypatch):
+    win = MainWindow()
+    calls = []
+    win._settings.setValue("window/start_state", "maximized")
+
+    monkeypatch.setattr(win, "isFullScreen", lambda: True)
+    monkeypatch.setattr(win, "showNormal", lambda: calls.append("normal"))
+    monkeypatch.setattr(win, "showMaximized", lambda: calls.append("max"))
+
+    win._toggle_fullscreen()
+    assert calls == ["normal", "max"]
+    win.close()
+
+
+def test_enforce_maximized_geometry_reapplies_when_state_dropped(monkeypatch):
+    win = MainWindow()
+    calls = []
+
+    monkeypatch.setattr(win, "isFullScreen", lambda: False)
+    monkeypatch.setattr(win, "isMaximized", lambda: False)
+    monkeypatch.setattr(win, "_best_available_geometry", lambda: QRect(0, 0, 1600, 900))
+    monkeypatch.setattr(win, "setGeometry", lambda rect: calls.append(rect))
+
+    win._enforce_maximized_geometry()
+    assert len(calls) == 1
+    assert calls[0].width() == 1600
+    assert calls[0].height() == 900
+    win.close()
+
+
+def test_change_event_records_maximize_timestamp(monkeypatch):
+    win = MainWindow()
+    win._last_maximize_at = 0.0
+
+    monkeypatch.setattr(win, "isMaximized", lambda: True)
+    monkeypatch.setattr(win, "isFullScreen", lambda: False)
+    event = QWindowStateChangeEvent(Qt.WindowState.WindowNoState)
+    win.changeEvent(event)
+
+    assert win._last_maximize_at > 0.0
+    win.close()
+
+
+def test_change_event_schedules_fallback_after_maximize_bounce(monkeypatch):
+    win = MainWindow()
+    win._last_maximize_at = time.monotonic()
+    calls = []
+
+    monkeypatch.setattr(win, "isMaximized", lambda: False)
+    monkeypatch.setattr(win, "isFullScreen", lambda: False)
+    monkeypatch.setattr(win, "_enforce_maximized_geometry", lambda: calls.append("enforce"))
+    monkeypatch.setattr(
+        "neoview.ui.main_window.QTimer.singleShot",
+        lambda delay, cb: (calls.append(delay), cb()),
+    )
+
+    event = QWindowStateChangeEvent(Qt.WindowState.WindowMaximized)
+    win.changeEvent(event)
+
+    assert calls == [0, "enforce"]
+    win.close()
+
+
+def test_change_event_skips_fallback_when_bounce_window_is_old(monkeypatch):
+    win = MainWindow()
+    win._last_maximize_at = time.monotonic() - 2.0
+    calls = []
+
+    monkeypatch.setattr(win, "isMaximized", lambda: False)
+    monkeypatch.setattr(win, "isFullScreen", lambda: False)
+    monkeypatch.setattr(
+        "neoview.ui.main_window.QTimer.singleShot",
+        lambda delay, cb: calls.append(delay),
+    )
+
+    event = QWindowStateChangeEvent(Qt.WindowState.WindowMaximized)
+    win.changeEvent(event)
+
+    assert calls == []
     win.close()
