@@ -300,6 +300,22 @@ class MainWindow(QMainWindow):
         self._tabs.removeTab(index)
         widget.deleteLater()
 
+    def _switch_tab_relative(self, step: int):
+        count = self._tabs.count()
+        if count <= 1:
+            return
+        current = self._tabs.currentIndex()
+        if current < 0:
+            current = 0
+        target = (current + step) % count
+        self._tabs.setCurrentIndex(target)
+
+    def _switch_to_next_tab(self):
+        self._switch_tab_relative(1)
+
+    def _switch_to_previous_tab(self):
+        self._switch_tab_relative(-1)
+
     def _find_open_view(self, path: str) -> Optional[PdfView]:
         target = os.path.abspath(path)
         for idx in range(self._tabs.count()):
@@ -378,6 +394,28 @@ class MainWindow(QMainWindow):
         go_m.addAction(self._action("&Next Page", lambda: self.current_view().next_page(), "PgDown"))
         go_m.addAction(self._action("&First Page", lambda: self.current_view().first_page(), "Home"))
         go_m.addAction(self._action("&Last Page", lambda: self.current_view().last_page(), "End"))
+        go_m.addSeparator()
+        self._next_tab_action = self._action("Next Ta&b", self._switch_to_next_tab)
+        self._next_tab_action.setShortcuts(
+            [
+                QKeySequence("Ctrl+Tab"),
+                QKeySequence("Ctrl+PgDown"),
+            ]
+        )
+        self._prev_tab_action = self._action("Previous T&ab", self._switch_to_previous_tab)
+        self._prev_tab_action.setShortcuts(
+            [
+                QKeySequence("Ctrl+Shift+Tab"),
+                QKeySequence("Ctrl+PgUp"),
+            ]
+        )
+        self._next_tab_action.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut)
+        self._prev_tab_action.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut)
+        self.addAction(self._next_tab_action)
+        self.addAction(self._prev_tab_action)
+        go_m.addAction(self._next_tab_action)
+        go_m.addAction(self._prev_tab_action)
+
         self._add_bookmark_action = self._action("Add &Bookmark", self._add_bookmark, "Ctrl+D")
         go_m.addSeparator()
         go_m.addAction(self._add_bookmark_action)

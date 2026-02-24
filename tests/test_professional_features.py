@@ -112,3 +112,27 @@ def test_restore_last_active_document_only(tmp_path: Path):
     assert win2._tabs.count() == 1
     assert os.path.abspath(win2.current_context().file_path or "") == os.path.abspath(str(pdf_b))
     win2.close()
+
+
+def test_tab_switch_wraparound_actions(tmp_path: Path):
+    pdf_a = tmp_path / "tab_a.pdf"
+    pdf_b = tmp_path / "tab_b.pdf"
+    _create_pdf(pdf_a, pages=1, text_prefix="A")
+    _create_pdf(pdf_b, pages=1, text_prefix="B")
+
+    win = MainWindow()
+    win._open_file(str(pdf_a))
+    win._open_file(str(pdf_b))
+    QApplication.processEvents()
+
+    assert win._tabs.count() == 2
+    assert os.path.abspath(win.current_context().file_path or "") == os.path.abspath(str(pdf_b))
+
+    win._switch_to_next_tab()
+    QApplication.processEvents()
+    assert os.path.abspath(win.current_context().file_path or "") == os.path.abspath(str(pdf_a))
+
+    win._switch_to_previous_tab()
+    QApplication.processEvents()
+    assert os.path.abspath(win.current_context().file_path or "") == os.path.abspath(str(pdf_b))
+    win.close()
