@@ -26,11 +26,14 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path bin | Out-Null
           Copy-Item -Path dist/neoview.exe -Destination bin/neoview.exe -Force
+          New-Item -ItemType Directory -Force -Path release/bin | Out-Null
+          Copy-Item -Path bin/neoview.exe -Destination release/bin/neoview.exe -Force
+          "NeoView Windows artifact" | Out-File -FilePath release/README.txt -Encoding utf8
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: neoview-windows
-          path: bin/
+          path: release/**
       - name: Upload to GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
