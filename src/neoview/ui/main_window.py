@@ -42,7 +42,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from neoview.models.view_state import AnnotationRecord, BookmarkRecord, DocumentSidecarState, SearchMatch, TabContext
+from neoview.models.view_state import AnnotationRecord, BookmarkRecord, SearchMatch, TabContext
 from neoview.persistence.sidecar_store import clamp_sidecar_for_page_count, load_sidecar, save_sidecar
 from neoview.resources import load_app_icon
 from neoview.ui.dialogs import ExportDialog
@@ -921,7 +921,19 @@ class MainWindow(QMainWindow):
     def _restore_document_session(self, path: str) -> bool:
         if not path:
             return False
-        state = self._document_sessions.get(os.path.abspath(path))
+        abs_path = os.path.abspath(path)
+        state = self._document_sessions.get(abs_path)
+        if not state:
+            state = self._document_sessions.get(path)
+        if not state:
+            target_norm = os.path.normcase(os.path.normpath(abs_path))
+            for key, value in self._document_sessions.items():
+                if not isinstance(key, str):
+                    continue
+                key_norm = os.path.normcase(os.path.normpath(os.path.abspath(key)))
+                if key_norm == target_norm:
+                    state = value
+                    break
         if not state:
             return False
 
