@@ -34,7 +34,7 @@ Requires valid credentials in `~/.pypirc`.
 ## 5. GitHub Release
 - Create GitHub release for `vX.Y.Z`
 - Add release notes (features, fixes, known limitations)
-- Verify Windows build workflow attached `dist/neoview.exe` to the release tag
+- Verify Windows build workflow attached `bin/neoview.exe` to the release tag
 
 ## 6. Post-release Verification
 - Confirm package is visible on PyPI
