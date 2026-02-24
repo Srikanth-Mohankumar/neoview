@@ -10,7 +10,7 @@ from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QApplication
 
 from neoview.resources import load_app_icon
-from neoview.theme import DARK_STYLE
+from neoview.theme import DARK_STYLE, LIGHT_STYLE
 from neoview.ui.main_window import MainWindow, APP_NAME
 
 
@@ -21,8 +21,15 @@ def main() -> None:
 
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
-    app.setStyleSheet(DARK_STYLE)
-    app.setFont(QFont("JetBrains Mono", 10))
+    theme_mode = os.getenv("NEOVIEW_THEME", "light").strip().lower()
+    if theme_mode == "dark":
+        app.setStyleSheet(DARK_STYLE)
+        app.setFont(QFont("JetBrains Mono", 10))
+    else:
+        app.setStyleSheet(LIGHT_STYLE)
+        app.setFont(QFont("Segoe UI", 10))
+        theme_mode = "light"
+    app.setProperty("theme_mode", theme_mode)
 
     icon = load_app_icon()
     if not icon.isNull():

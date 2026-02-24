@@ -12,7 +12,16 @@ from typing import Dict, List, Optional, Tuple
 import fitz
 from PySide6.QtCore import QPoint, QPointF, QRectF, QTimer, QUrl, Signal, Qt
 from PySide6.QtGui import QBrush, QColor, QDesktopServices, QKeyEvent, QMouseEvent, QPainter, QPen, QWheelEvent
-from PySide6.QtWidgets import QGraphicsRectItem, QGraphicsScene, QGraphicsView, QLabel, QMessageBox, QStyle, QToolTip
+from PySide6.QtWidgets import (
+    QApplication,
+    QGraphicsRectItem,
+    QGraphicsScene,
+    QGraphicsView,
+    QLabel,
+    QMessageBox,
+    QStyle,
+    QToolTip,
+)
 import shiboken6
 
 from neoview.models.view_state import AnnotationRecord
@@ -55,7 +64,12 @@ class PdfView(QGraphicsView):
         self.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.setBackgroundBrush(QBrush(QColor("#141417")))
+        app = QApplication.instance()
+        theme_mode = ""
+        if app is not None:
+            theme_mode = str(app.property("theme_mode") or "").lower()
+        canvas_bg = "#141417" if theme_mode == "dark" else "#eef2f7"
+        self.setBackgroundBrush(QBrush(QColor(canvas_bg)))
         self.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
         self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.SmartViewportUpdate)
         self.verticalScrollBar().setSingleStep(36)

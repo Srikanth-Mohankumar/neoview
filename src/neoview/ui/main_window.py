@@ -10,8 +10,21 @@ from typing import Dict, List, Optional
 from uuid import uuid4
 
 import fitz
-from PySide6.QtCore import QEvent, QFileSystemWatcher, QPoint, QRect, QRectF, QSettings, QSize, Qt, QTimer
-from PySide6.QtGui import QAction, QActionGroup, QGuiApplication, QIcon, QImage, QKeySequence, QPixmap, QWindowStateChangeEvent
+from PySide6.QtCore import QEvent, QFileSystemWatcher, QPoint, QPointF, QRect, QRectF, QSettings, QSize, Qt, QTimer
+from PySide6.QtGui import (
+    QAction,
+    QActionGroup,
+    QColor,
+    QGuiApplication,
+    QIcon,
+    QImage,
+    QKeySequence,
+    QPainter,
+    QPen,
+    QPixmap,
+    QPolygonF,
+    QWindowStateChangeEvent,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -31,6 +44,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
     QStatusBar,
     QStyle,
     QTabWidget,
@@ -409,6 +423,8 @@ class MainWindow(QMainWindow):
         self._fit_page_action.setIcon(self._icon("zoom-fit-best", QStyle.StandardPixmap.SP_DesktopIcon))
         self._actual_size_action.setIcon(self._icon("zoom-original", QStyle.StandardPixmap.SP_ComputerIcon))
         self._select_action.setIcon(self._icon("cursor-arrow", QStyle.StandardPixmap.SP_ArrowRight))
+        self._hand_action.setIcon(self._hand_icon())
+        self._measure_action.setIcon(self._icon("draw-rectangle", QStyle.StandardPixmap.SP_DialogApplyButton))
         self._copy_action.setIcon(self._icon("edit-copy", QStyle.StandardPixmap.SP_FileIcon))
         self._export_action.setIcon(self._icon("document-save", QStyle.StandardPixmap.SP_DialogSaveButton))
         self._annot_highlight_action.setIcon(self._icon("format-text-highlight", QStyle.StandardPixmap.SP_DialogApplyButton))
@@ -421,6 +437,8 @@ class MainWindow(QMainWindow):
         self._fit_width_action.setToolTip("Fit width (W)")
         self._actual_size_action.setToolTip("Actual size (Ctrl+1)")
         self._select_action.setToolTip("Select tool (1)")
+        self._hand_action.setToolTip("Hand tool (2)")
+        self._measure_action.setToolTip("Measure tool (3)")
         self._copy_action.setToolTip("Copy measurements (Ctrl+C)")
         self._export_action.setToolTip("Export selection")
 
@@ -461,7 +479,35 @@ class MainWindow(QMainWindow):
         self._toolbar_select_action.setToolTip("Select tool (1)")
         self._toolbar_select_action.setCheckable(True)
         self._toolbar_select_action.triggered.connect(lambda: self._set_tool(ToolMode.SELECT))
+
+        self._toolbar_hand_action = QAction(
+            self._hand_icon(),
+            "Hand",
+            self,
+        )
+        self._toolbar_hand_action.setToolTip("Hand tool (2)")
+        self._toolbar_hand_action.setCheckable(True)
+        self._toolbar_hand_action.triggered.connect(lambda: self._set_tool(ToolMode.HAND))
+
+        self._toolbar_measure_action = QAction(
+            self._icon("draw-rectangle", QStyle.StandardPixmap.SP_DialogApplyButton),
+            "Measure",
+            self,
+        )
+        self._toolbar_measure_action.setToolTip("Measure tool (3)")
+        self._toolbar_measure_action.setCheckable(True)
+        self._toolbar_measure_action.triggered.connect(lambda: self._set_tool(ToolMode.MEASURE))
+
+        self._toolbar_tool_group = QActionGroup(self)
+        self._toolbar_tool_group.setExclusive(True)
+        self._toolbar_tool_group.addAction(self._toolbar_select_action)
+        self._toolbar_tool_group.addAction(self._toolbar_hand_action)
+        self._toolbar_tool_group.addAction(self._toolbar_measure_action)
+
         tb.addAction(self._toolbar_select_action)
+        tb.addAction(self._toolbar_hand_action)
+        tb.addAction(self._toolbar_measure_action)
+        tb.addSeparator()
 
         self._toolbar_export_action = QAction(self._icon("document-save", QStyle.StandardPixmap.SP_DialogSaveButton), "Export", self)
         self._toolbar_export_action.setToolTip("Export selection")
@@ -626,18 +672,23 @@ class MainWindow(QMainWindow):
         tool_row.setSpacing(6)
         self._panel_tool_group = QButtonGroup(self)
         self._panel_tool_group.setExclusive(True)
-        self._panel_select_btn = QPushButton("Select (1)")
-        self._panel_hand_btn = QPushButton("Hand (2)")
-        self._panel_measure_btn = QPushButton("Measure (3)")
+        self._panel_select_btn = QPushButton("Select")
+        self._panel_hand_btn = QPushButton("Hand")
+        self._panel_measure_btn = QPushButton("Measure")
         for btn, mode in (
             (self._panel_select_btn, ToolMode.SELECT),
             (self._panel_hand_btn, ToolMode.HAND),
             (self._panel_measure_btn, ToolMode.MEASURE),
         ):
             btn.setCheckable(True)
+            btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            btn.setMinimumWidth(0)
             btn.clicked.connect(lambda _checked=False, m=mode: self._set_tool(m))
             self._panel_tool_group.addButton(btn)
             tool_row.addWidget(btn)
+        self._panel_select_btn.setToolTip("Select tool (1)")
+        self._panel_hand_btn.setToolTip("Hand tool (2)")
+        self._panel_measure_btn.setToolTip("Measure tool (3)")
         m_layout.addLayout(tool_row)
 
         font_section = CollapsibleSection("Font Inspector")
@@ -1947,6 +1998,8 @@ class MainWindow(QMainWindow):
         self._hand_action.setChecked(tool == ToolMode.HAND)
         self._measure_action.setChecked(tool == ToolMode.MEASURE)
         self._toolbar_select_action.setChecked(tool == ToolMode.SELECT)
+        self._toolbar_hand_action.setChecked(tool == ToolMode.HAND)
+        self._toolbar_measure_action.setChecked(tool == ToolMode.MEASURE)
 
         self._panel_select_btn.setChecked(tool == ToolMode.SELECT)
         self._panel_hand_btn.setChecked(tool == ToolMode.HAND)
@@ -2032,11 +2085,55 @@ class MainWindow(QMainWindow):
             self._update_measurements_panel(None)
 
         self._toolbar_select_action.setChecked(view.tool == ToolMode.SELECT)
+        self._toolbar_hand_action.setChecked(view.tool == ToolMode.HAND)
+        self._toolbar_measure_action.setChecked(view.tool == ToolMode.MEASURE)
         self._panel_select_btn.setChecked(view.tool == ToolMode.SELECT)
         self._panel_hand_btn.setChecked(view.tool == ToolMode.HAND)
         self._panel_measure_btn.setChecked(view.tool == ToolMode.MEASURE)
 
     # --------------------------- Utility widgets ---------------------------
+    def _hand_icon(self) -> QIcon:
+        for name in (
+            "cursor-openhand",
+            "pan",
+            "tool-pan",
+            "input-touchpad",
+            "draw-freehand",
+        ):
+            icon = QIcon.fromTheme(name)
+            if not icon.isNull():
+                return icon
+
+        app = QApplication.instance()
+        is_dark = str(app.property("theme_mode") or "").lower() == "dark" if app else False
+        line_color = QColor("#e8e8ed") if is_dark else QColor("#1f2430")
+        fill_color = QColor("#2b3f72") if is_dark else QColor("#ffffff")
+
+        pix = QPixmap(20, 20)
+        pix.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pix)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setPen(QPen(line_color, 1.3))
+        painter.setBrush(fill_color)
+
+        painter.drawRoundedRect(7.0, 9.0, 7.0, 7.0, 1.6, 1.6)  # palm
+        painter.drawRoundedRect(7.0, 4.0, 1.4, 5.4, 0.7, 0.7)  # index
+        painter.drawRoundedRect(8.8, 3.5, 1.4, 5.8, 0.7, 0.7)  # middle
+        painter.drawRoundedRect(10.6, 4.0, 1.4, 5.4, 0.7, 0.7)  # ring
+        painter.drawRoundedRect(12.4, 4.8, 1.4, 4.6, 0.7, 0.7)  # pinky
+
+        thumb = QPolygonF(
+            [
+                QPointF(7.0, 10.2),
+                QPointF(4.4, 9.0),
+                QPointF(3.8, 11.7),
+                QPointF(6.6, 12.8),
+            ]
+        )
+        painter.drawPolygon(thumb)
+        painter.end()
+        return QIcon(pix)
+
     def _icon(self, name: str, fallback: QStyle.StandardPixmap) -> QIcon:
         icon = QIcon.fromTheme(name)
         if not icon.isNull():
