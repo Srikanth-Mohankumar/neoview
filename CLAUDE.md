@@ -1,52 +1,96 @@
 # CLAUDE.md
 
-Notes for automated agents working in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Repo overview
-- NeoView is a PDF viewer with measurement and text selection tools.
-- Primary code lives in `src/neoview/` (src layout).
-- Main entry point: `neoview.app:main`.
-- Legacy shim: `pdf_crop_measure.py` (kept for backward compatibility).
+## What is NeoView
 
-## Key directories
-- `src/neoview/ui/` — Qt UI widgets, viewer, dialogs.
-- `src/neoview/utils/` — small helpers (units).
-- `src/neoview/assets/` — icons and packaged assets.
-- `tests/` — pytest tests (lightweight UI logic, no heavy GUI).
+NeoView is a PySide6/PyMuPDF PDF viewer with measurement tools, text selection, annotations, bookmarks, and auto-reload for LaTeX workflows. It targets Linux and Windows.
 
-## Development setup
-- Recommended local run:
-  - `./run.sh` (auto-creates venv and launches app).
-- Manual venv:
-  - `python3 -m venv .venv`
-  - `. .venv/bin/activate`
-  - `python -m pip install -e .[dev]`
+## Common commands
 
-## Tests
-- Run: `.venv/bin/python -m pytest`
-- Tests are minimal and should remain fast.
+```bash
+# Run the app (auto-creates venv)
+./run.sh
 
-## Packaging
-- `pyproject.toml` is canonical metadata.
-- `setup.py` exists for editable installs on older tooling.
-- `publish.sh` builds, checks, and uploads to PyPI using `~/.pypirc`.
-- Version is in `pyproject.toml`; PyPI does not allow re-upload of the same version.
+# Manual setup
+python3 -m venv .venv && . .venv/bin/activate && pip install -e .[dev]
 
-## Windows executable
-- PyInstaller spec: `neoview.spec`.
-- CI build workflow: `.github/workflows/windows-build.yml` builds `dist/neoview.exe` on Windows and attaches to GitHub Releases for tags.
-- Building `.exe` should be done on Windows (or via GitHub Actions).
+# Run all tests
+.venv/bin/python -m pytest
 
-## UI notes
-- Theme is light (`src/neoview/theme.py`).
-- Status bar includes a subtle credit label.
-- Docks: Search, Outline, Thumbnails, Page Info.
-- Avoid heavy UI blocking calls on large PDFs.
+# Run a single test
+.venv/bin/python -m pytest tests/test_units.py::test_pt_to_mm
 
-## Quality/compatibility
-- Linux and Windows are supported in docs; ensure changes remain cross-platform.
-- Avoid Linux-only paths in core logic.
+# Lint
+.venv/bin/ruff check .
 
-## Style guidance
-- Keep changes modular; prefer adding new UI elements in `main_window.py` and view logic in `pdf_view.py`.
-- Maintain ASCII-only edits unless existing file contains Unicode.
+# Build distributions
+.venv/bin/python -m build --sdist --wheel
+
+# Verify build metadata
+.venv/bin/python -m twine check dist/*
+```
+
+## Architecture
+
+### Entry point and bootstrap
+
+`app.py:main()` creates QApplication, applies theme (light/dark via `NEOVIEW_THEME` env var), loads the app icon, and opens `MainWindow` with an optional PDF path from argv.
+
+### Core widget hierarchy
+
+```
+MainWindow (main_window.py ~2200 lines)
+ └─ QTabWidget (multi-tab support)
+     └─ PdfView (pdf_view.py ~1450 lines) — one per tab
+         └─ QGraphicsScene
+             ├─ PageItem (page_item.py) — one per PDF page, renders via PyMuPDF at 2x
+             ├─ SelectionRect (selection.py) — measurement rectangle with drag handles
+             └─ QGraphicsRectItems — search highlights, annotations, text selection, link hovers
+```
+
+`MainWindow` orchestrates menus, toolbar, status bar, and four dock panels (Search, Outline, Thumbnails, Page Info). `PdfView` handles all rendering, input, zoom, and tool modes (Select/Hand/Measure). `PageItem` manages per-page pixmap rendering with an LRU cache (96 items).
+
+### Signal/slot communication
+
+PdfView emits signals (`selection_changed`, `zoom_changed`, `page_changed`, `text_info_changed`, `text_selected`, `annotation_clicked`, `document_loaded`) that MainWindow connects to `_on_view_*` handler methods. This is the primary communication pattern — PdfView never references MainWindow directly.
+
+### Data model and persistence
+
+- `models/view_state.py` — dataclasses: `TabContext` (per-tab state), `AnnotationRecord`, `BookmarkRecord`, `DocumentSidecarState`, `SearchMatch`
+- `persistence/sidecar_store.py` — reads/writes `{pdf_path}.neoview.json` sidecar files for annotations and bookmarks. Handles corrupt files by renaming to `.broken.*`.
+- `QSettings` stores window geometry, recent files, session state, and per-document view state.
+- Sidecar saves are debounced via QTimer to avoid rapid I/O.
+
+### Theme
+
+`theme.py` defines `LIGHT_STYLE` and `DARK_STYLE` Qt stylesheets. Light uses Segoe UI; dark uses JetBrains Mono.
+
+## Where to add things
+
+- **New UI elements** (menus, toolbar buttons, docks): `main_window.py`
+- **Viewer behavior** (input handling, rendering, tool modes): `pdf_view.py`
+- **New data models**: `models/view_state.py`
+- **New persistence**: `persistence/sidecar_store.py`
+- **Unit conversions / helpers**: `utils/units.py`
+
+## Testing patterns
+
+- Tests use a session-scoped `_qt_app` fixture and autouse `_isolated_qsettings` for isolation (see `tests/conftest.py`).
+- Integration tests create temporary PDFs via `fitz.open()` and use `QApplication.processEvents()` to flush the Qt event loop.
+- External calls (QDesktopServices, dialogs) are mocked via `monkeypatch`.
+- Tests should remain fast — no heavy GUI rendering.
+
+## Packaging and CI
+
+- `pyproject.toml` is the canonical metadata source. Version lives there.
+- `setup.py` exists only for older editable-install tooling.
+- CI (`.github/workflows/ci.yml`): lint (ruff) + test (pytest) + build on Ubuntu (3.10/3.11/3.12) and Windows (3.10).
+- Windows .exe: built via PyInstaller (`neoview.spec`) in `.github/workflows/windows-build.yml`, attached to GitHub Releases on tag push.
+- PyPI publishing: `./publish.sh` (requires `~/.pypirc`). PyPI does not allow re-upload of the same version.
+
+## Cross-platform notes
+
+- Avoid Linux-only paths or APIs in core logic.
+- `pdf_crop_measure.py` is a legacy entry-point shim — keep but don't extend.
+- Maintain ASCII-only edits unless the existing file already contains Unicode.
