@@ -6,7 +6,7 @@ from collections import deque
 import json
 import os
 import time
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from uuid import uuid4
 
 import fitz
@@ -121,7 +121,7 @@ class MainWindow(QMainWindow):
         self.resize(1280, 900)
 
         self._current_file: Optional[str] = None
-        self._last_mtime: float = 0
+        self._last_file_sig: Optional[Tuple[int, int, int]] = None
         self._settings = QSettings("NeoView", "NeoView")
         self._recent_files: List[str] = self._settings.value("recent_files", [], type=list)
         self._recent_menu: Optional[object] = None
@@ -1906,20 +1906,26 @@ class MainWindow(QMainWindow):
     def _update_mtime(self):
         try:
             if self._current_file and os.path.exists(self._current_file):
-                self._last_mtime = os.path.getmtime(self._current_file)
+                self._last_file_sig = self._file_signature(self._current_file)
         except OSError:
             pass
+
+    def _normalize_path(self, path: str) -> str:
+        return os.path.normcase(os.path.realpath(os.path.abspath(path)))
 
     def _on_change(self, _path: str):
         if not self._auto_reload_enabled:
             return
         if not self._current_file:
             return
-        changed = os.path.abspath(_path) if _path else ""
-        current_file = os.path.abspath(self._current_file)
-        current_dir = os.path.dirname(current_file)
-        if changed and changed not in {current_file, current_dir}:
-            return
+
+        current_file = self._normalize_path(self._current_file)
+        current_dir = self._normalize_path(os.path.dirname(self._current_file))
+        changed = self._normalize_path(_path) if _path else ""
+        if changed and changed != current_file and changed != current_dir:
+            if not changed.startswith(current_dir + os.sep):
+                return
+
         self._schedule_reload_if_modified()
 
     def _poll_check(self):
@@ -1927,19 +1933,20 @@ class MainWindow(QMainWindow):
             return
         self._schedule_reload_if_modified()
 
-    def _file_mtime(self, path: Optional[str]) -> Optional[float]:
+    def _file_signature(self, path: Optional[str]) -> Optional[Tuple[int, int, int]]:
         if not path or not os.path.exists(path):
             return None
         try:
-            return os.path.getmtime(path)
+            stat = os.stat(path)
+            return (int(stat.st_mtime_ns), int(stat.st_size), int(getattr(stat, "st_ino", 0)))
         except OSError:
             return None
 
     def _schedule_reload_if_modified(self):
-        mtime = self._file_mtime(self._current_file)
-        if mtime is None:
+        current_sig = self._file_signature(self._current_file)
+        if current_sig is None:
             return
-        if mtime != self._last_mtime:
+        if current_sig != self._last_file_sig:
             self._reload_timer.start(200)
 
     def _do_reload(self, force: bool = False):
@@ -1950,10 +1957,10 @@ class MainWindow(QMainWindow):
         if not ctx.file_path or not os.path.exists(ctx.file_path):
             return
 
-        current_mtime = self._file_mtime(ctx.file_path)
-        if current_mtime is None:
+        current_sig = self._file_signature(ctx.file_path)
+        if current_sig is None:
             return
-        if not force and current_mtime == self._last_mtime:
+        if not force and current_sig == self._last_file_sig:
             return
 
         try:
@@ -1974,7 +1981,7 @@ class MainWindow(QMainWindow):
         if reloaded:
             ctx.sidecar_state = clamp_sidecar_for_page_count(ctx.sidecar_state, view.page_count)
             view.set_annotations(ctx.sidecar_state.annotations)
-            self._last_mtime = current_mtime
+            self._last_file_sig = current_sig
             self._status.showMessage("Reloaded", 1000)
             self._populate_annotation_list()
             self._populate_outline()

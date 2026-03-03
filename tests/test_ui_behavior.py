@@ -329,13 +329,13 @@ def test_on_change_ignores_unrelated_paths(monkeypatch):
     win = MainWindow()
     win._current_file = "/tmp/active.pdf"
     win._auto_reload_enabled = True
-    win._last_mtime = 1.0
+    win._last_file_sig = (1, 100, 1)
 
     starts = []
-    monkeypatch.setattr(win, "_file_mtime", lambda _path: 2.0)
+    monkeypatch.setattr(win, "_file_signature", lambda _path: (2, 100, 1))
     monkeypatch.setattr(win._reload_timer, "start", lambda ms: starts.append(ms))
 
-    win._on_change("/tmp/other.pdf")
+    win._on_change("/var/other.pdf")
     assert starts == []
     win.close()
 
@@ -344,10 +344,10 @@ def test_on_change_schedules_reload_for_current_file(monkeypatch):
     win = MainWindow()
     win._current_file = "/tmp/active.pdf"
     win._auto_reload_enabled = True
-    win._last_mtime = 1.0
+    win._last_file_sig = (1, 100, 1)
 
     starts = []
-    monkeypatch.setattr(win, "_file_mtime", lambda _path: 2.0)
+    monkeypatch.setattr(win, "_file_signature", lambda _path: (2, 100, 1))
     monkeypatch.setattr(win._reload_timer, "start", lambda ms: starts.append(ms))
 
     win._on_change("/tmp/active.pdf")
@@ -359,10 +359,10 @@ def test_do_reload_skips_when_file_not_modified(monkeypatch):
     win = MainWindow()
     ctx = win.current_context()
     ctx.file_path = "/tmp/demo.pdf"
-    win._last_mtime = 10.0
+    win._last_file_sig = (10, 2048, 1)
 
     monkeypatch.setattr("neoview.ui.main_window.os.path.exists", lambda _path: True)
-    monkeypatch.setattr(win, "_file_mtime", lambda _path: 10.0)
+    monkeypatch.setattr(win, "_file_signature", lambda _path: (10, 2048, 1))
     reload_calls = []
     monkeypatch.setattr(win.current_view(), "reload_document", lambda: reload_calls.append(True) or True)
 
@@ -375,19 +375,19 @@ def test_force_reload_runs_even_when_mtime_is_unchanged(monkeypatch):
     win = MainWindow()
     ctx = win.current_context()
     ctx.file_path = "/tmp/demo.pdf"
-    win._last_mtime = 10.0
+    win._last_file_sig = (10, 2048, 1)
     win._auto_reload_enabled = False
 
     monkeypatch.setattr("neoview.ui.main_window.os.path.exists", lambda _path: True)
     monkeypatch.setattr("neoview.ui.main_window.os.path.getsize", lambda _path: 2048)
-    monkeypatch.setattr(win, "_file_mtime", lambda _path: 10.0)
+    monkeypatch.setattr(win, "_file_signature", lambda _path: (10, 2048, 1))
 
     reload_calls = []
     monkeypatch.setattr(win.current_view(), "reload_document", lambda: reload_calls.append(True) or True)
 
     win._do_reload(force=True)
     assert reload_calls == [True]
-    assert win._last_mtime == 10.0
+    assert win._last_file_sig == (10, 2048, 1)
     win.close()
 
 
