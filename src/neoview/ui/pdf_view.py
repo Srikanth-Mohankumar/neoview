@@ -50,6 +50,7 @@ class PdfView(QGraphicsView):
     text_selected = Signal(str)
     annotation_clicked = Signal(str)
     document_loaded = Signal()
+    performance_mode_toggled = Signal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -116,6 +117,7 @@ class PdfView(QGraphicsView):
         self._panning = False
         self._pan_start: Optional[QPointF] = None
 
+        self._performance_mode = False
         self._pinch_start_zoom: float = 1.0
         self._rotation: int = 0
 
@@ -511,7 +513,8 @@ class PdfView(QGraphicsView):
         self._update_measure_badge()
         self._hide_link_badge()
         if self._visible_page_needs_rerender():
-            self._rerender_timer.start(40)
+            if not self._performance_mode:
+                self._rerender_timer.start(40)
 
     def set_zoom(self, z: float, immediate: bool = False, zoom_mode: str = ZOOM_MODE_CUSTOM):
         z = max(0.25, min(z, 5.0))
@@ -535,10 +538,23 @@ class PdfView(QGraphicsView):
                 self._rerender_timer.stop()
                 self._rerender_pages()
             else:
-                self._rerender_timer.start(55)
+                if not self._performance_mode:
+                    self._rerender_timer.start(55)
         else:
             self._render_all_pages()
         self.zoom_changed.emit(z)
+
+    def set_performance_mode(self, enabled: bool) -> None:
+        """Enable/disable performance mode. When enabled, defers expensive zoom/scroll rerenders."""
+        self._performance_mode = enabled
+        self.performance_mode_toggled.emit(enabled)
+        if not enabled:
+            if self._visible_page_needs_rerender():
+                self._rerender_timer.start(40)
+
+    def is_performance_mode(self) -> bool:
+        """Return True if performance mode is currently enabled."""
+        return self._performance_mode
 
     def rotate_by(self, delta_degrees: int):
         self.set_rotation(self._rotation + delta_degrees)

@@ -272,6 +272,11 @@ class MainWindow(QMainWindow):
         self._populate_annotation_list()
         self._update_status()
 
+        if hasattr(self, "_perf_action"):
+            if isinstance(view, PdfView):
+                view.set_performance_mode(self._perf_action.isChecked())
+            self._update_perf_status()
+
     def _close_tab_index(self, index: int):
         widget = self._tabs.widget(index)
         if not isinstance(widget, PdfView):
@@ -388,6 +393,12 @@ class MainWindow(QMainWindow):
         self._fullscreen_action = self._action("&Toggle Full Screen", self._toggle_fullscreen, "F11")
         view_m.addAction(self._fullscreen_action)
         view_m.addAction(self._action("Reset Window &Layout", self._reset_window_layout))
+        view_m.addSeparator()
+        self._perf_action = QAction("Performance Mode", self)
+        self._perf_action.setCheckable(True)
+        self._perf_action.setStatusTip("Pause rendering during zoom/scroll — reduces CPU on large PDFs")
+        self._perf_action.triggered.connect(self._on_performance_mode_toggled)
+        view_m.addAction(self._perf_action)
 
         go_m = self.menuBar().addMenu("&Go")
         go_m.addAction(self._action("&Previous Page", lambda: self.current_view().prev_page(), "PgUp"))
@@ -576,6 +587,8 @@ class MainWindow(QMainWindow):
         self._status.addWidget(self._status_dot)
         self._status.addWidget(self._file_lbl)
         self._status.addWidget(self._page_count_lbl)
+        self._perf_label = QLabel("")
+        self._status.addPermanentWidget(self._perf_label)
         self._status.addPermanentWidget(self._zoom_lbl)
 
     def _setup_docks(self):
@@ -2135,6 +2148,20 @@ class MainWindow(QMainWindow):
         self._panel_select_btn.setChecked(view.tool == ToolMode.SELECT)
         self._panel_hand_btn.setChecked(view.tool == ToolMode.HAND)
         self._panel_measure_btn.setChecked(view.tool == ToolMode.MEASURE)
+
+    # ----------------------- Performance mode helpers -----------------------
+    def _on_performance_mode_toggled(self, checked: bool) -> None:
+        view = self.current_view()
+        if isinstance(view, PdfView):
+            view.set_performance_mode(checked)
+        self._update_perf_status()
+
+    def _update_perf_status(self) -> None:
+        view = self.current_view()
+        if isinstance(view, PdfView) and view.is_performance_mode():
+            self._perf_label.setText("Perf Mode ON")
+        else:
+            self._perf_label.setText("")
 
     # --------------------------- Utility widgets ---------------------------
     def _hand_icon(self) -> QIcon:
