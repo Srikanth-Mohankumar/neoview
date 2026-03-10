@@ -3,10 +3,24 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 
 RectTuple = Tuple[float, float, float, float]
+
+# All supported annotation types.
+ANNOTATION_TYPES = {
+    "highlight",
+    "underline",
+    "strikethrough",
+    "note",
+    "text-box",
+    "rectangle",
+    "ellipse",
+    "freehand",
+    "line",
+    "arrow",
+}
 
 
 @dataclass
@@ -22,6 +36,16 @@ class AnnotationRecord:
     contents: str = ""
     created_at: str = ""
     updated_at: str = ""
+    # Shape stroke/border colour (empty = same as color)
+    border_color: str = ""
+    # Stroke width in points (used for shapes, freehand, line, arrow)
+    border_width: float = 2.0
+    # Font size for text-box annotations
+    font_size: float = 12.0
+    # Freehand path: list of [x, y] pairs in PDF coordinates
+    points: List[List[float]] = field(default_factory=list)
+    # Arbitrary extra data (reserved for future use)
+    extra: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -63,3 +87,5 @@ class TabContext:
     search_results: List[SearchMatch] = field(default_factory=list)
     sidecar_state: DocumentSidecarState = field(default_factory=DocumentSidecarState)
     sidecar_error: str = ""
+    # Annotations read from the PDF itself (e.g. made in Acrobat). Read-only; not persisted to sidecar.
+    native_annotations: List[AnnotationRecord] = field(default_factory=list)

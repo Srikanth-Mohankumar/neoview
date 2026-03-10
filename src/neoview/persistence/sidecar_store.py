@@ -7,13 +7,22 @@ import logging
 import os
 import tempfile
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
-from neoview.models.view_state import AnnotationRecord, BookmarkRecord, DocumentSidecarState
+from neoview.models.view_state import (
+    ANNOTATION_TYPES,
+    AnnotationRecord,
+    BookmarkRecord,
+    DocumentSidecarState,
+)
 
 
+<<<<<<< claude/fix-pdf-annotations-nhxrE
+SCHEMA_VERSION = 2
+=======
 SCHEMA_VERSION = 1
 LOG = logging.getLogger(__name__)
+>>>>>>> main
 
 
 def _utc_now_iso() -> str:
@@ -39,6 +48,20 @@ def _coerce_rect(value: Any) -> Optional[tuple[float, float, float, float]]:
     return (x, y, w, h)
 
 
+def _coerce_points(value: Any) -> List[List[float]]:
+    """Coerce a raw value to a list of [x, y] float pairs."""
+    if not isinstance(value, list):
+        return []
+    result = []
+    for pt in value:
+        if isinstance(pt, (list, tuple)) and len(pt) >= 2:
+            try:
+                result.append([float(pt[0]), float(pt[1])])
+            except (TypeError, ValueError):
+                pass
+    return result
+
+
 def _annotation_from_dict(item: Dict[str, Any]) -> Optional[AnnotationRecord]:
     if not isinstance(item, dict):
         return None
@@ -53,7 +76,7 @@ def _annotation_from_dict(item: Dict[str, Any]) -> Optional[AnnotationRecord]:
         return None
 
     kind = str(item.get("type", "")).strip().lower()
-    if kind not in {"highlight", "underline", "note"}:
+    if kind not in ANNOTATION_TYPES:
         return None
 
     aid = str(item.get("id", "")).strip()
@@ -66,6 +89,24 @@ def _annotation_from_dict(item: Dict[str, Any]) -> Optional[AnnotationRecord]:
     except (TypeError, ValueError):
         opacity = 0.25
     opacity = max(0.0, min(1.0, opacity))
+
+    try:
+        border_width = float(item.get("border_width", 2.0))
+    except (TypeError, ValueError):
+        border_width = 2.0
+    border_width = max(0.5, min(20.0, border_width))
+
+    try:
+        font_size = float(item.get("font_size", 12.0))
+    except (TypeError, ValueError):
+        font_size = 12.0
+    font_size = max(6.0, min(72.0, font_size))
+
+    border_color = str(item.get("border_color") or "").strip()
+    points = _coerce_points(item.get("points", []))
+    extra = item.get("extra", {})
+    if not isinstance(extra, dict):
+        extra = {}
 
     created = str(item.get("created_at") or _utc_now_iso())
     updated = str(item.get("updated_at") or created)
@@ -81,6 +122,11 @@ def _annotation_from_dict(item: Dict[str, Any]) -> Optional[AnnotationRecord]:
         contents=contents,
         created_at=created,
         updated_at=updated,
+        border_color=border_color,
+        border_width=border_width,
+        font_size=font_size,
+        points=points,
+        extra=extra,
     )
 
 
@@ -106,7 +152,7 @@ def _bookmark_from_dict(item: Dict[str, Any]) -> Optional[BookmarkRecord]:
 
 
 def _annotation_to_dict(record: AnnotationRecord) -> Dict[str, Any]:
-    return {
+    d: Dict[str, Any] = {
         "id": record.id,
         "type": record.type,
         "page": int(record.page),
@@ -117,6 +163,17 @@ def _annotation_to_dict(record: AnnotationRecord) -> Dict[str, Any]:
         "created_at": record.created_at or _utc_now_iso(),
         "updated_at": record.updated_at or _utc_now_iso(),
     }
+    if record.border_color:
+        d["border_color"] = record.border_color
+    if record.border_width != 2.0:
+        d["border_width"] = float(record.border_width)
+    if record.font_size != 12.0:
+        d["font_size"] = float(record.font_size)
+    if record.points:
+        d["points"] = [[float(p[0]), float(p[1])] for p in record.points]
+    if record.extra:
+        d["extra"] = record.extra
+    return d
 
 
 def _bookmark_to_dict(record: BookmarkRecord) -> Dict[str, Any]:
