@@ -87,3 +87,5 @@ class TabContext:
     search_results: List[SearchMatch] = field(default_factory=list)
     sidecar_state: DocumentSidecarState = field(default_factory=DocumentSidecarState)
     sidecar_error: str = ""
+    # Annotations read from the PDF itself (e.g. made in Acrobat). Read-only; not persisted to sidecar.
+    native_annotations: List[AnnotationRecord] = field(default_factory=list)

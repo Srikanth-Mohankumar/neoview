@@ -1174,7 +1174,8 @@ class MainWindow(QMainWindow):
 
         loaded_state = load_sidecar(norm_path)
         target_ctx.sidecar_state = clamp_sidecar_for_page_count(loaded_state, target.page_count)
-        target.set_annotations(target_ctx.sidecar_state.annotations)
+        self._load_native_pdf_annotations(target, target_ctx)
+        target.set_annotations(target_ctx.sidecar_state.annotations + target_ctx.native_annotations)
 
         self._tabs.setCurrentWidget(target)
         self._set_tab_title(target)
@@ -1615,14 +1616,36 @@ class MainWindow(QMainWindow):
             item.setData(Qt.ItemDataRole.UserRole, ann.id)
             self._annotation_list.addItem(item)
 
-        view.set_annotations(ctx.sidecar_state.annotations)
+        for ann in ctx.native_annotations:
+            if filt != "all" and ann.type != filt:
+                continue
+            preview = ann.contents.strip() if ann.contents else ""
+            if not preview:
+                preview = f"{ann.rect[2]:.0f}x{ann.rect[3]:.0f}"
+            prefix = ann.type[:1].upper()
+            item = QListWidgetItem(f"[{prefix}] p{ann.page + 1}: {preview[:50]} (PDF)")
+            item.setData(Qt.ItemDataRole.UserRole, ann.id)
+            tip = f"Native PDF annotation ({ann.type}) — read-only"
+            if ann.contents:
+                tip += f"\n{ann.contents}"
+            item.setToolTip(tip)
+            self._annotation_list.addItem(item)
+
+        all_annotations = ctx.sidecar_state.annotations + ctx.native_annotations
+        view.set_annotations(all_annotations)
 
     def _find_annotation_by_id(self, ann_id: str) -> Optional[AnnotationRecord]:
         ctx = self.current_context()
         for ann in ctx.sidecar_state.annotations:
             if ann.id == ann_id:
                 return ann
+        for ann in ctx.native_annotations:
+            if ann.id == ann_id:
+                return ann
         return None
+
+    def _is_native_annotation_id(self, ann_id: str) -> bool:
+        return ann_id.startswith("native-")
 
     def _selected_annotation_id(self) -> Optional[str]:
         item = self._annotation_list.currentItem()
@@ -1654,6 +1677,9 @@ class MainWindow(QMainWindow):
     def _edit_selected_annotation(self):
         ann_id = self._selected_annotation_id()
         if not ann_id:
+            return
+        if self._is_native_annotation_id(ann_id):
+            self._status.showMessage("Native PDF annotations are read-only", 1500)
             return
         ann = self._find_annotation_by_id(ann_id)
         if ann is None:
@@ -1752,6 +1778,9 @@ class MainWindow(QMainWindow):
     def _delete_selected_annotation(self):
         ann_id = self._selected_annotation_id()
         if not ann_id:
+            return
+        if self._is_native_annotation_id(ann_id):
+            self._status.showMessage("Native PDF annotations cannot be deleted here", 1500)
             return
 
         ctx = self.current_context()
@@ -1924,7 +1953,7 @@ class MainWindow(QMainWindow):
                 elif t == "arrow":
                     a = page.add_line_annot(_fitz.Point(x, y), _fitz.Point(x + w, y + h))
                 elif t == "freehand" and ann_rec.points:
-                    pts = [_fitz.Point(p[0], p[1]) for p in ann_rec.points]
+                    pts = [(p[0], p[1]) for p in ann_rec.points]
                     a = page.add_ink_annot([pts])
                 else:
                     continue
@@ -2140,11 +2169,72 @@ class MainWindow(QMainWindow):
         else:
             self._status.showMessage("No text in selection", 1500)
 
+    def _load_native_pdf_annotations(self, view: PdfView, ctx) -> None:
+        """Read annotations embedded in the PDF (e.g. created by Acrobat) and store as native_annotations."""
+        import fitz as _fitz
+
+        _FITZ_TYPE_MAP = {
+            _fitz.PDF_ANNOT_HIGHLIGHT: "highlight",
+            _fitz.PDF_ANNOT_UNDERLINE: "underline",
+            _fitz.PDF_ANNOT_SQUIGGLY: "underline",
+            _fitz.PDF_ANNOT_STRIKE_OUT: "strikethrough",
+            _fitz.PDF_ANNOT_TEXT: "note",
+            _fitz.PDF_ANNOT_FREE_TEXT: "text-box",
+            _fitz.PDF_ANNOT_SQUARE: "rectangle",
+            _fitz.PDF_ANNOT_CIRCLE: "ellipse",
+            _fitz.PDF_ANNOT_LINE: "line",
+            _fitz.PDF_ANNOT_INK: "freehand",
+            _fitz.PDF_ANNOT_POLYGON: "rectangle",
+            _fitz.PDF_ANNOT_POLY_LINE: "line",
+            _fitz.PDF_ANNOT_STAMP: "rectangle",
+        }
+
+        native = []
+        doc = view.document
+        if not doc:
+            ctx.native_annotations = native
+            return
+
+        try:
+            for page_idx in range(doc.page_count):
+                page = doc[page_idx]
+                for ann in page.annots():
+                    ann_type = ann.type[0]
+                    mapped = _FITZ_TYPE_MAP.get(ann_type)
+                    if mapped is None:
+                        continue
+                    r = ann.rect
+                    color_tuple = ann.colors.get("stroke") or ann.colors.get("fill") or (1.0, 0.8, 0.0)
+                    hex_color = "#{:02x}{:02x}{:02x}".format(
+                        int(color_tuple[0] * 255),
+                        int(color_tuple[1] * 255),
+                        int(color_tuple[2] * 255),
+                    )
+                    info = ann.info
+                    contents = info.get("content", "") or ""
+                    native.append(
+                        AnnotationRecord(
+                            id=f"native-{page_idx}-{len(native)}",
+                            type=mapped,
+                            page=page_idx,
+                            rect=(r.x0, r.y0, r.width, r.height),
+                            color=hex_color,
+                            opacity=ann.opacity if ann.opacity is not None else 0.4,
+                            contents=contents,
+                        )
+                    )
+        except Exception:
+            pass
+
+        ctx.native_annotations = native
+
     def _on_view_document_loaded(self, view: PdfView):
         ctx = self._context_for_view(view)
         if ctx.file_path:
             ctx.sidecar_state = clamp_sidecar_for_page_count(ctx.sidecar_state, view.page_count)
-            view.set_annotations(ctx.sidecar_state.annotations)
+            self._load_native_pdf_annotations(view, ctx)
+            all_annotations = ctx.sidecar_state.annotations + ctx.native_annotations
+            view.set_annotations(all_annotations)
         if self._is_current_view(view):
             self._refresh_document_info()
             self._populate_outline()
@@ -2242,7 +2332,8 @@ class MainWindow(QMainWindow):
 
         if reloaded:
             ctx.sidecar_state = clamp_sidecar_for_page_count(ctx.sidecar_state, view.page_count)
-            view.set_annotations(ctx.sidecar_state.annotations)
+            self._load_native_pdf_annotations(view, ctx)
+            view.set_annotations(ctx.sidecar_state.annotations + ctx.native_annotations)
             self._last_file_sig = current_sig
             self._status.showMessage("Reloaded", 1000)
             self._populate_annotation_list()
