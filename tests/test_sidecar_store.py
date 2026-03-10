@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 
 from neoview.models.view_state import AnnotationRecord, BookmarkRecord, DocumentSidecarState
@@ -74,3 +75,20 @@ def test_clamp_sidecar_for_page_count():
     clamped = clamp_sidecar_for_page_count(state, 3)
     assert [a.id for a in clamped.annotations] == ["a1"]
     assert [b.id for b in clamped.bookmarks] == ["b1"]
+
+
+def test_save_sidecar_write_error_is_fail_soft(tmp_path: Path, monkeypatch):
+    pdf_path = tmp_path / "sample.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4")
+
+    state = DocumentSidecarState(
+        annotations=[AnnotationRecord(id="ann-1", type="highlight", page=0, rect=(0, 0, 1, 1))]
+    )
+
+    def broken_replace(_src, _dst):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(os, "replace", broken_replace)
+
+    # Should not raise on write/replace failure.
+    save_sidecar(str(pdf_path), state)

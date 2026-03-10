@@ -10,4 +10,7 @@ def pt_to_pica(pt: float) -> float:
 
 
 def format_size(w: float, h: float) -> str:
-    return f"W: {w:.1f}pt ({pt_to_mm(w):.2f}mm)  H: {h:.1f}pt ({pt_to_mm(h):.2f}mm)"
+    return (
+        f"W: {w:.1f}pt ({pt_to_pica(w):.2f}pc, {pt_to_mm(w):.2f}mm)  "
+        f"H: {h:.1f}pt ({pt_to_pica(h):.2f}pc, {pt_to_mm(h):.2f}mm)"
+    )
