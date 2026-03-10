@@ -94,6 +94,50 @@ def test_add_highlight_annotation_updates_state(tmp_path: Path):
     win.close()
 
 
+
+
+def test_add_strikeout_annotation_updates_state(tmp_path: Path):
+    pdf = tmp_path / "annot_strikeout.pdf"
+    _create_pdf(pdf, pages=1)
+
+    win = MainWindow()
+    win._open_file(str(pdf))
+    QApplication.processEvents()
+
+    view = win.current_view()
+    view._create_selection_on_page(0, QRectF(40, 50, 100, 40))
+    win._add_strikeout()
+
+    ctx = win.current_context()
+    assert len(ctx.sidecar_state.annotations) == 1
+    assert ctx.sidecar_state.annotations[0].type == "strikeout"
+    assert len(view._annotations) == 1
+    win.close()
+
+
+def test_edit_non_note_annotation_comment(tmp_path: Path, monkeypatch):
+    pdf = tmp_path / "annot_comment.pdf"
+    _create_pdf(pdf, pages=1)
+
+    win = MainWindow()
+    win._open_file(str(pdf))
+    QApplication.processEvents()
+
+    view = win.current_view()
+    view._create_selection_on_page(0, QRectF(40, 50, 100, 40))
+    win._add_highlight()
+    QApplication.processEvents()
+
+    win._annotation_list.setCurrentRow(0)
+    monkeypatch.setattr(
+        "neoview.ui.main_window.QInputDialog.getMultiLineText",
+        lambda *_args, **_kwargs: ("reviewed text", True),
+    )
+    win._edit_selected_annotation()
+
+    assert win.current_context().sidecar_state.annotations[0].contents == "reviewed text"
+    win.close()
+
 def test_restore_last_active_document_only(tmp_path: Path):
     pdf_a = tmp_path / "a.pdf"
     pdf_b = tmp_path / "b.pdf"

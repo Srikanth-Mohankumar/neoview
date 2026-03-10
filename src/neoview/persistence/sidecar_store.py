@@ -12,6 +12,7 @@ from neoview.models.view_state import AnnotationRecord, BookmarkRecord, Document
 
 
 SCHEMA_VERSION = 1
+SUPPORTED_ANNOTATION_TYPES = {"highlight", "underline", "note", "strikeout", "squiggly"}
 
 
 def _utc_now_iso() -> str:
@@ -51,7 +52,7 @@ def _annotation_from_dict(item: Dict[str, Any]) -> Optional[AnnotationRecord]:
         return None
 
     kind = str(item.get("type", "")).strip().lower()
-    if kind not in {"highlight", "underline", "note"}:
+    if kind not in SUPPORTED_ANNOTATION_TYPES:
         return None
 
     aid = str(item.get("id", "")).strip()

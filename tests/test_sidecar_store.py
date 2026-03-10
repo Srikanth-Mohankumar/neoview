@@ -60,6 +60,25 @@ def test_sidecar_corrupt_file_falls_back_and_renames(tmp_path: Path):
     assert broken_files, "Corrupt sidecar should be renamed with .broken suffix."
 
 
+
+
+def test_sidecar_load_accepts_extended_annotation_types(tmp_path: Path):
+    pdf_path = tmp_path / "extended.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4")
+
+    payload = {
+        "version": 1,
+        "annotations": [
+            {"id": "a1", "type": "strikeout", "page": 0, "rect": [0, 0, 10, 10]},
+            {"id": "a2", "type": "squiggly", "page": 0, "rect": [0, 0, 10, 10]},
+        ],
+        "bookmarks": [],
+    }
+    (tmp_path / "extended.pdf.neoview.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    loaded = load_sidecar(str(pdf_path))
+    assert [ann.type for ann in loaded.annotations] == ["strikeout", "squiggly"]
+
 def test_clamp_sidecar_for_page_count():
     state = DocumentSidecarState(
         annotations=[

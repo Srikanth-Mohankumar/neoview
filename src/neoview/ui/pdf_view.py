@@ -703,12 +703,22 @@ class PdfView(QGraphicsView):
                 pen.setCosmetic(True)
                 item.setPen(pen)
                 item.setBrush(QBrush(QColor(color.red(), color.green(), color.blue(), int(255 * opacity))))
-            elif ann.type == "underline":
+            elif ann.type in {"underline", "strikeout", "squiggly"}:
                 line_h = max(1.2, min(3.2, base_rect.height() * 0.12))
-                line_rect = QRectF(base_rect.x(), base_rect.bottom() - line_h, base_rect.width(), line_h)
+                if ann.type == "underline":
+                    line_y = base_rect.bottom() - line_h
+                elif ann.type == "strikeout":
+                    line_y = base_rect.y() + (base_rect.height() * 0.5) - (line_h * 0.5)
+                else:
+                    line_y = base_rect.bottom() - line_h
+                line_rect = QRectF(base_rect.x(), line_y, base_rect.width(), line_h)
                 item = QGraphicsRectItem(line_rect)
-                item.setPen(Qt.PenStyle.NoPen)
-                item.setBrush(QBrush(QColor(color.red(), color.green(), color.blue(), 235)))
+                if ann.type == "squiggly":
+                    item.setPen(Qt.PenStyle.NoPen)
+                    item.setBrush(QBrush(QColor(color.red(), color.green(), color.blue(), 165)))
+                else:
+                    item.setPen(Qt.PenStyle.NoPen)
+                    item.setBrush(QBrush(QColor(color.red(), color.green(), color.blue(), 235)))
             else:
                 # Note icon marker anchored near annotation rect.
                 icon_size = 12.0

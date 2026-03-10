@@ -455,9 +455,13 @@ class MainWindow(QMainWindow):
         self._annot_highlight_action = self._action("Add &Highlight", self._add_highlight, "Ctrl+Shift+H")
         self._annot_underline_action = self._action("Add &Underline", self._add_underline, "Ctrl+Shift+U")
         self._annot_note_action = self._action("Add &Note", self._add_note, "Ctrl+Shift+N")
+        self._annot_strikeout_action = self._action("Add &Strikeout", self._add_strikeout, "Ctrl+Shift+S")
+        self._annot_squiggly_action = self._action("Add S&quiggly", self._add_squiggly, "Ctrl+Shift+Q")
         tools_m.addAction(self._annot_highlight_action)
         tools_m.addAction(self._annot_underline_action)
         tools_m.addAction(self._annot_note_action)
+        tools_m.addAction(self._annot_strikeout_action)
+        tools_m.addAction(self._annot_squiggly_action)
 
         tools_m.addSeparator()
         tools_m.addAction(self._action("&Search Panel", self._toggle_search_dock, "Ctrl+Shift+F"))
@@ -479,6 +483,8 @@ class MainWindow(QMainWindow):
         self._annot_highlight_action.setIcon(self._icon("format-text-highlight", QStyle.StandardPixmap.SP_DialogApplyButton))
         self._annot_underline_action.setIcon(self._icon("format-text-underline", QStyle.StandardPixmap.SP_LineEditClearButton))
         self._annot_note_action.setIcon(self._icon("insert-text", QStyle.StandardPixmap.SP_MessageBoxInformation))
+        self._annot_strikeout_action.setIcon(self._icon("edit-delete", QStyle.StandardPixmap.SP_LineEditClearButton))
+        self._annot_squiggly_action.setIcon(self._icon("draw-freehand", QStyle.StandardPixmap.SP_BrowserReload))
 
         self._open_action.setToolTip("Open PDF (Ctrl+O)")
         self._zoom_out_action.setToolTip("Zoom out")
@@ -572,6 +578,8 @@ class MainWindow(QMainWindow):
         tb.addAction(self._annot_highlight_action)
         tb.addAction(self._annot_underline_action)
         tb.addAction(self._annot_note_action)
+        tb.addAction(self._annot_strikeout_action)
+        tb.addAction(self._annot_squiggly_action)
 
     def _setup_statusbar(self):
         self._status = QStatusBar()
@@ -751,7 +759,7 @@ class MainWindow(QMainWindow):
         annotation_section = CollapsibleSection("Annotations")
         a_layout = annotation_section.content_layout
         self._annotation_filter = QComboBox()
-        self._annotation_filter.addItems(["All", "Highlight", "Underline", "Note"])
+        self._annotation_filter.addItems(["All", "Highlight", "Underline", "Strikeout", "Squiggly", "Note"])
         self._annotation_filter.currentIndexChanged.connect(self._populate_annotation_list)
         self._annotation_list = QListWidget()
         self._annotation_list.itemActivated.connect(self._jump_to_annotation_item)
@@ -1611,11 +1619,11 @@ class MainWindow(QMainWindow):
         if not ann_id:
             return
         ann = self._find_annotation_by_id(ann_id)
-        if ann is None or ann.type != "note":
-            self._status.showMessage("Select a note annotation to edit", 1500)
+        if ann is None:
+            self._status.showMessage("Select an annotation to edit", 1500)
             return
 
-        text, ok = QInputDialog.getMultiLineText(self, "Edit Note", "Note text:", ann.contents)
+        text, ok = QInputDialog.getMultiLineText(self, "Edit Annotation", "Comment:", ann.contents)
         if not ok:
             return
         ann.contents = text
@@ -1657,8 +1665,18 @@ class MainWindow(QMainWindow):
         color = {
             "highlight": "#f7c948",
             "underline": "#7ab4ff",
+            "strikeout": "#f97373",
+            "squiggly": "#ff9f43",
             "note": "#5b8df6",
         }.get(ann_type, "#f7c948")
+
+        opacity = {
+            "highlight": 0.3,
+            "underline": 0.95,
+            "strikeout": 0.95,
+            "squiggly": 0.95,
+            "note": 0.9,
+        }.get(ann_type, 0.3)
 
         return AnnotationRecord(
             id=uuid4().hex,
@@ -1666,7 +1684,7 @@ class MainWindow(QMainWindow):
             page=page_idx,
             rect=(float(sel.x()), float(sel.y()), float(sel.width()), float(sel.height())),
             color=color,
-            opacity=0.3 if ann_type == "highlight" else 0.95 if ann_type == "underline" else 0.9,
+            opacity=opacity,
             contents=contents,
         )
 
@@ -1694,6 +1712,12 @@ class MainWindow(QMainWindow):
 
     def _add_note(self):
         self._add_annotation("note")
+
+    def _add_strikeout(self):
+        self._add_annotation("strikeout")
+
+    def _add_squiggly(self):
+        self._add_annotation("squiggly")
 
     # --------------------------- Thumbnails ---------------------------
     def _populate_thumbnails(self):
