@@ -1177,7 +1177,7 @@ class PdfView(QGraphicsView):
         return "Follow link"
 
     def _update_link_hover(self, scene_pos: QPointF, viewport_pos: QPoint):
-        if self._tool not in (ToolMode.HAND, ToolMode.SELECT):
+        if self._tool != ToolMode.HAND:
             self._hide_link_badge()
             return
         if self._text_selecting or self._creating or self._interacting or self._panning:
@@ -1338,7 +1338,7 @@ class PdfView(QGraphicsView):
         if self._selected_annotation_id:
             self.select_annotation(None)
 
-        if self._hover_link and self._tool in (ToolMode.HAND, ToolMode.SELECT):
+        if self._hover_link and self._tool == ToolMode.HAND:
             self._pressed_link = self._hover_link
             self._pressed_pos = QPointF(e.position())
             e.accept()
