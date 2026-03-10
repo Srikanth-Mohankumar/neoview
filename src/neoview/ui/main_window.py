@@ -59,6 +59,7 @@ from PySide6.QtWidgets import (
 from neoview.models.view_state import AnnotationRecord, BookmarkRecord, SearchMatch, TabContext
 from neoview.persistence.sidecar_store import clamp_sidecar_for_page_count, load_sidecar, save_sidecar
 from neoview.resources import load_app_icon
+from neoview.ui.annotation_toolbar import AnnotationToolbar
 from neoview.ui.dialogs import ExportDialog
 from neoview.ui.pdf_view import PdfView, ToolMode
 from neoview.utils.units import format_size
@@ -210,6 +211,7 @@ class MainWindow(QMainWindow):
 
         self._setup_menus()
         self._setup_toolbar()
+        self._setup_annotation_toolbar()
         self._setup_statusbar()
         self._setup_docks()
         self._update_status()
@@ -224,6 +226,9 @@ class MainWindow(QMainWindow):
         view.text_selected.connect(lambda text, v=view: self._on_view_text_selected(v, text))
         view.document_loaded.connect(lambda v=view: self._on_view_document_loaded(v))
         view.annotation_clicked.connect(lambda ann_id, v=view: self._on_view_annotation_clicked(v, ann_id))
+        view.annotation_created.connect(lambda rec, v=view: self._on_view_annotation_created(v, rec))
+        view.annotation_deleted.connect(lambda ann_id, v=view: self._on_view_annotation_deleted(v, ann_id))
+        view.annotation_edit_requested.connect(lambda ann_id, v=view: self._on_view_annotation_edit_requested(v, ann_id))
 
         timer = QTimer(self)
         timer.setSingleShot(True)
@@ -451,13 +456,22 @@ class MainWindow(QMainWindow):
         self._tool_group.addAction(self._measure_action)
         tools_m.addAction(self._measure_action)
 
+        self._annotate_action = self._action("&Annotate", lambda: self._set_tool(ToolMode.ANNOTATE), "4")
+        self._annotate_action.setCheckable(True)
+        self._tool_group.addAction(self._annotate_action)
+        tools_m.addAction(self._annotate_action)
+
         tools_m.addSeparator()
-        self._annot_highlight_action = self._action("Add &Highlight", self._add_highlight, "Ctrl+Shift+H")
-        self._annot_underline_action = self._action("Add &Underline", self._add_underline, "Ctrl+Shift+U")
-        self._annot_note_action = self._action("Add &Note", self._add_note, "Ctrl+Shift+N")
+        self._annot_highlight_action = self._action("Add &Highlight (selection)", self._add_highlight, "Ctrl+Shift+H")
+        self._annot_underline_action = self._action("Add &Underline (selection)", self._add_underline, "Ctrl+Shift+U")
+        self._annot_note_action = self._action("Add &Note (selection)", self._add_note, "Ctrl+Shift+N")
         tools_m.addAction(self._annot_highlight_action)
         tools_m.addAction(self._annot_underline_action)
         tools_m.addAction(self._annot_note_action)
+
+        tools_m.addSeparator()
+        self._export_annot_action = self._action("Export PDF with &Annotations", self._export_pdf_with_annotations)
+        tools_m.addAction(self._export_annot_action)
 
         tools_m.addSeparator()
         tools_m.addAction(self._action("&Search Panel", self._toggle_search_dock, "Ctrl+Shift+F"))
@@ -568,10 +582,32 @@ class MainWindow(QMainWindow):
         self._toolbar_copy_action.triggered.connect(self._copy)
         tb.addAction(self._toolbar_copy_action)
 
+        # Add Annotate toggle to main toolbar
+        self._toolbar_annotate_action = QAction(
+            self._icon("draw-brush", QStyle.StandardPixmap.SP_FileDialogDetailedView),
+            "Annotate",
+            self,
+        )
+        self._toolbar_annotate_action.setToolTip("Annotate tool (4)")
+        self._toolbar_annotate_action.setCheckable(True)
+        self._toolbar_annotate_action.triggered.connect(lambda: self._set_tool(ToolMode.ANNOTATE))
+        self._toolbar_tool_group.addAction(self._toolbar_annotate_action)
+        tb.addAction(self._toolbar_annotate_action)
         tb.addSeparator()
-        tb.addAction(self._annot_highlight_action)
-        tb.addAction(self._annot_underline_action)
-        tb.addAction(self._annot_note_action)
+
+        self._toolbar_export_action.setParent(self)  # already added above, keep order
+        self._toolbar_copy_action.setParent(self)
+
+    def _setup_annotation_toolbar(self):
+        """Create and add the dedicated annotation toolbar (shown below main toolbar)."""
+        self._ann_toolbar = AnnotationToolbar(self)
+        self.addToolBar(self._ann_toolbar)
+        self._ann_toolbar.setVisible(False)  # only visible when ANNOTATE tool is active
+
+        self._ann_toolbar.type_changed.connect(self._on_ann_toolbar_type_changed)
+        self._ann_toolbar.color_changed.connect(self._on_ann_toolbar_color_changed)
+        self._ann_toolbar.opacity_changed.connect(self._on_ann_toolbar_opacity_changed)
+        self._ann_toolbar.border_width_changed.connect(self._on_ann_toolbar_width_changed)
 
     def _setup_statusbar(self):
         self._status = QStatusBar()
@@ -751,21 +787,30 @@ class MainWindow(QMainWindow):
         annotation_section = CollapsibleSection("Annotations")
         a_layout = annotation_section.content_layout
         self._annotation_filter = QComboBox()
-        self._annotation_filter.addItems(["All", "Highlight", "Underline", "Note"])
+        self._annotation_filter.addItems([
+            "All", "Highlight", "Underline", "Strikethrough", "Note",
+            "Text-box", "Rectangle", "Ellipse", "Line", "Arrow", "Freehand",
+        ])
         self._annotation_filter.currentIndexChanged.connect(self._populate_annotation_list)
         self._annotation_list = QListWidget()
         self._annotation_list.itemActivated.connect(self._jump_to_annotation_item)
         self._annotation_list.itemClicked.connect(self._jump_to_annotation_item)
-        self._annotation_edit_btn = QPushButton("Edit Note")
+        self._annotation_edit_btn = QPushButton("Properties")
         self._annotation_delete_btn = QPushButton("Delete")
+        self._annotation_export_btn = QPushButton("Export PDF")
+        self._annotation_edit_btn.setToolTip("Edit annotation properties (double-click annotation to edit)")
+        self._annotation_delete_btn.setToolTip("Delete selected annotation (Delete key)")
+        self._annotation_export_btn.setToolTip("Save a copy of the PDF with annotations embedded")
         self._annotation_edit_btn.clicked.connect(self._edit_selected_annotation)
         self._annotation_delete_btn.clicked.connect(self._delete_selected_annotation)
+        self._annotation_export_btn.clicked.connect(self._export_pdf_with_annotations)
 
         ann_btn_row = QHBoxLayout()
         ann_btn_row.setContentsMargins(0, 0, 0, 0)
-        ann_btn_row.setSpacing(6)
+        ann_btn_row.setSpacing(4)
         ann_btn_row.addWidget(self._annotation_edit_btn)
         ann_btn_row.addWidget(self._annotation_delete_btn)
+        ann_btn_row.addWidget(self._annotation_export_btn)
 
         a_layout.addWidget(self._annotation_filter)
         a_layout.addWidget(self._annotation_list)
@@ -1611,14 +1656,95 @@ class MainWindow(QMainWindow):
         if not ann_id:
             return
         ann = self._find_annotation_by_id(ann_id)
-        if ann is None or ann.type != "note":
-            self._status.showMessage("Select a note annotation to edit", 1500)
+        if ann is None:
+            return
+        self._open_annotation_properties_dialog(ann)
+
+    def _open_annotation_properties_dialog(self, ann: AnnotationRecord):
+        """Open the annotation properties / edit dialog."""
+        from PySide6.QtWidgets import (
+            QColorDialog,
+            QDialog,
+            QDialogButtonBox,
+            QDoubleSpinBox,
+            QFormLayout,
+            QSlider,
+            QTextEdit,
+        )
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"Annotation Properties ({ann.type})")
+        dlg.setMinimumWidth(380)
+        form = QFormLayout(dlg)
+
+        # Text / contents (for types that support it)
+        text_edit = None
+        if ann.type in ("note", "text-box"):
+            text_edit = QTextEdit()
+            text_edit.setPlainText(ann.contents)
+            text_edit.setFixedHeight(90)
+            form.addRow("Text:", text_edit)
+
+        # Color
+        color_btn = QPushButton()
+        color_btn.setFixedSize(60, 24)
+        cur_color = QColor(ann.color or "#f7c948")
+
+        def _update_color_btn(c: QColor):
+            pix = QPixmap(40, 16)
+            pix.fill(c)
+            color_btn.setIcon(QIcon(pix))
+            color_btn.setText(c.name())
+        _update_color_btn(cur_color)
+
+        chosen_color = [cur_color]
+
+        def _pick_color():
+            c = QColorDialog.getColor(chosen_color[0], dlg, "Annotation Color")
+            if c.isValid():
+                chosen_color[0] = c
+                _update_color_btn(c)
+        color_btn.clicked.connect(_pick_color)
+        form.addRow("Color:", color_btn)
+
+        # Opacity
+        opacity_slider = QSlider(Qt.Orientation.Horizontal)
+        opacity_slider.setRange(5, 100)
+        opacity_slider.setValue(int(ann.opacity * 100))
+        opacity_label = QLabel(f"{int(ann.opacity * 100)}%")
+        opacity_slider.valueChanged.connect(lambda v: opacity_label.setText(f"{v}%"))
+        opacity_row = QHBoxLayout()
+        opacity_row.addWidget(opacity_slider)
+        opacity_row.addWidget(opacity_label)
+        opacity_container = QWidget()
+        opacity_container.setLayout(opacity_row)
+        form.addRow("Opacity:", opacity_container)
+
+        # Border width (for shapes, freehand, line, arrow)
+        if ann.type in ("rectangle", "ellipse", "line", "arrow", "freehand", "text-box"):
+            width_spin = QDoubleSpinBox()
+            width_spin.setRange(0.5, 20.0)
+            width_spin.setSingleStep(0.5)
+            width_spin.setDecimals(1)
+            width_spin.setValue(ann.border_width)
+            form.addRow("Stroke width:", width_spin)
+        else:
+            width_spin = None
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        form.addRow(buttons)
+
+        if dlg.exec() != QDialog.DialogCode.Accepted:
             return
 
-        text, ok = QInputDialog.getMultiLineText(self, "Edit Note", "Note text:", ann.contents)
-        if not ok:
-            return
-        ann.contents = text
+        ann.color = chosen_color[0].name()
+        ann.opacity = opacity_slider.value() / 100.0
+        if text_edit is not None:
+            ann.contents = text_edit.toPlainText()
+        if width_spin is not None:
+            ann.border_width = width_spin.value()
         ann.updated_at = ""
         self._mark_sidecar_dirty(self.current_view())
         self._populate_annotation_list()
@@ -1694,6 +1820,129 @@ class MainWindow(QMainWindow):
 
     def _add_note(self):
         self._add_annotation("note")
+
+    # ------ New annotation signal handlers ------
+
+    def _on_view_annotation_created(self, view: PdfView, record: AnnotationRecord):
+        """Called when annotation is drawn directly on the canvas."""
+        if not self._is_current_view(view):
+            return
+        ctx = self._context_for_view(view)
+        if not ctx.file_path:
+            self._status.showMessage("Open a PDF first", 1500)
+            return
+        ctx.sidecar_state.annotations.append(record)
+        self._mark_sidecar_dirty(view)
+        self._populate_annotation_list()
+        self._status.showMessage(f"Added {record.type}", 1200)
+
+    def _on_view_annotation_deleted(self, view: PdfView, ann_id: str):
+        """Called when Delete key or context menu removes an annotation."""
+        if not self._is_current_view(view):
+            return
+        ctx = self._context_for_view(view)
+        before = len(ctx.sidecar_state.annotations)
+        ctx.sidecar_state.annotations = [a for a in ctx.sidecar_state.annotations if a.id != ann_id]
+        if len(ctx.sidecar_state.annotations) < before:
+            self._mark_sidecar_dirty(view)
+            self._populate_annotation_list()
+            self._status.showMessage("Annotation deleted", 1200)
+
+    def _on_view_annotation_edit_requested(self, view: PdfView, ann_id: str):
+        """Called on double-click or context menu Edit."""
+        if not self._is_current_view(view):
+            return
+        ann = self._find_annotation_by_id(ann_id)
+        if ann:
+            self._open_annotation_properties_dialog(ann)
+
+    # ------ Annotation toolbar sync ------
+
+    def _on_ann_toolbar_type_changed(self, type_key: str):
+        self.current_view().annotate_type = type_key
+
+    def _on_ann_toolbar_color_changed(self, color: str):
+        self.current_view().annotate_color = color
+
+    def _on_ann_toolbar_opacity_changed(self, opacity: float):
+        self.current_view().annotate_opacity = opacity
+
+    def _on_ann_toolbar_width_changed(self, width: float):
+        self.current_view().annotate_border_width = width
+
+    # ------ Export annotations to PDF ------
+
+    def _export_pdf_with_annotations(self):
+        """Save a copy of the current PDF with embedded annotations."""
+        view = self.current_view()
+        ctx = self.current_context()
+        if not view.document or not ctx.file_path:
+            self._status.showMessage("Open a PDF first", 1500)
+            return
+        if not ctx.sidecar_state.annotations:
+            self._status.showMessage("No annotations to export", 1500)
+            return
+
+        src = ctx.file_path
+        base, ext = os.path.splitext(src)
+        default_out = f"{base}_annotated{ext}"
+        out_path, _ = QFileDialog.getSaveFileName(
+            self, "Save Annotated PDF", default_out, "PDF Files (*.pdf)"
+        )
+        if not out_path:
+            return
+
+        try:
+            import fitz as _fitz
+            doc = _fitz.open(src)
+            for ann_rec in ctx.sidecar_state.annotations:
+                if not (0 <= ann_rec.page < doc.page_count):
+                    continue
+                page = doc[ann_rec.page]
+                x, y, w, h = ann_rec.rect
+                rect = _fitz.Rect(x, y, x + w, y + h)
+                color_obj = QColor(ann_rec.color or "#f7c948")
+                rgb = (color_obj.redF(), color_obj.greenF(), color_obj.blueF())
+
+                t = ann_rec.type
+                if t == "highlight":
+                    a = page.add_highlight_annot(rect)
+                elif t == "underline":
+                    a = page.add_underline_annot(rect)
+                elif t == "strikethrough":
+                    a = page.add_strikeout_annot(rect)
+                elif t in ("note",):
+                    a = page.add_text_annot(_fitz.Point(x, y), ann_rec.contents or "")
+                elif t == "text-box":
+                    a = page.add_freetext_annot(rect, ann_rec.contents or "", fontsize=ann_rec.font_size, text_color=rgb)
+                elif t == "rectangle":
+                    a = page.add_rect_annot(rect)
+                elif t == "ellipse":
+                    a = page.add_circle_annot(rect)
+                elif t == "line":
+                    a = page.add_line_annot(_fitz.Point(x, y), _fitz.Point(x + w, y + h))
+                elif t == "arrow":
+                    a = page.add_line_annot(_fitz.Point(x, y), _fitz.Point(x + w, y + h))
+                elif t == "freehand" and ann_rec.points:
+                    pts = [_fitz.Point(p[0], p[1]) for p in ann_rec.points]
+                    a = page.add_ink_annot([pts])
+                else:
+                    continue
+
+                try:
+                    a.set_colors(stroke=rgb, fill=rgb)
+                    a.set_opacity(ann_rec.opacity)
+                    if ann_rec.contents and t not in ("note", "text-box", "freehand"):
+                        a.set_info(content=ann_rec.contents)
+                    a.update()
+                except Exception:
+                    pass
+
+            doc.save(out_path, garbage=4, deflate=True)
+            doc.close()
+            self._status.showMessage(f"Saved annotated PDF to {os.path.basename(out_path)}", 3000)
+        except Exception as exc:
+            QMessageBox.critical(self, "Export Failed", f"Could not export annotations:\n{exc}")
 
     # --------------------------- Thumbnails ---------------------------
     def _populate_thumbnails(self):
@@ -2058,10 +2307,14 @@ class MainWindow(QMainWindow):
         self._toolbar_select_action.setChecked(tool == ToolMode.SELECT)
         self._toolbar_hand_action.setChecked(tool == ToolMode.HAND)
         self._toolbar_measure_action.setChecked(tool == ToolMode.MEASURE)
+        self._toolbar_annotate_action.setChecked(tool == ToolMode.ANNOTATE)
 
         self._panel_select_btn.setChecked(tool == ToolMode.SELECT)
         self._panel_hand_btn.setChecked(tool == ToolMode.HAND)
         self._panel_measure_btn.setChecked(tool == ToolMode.MEASURE)
+
+        # Show/hide annotation toolbar
+        self._ann_toolbar.setVisible(tool == ToolMode.ANNOTATE)
 
         self._settings.setValue("view/tool", tool.name)
         self._update_status()

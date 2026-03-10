@@ -11,13 +11,16 @@ from typing import Dict, List, Optional, Tuple
 
 import fitz
 from PySide6.QtCore import QPoint, QPointF, QRectF, QTimer, QUrl, Signal, Qt
-from PySide6.QtGui import QBrush, QColor, QDesktopServices, QKeyEvent, QMouseEvent, QPainter, QPen, QWheelEvent
+from PySide6.QtGui import QBrush, QColor, QDesktopServices, QKeyEvent, QMouseEvent, QPainter, QPainterPath, QPen, QWheelEvent
 from PySide6.QtWidgets import (
     QApplication,
+    QGraphicsPathItem,
     QGraphicsRectItem,
     QGraphicsScene,
     QGraphicsView,
+    QInputDialog,
     QLabel,
+    QMenu,
     QMessageBox,
     QStyle,
     QToolTip,
@@ -25,6 +28,7 @@ from PySide6.QtWidgets import (
 import shiboken6
 
 from neoview.models.view_state import AnnotationRecord
+from neoview.ui.annotation_item import AnnotationItem
 from neoview.ui.selection import SelectionRect
 from neoview.ui.page_item import PageItem
 
@@ -33,6 +37,7 @@ class ToolMode(Enum):
     SELECT = auto()
     HAND = auto()
     MEASURE = auto()
+    ANNOTATE = auto()
 
 
 class PdfView(QGraphicsView):
@@ -49,6 +54,9 @@ class PdfView(QGraphicsView):
     text_info_changed = Signal(str)
     text_selected = Signal(str)
     annotation_clicked = Signal(str)
+    annotation_created = Signal(object)   # emits AnnotationRecord
+    annotation_deleted = Signal(str)      # emits annotation id
+    annotation_edit_requested = Signal(str)  # emits annotation id (double-click / context menu)
     document_loaded = Signal()
     performance_mode_toggled = Signal(bool)
 
@@ -100,8 +108,23 @@ class PdfView(QGraphicsView):
         self._search_highlights: List[tuple] = []
         self._search_items: List[QGraphicsRectItem] = []
         self._annotations: List[AnnotationRecord] = []
-        self._annotation_items: List[Tuple[int, QGraphicsRectItem]] = []
+        self._annotation_items: List[Tuple[int, AnnotationItem]] = []
         self._annotation_index: Dict[str, AnnotationRecord] = {}
+        self._selected_annotation_id: Optional[str] = None
+
+        # Annotate tool state
+        self._annotate_type: str = "highlight"
+        self._annotate_color: str = "#f7c948"
+        self._annotate_opacity: float = 0.3
+        self._annotate_border_width: float = 2.0
+        self._annotate_font_size: float = 12.0
+        self._annotate_creating: bool = False
+        self._annotate_start: Optional[QPointF] = None
+        self._annotate_page: int = -1
+        self._annotate_preview_rect: Optional[QGraphicsRectItem] = None
+        self._annotate_freehand_points: List[List[float]] = []
+        self._annotate_freehand_path_item: Optional[QGraphicsPathItem] = None
+
         self._page_links: List[List[Tuple[QRectF, Dict]]] = []
         self._hover_link: Optional[Dict] = None
         self._pressed_link: Optional[Dict] = None
@@ -161,7 +184,49 @@ class PdfView(QGraphicsView):
         if t != ToolMode.SELECT:
             self.clear_text_selection()
             self.text_info_changed.emit("")
+        if t != ToolMode.ANNOTATE:
+            self._cancel_annotate_drawing()
         self._update_cursor()
+
+    @property
+    def annotate_type(self) -> str:
+        return self._annotate_type
+
+    @annotate_type.setter
+    def annotate_type(self, t: str):
+        self._annotate_type = t
+
+    @property
+    def annotate_color(self) -> str:
+        return self._annotate_color
+
+    @annotate_color.setter
+    def annotate_color(self, c: str):
+        self._annotate_color = c
+
+    @property
+    def annotate_opacity(self) -> float:
+        return self._annotate_opacity
+
+    @annotate_opacity.setter
+    def annotate_opacity(self, v: float):
+        self._annotate_opacity = max(0.05, min(1.0, v))
+
+    @property
+    def annotate_border_width(self) -> float:
+        return self._annotate_border_width
+
+    @annotate_border_width.setter
+    def annotate_border_width(self, v: float):
+        self._annotate_border_width = max(0.5, min(20.0, v))
+
+    @property
+    def annotate_font_size(self) -> float:
+        return self._annotate_font_size
+
+    @annotate_font_size.setter
+    def annotate_font_size(self, v: float):
+        self._annotate_font_size = max(6.0, min(72.0, v))
 
     @property
     def zoom_mode(self) -> str:
@@ -208,6 +273,12 @@ class PdfView(QGraphicsView):
             self.setDragMode(QGraphicsView.DragMode.NoDrag)
         elif self._tool == ToolMode.MEASURE:
             self.setCursor(Qt.CursorShape.CrossCursor)
+            self.setDragMode(QGraphicsView.DragMode.NoDrag)
+        elif self._tool == ToolMode.ANNOTATE:
+            if self._annotate_type == "freehand":
+                self.setCursor(Qt.CursorShape.ArrowCursor)
+            else:
+                self.setCursor(Qt.CursorShape.CrossCursor)
             self.setDragMode(QGraphicsView.DragMode.NoDrag)
 
     def open_document(self, path: str) -> bool:
@@ -667,16 +738,20 @@ class PdfView(QGraphicsView):
         self._annotation_index = {item.id: item for item in self._annotations if item.id}
         self._rebuild_annotation_items()
 
+    def select_annotation(self, ann_id: Optional[str]):
+        """Visually select/deselect an annotation by id."""
+        self._selected_annotation_id = ann_id
+        for _pg, item in self._annotation_items:
+            if shiboken6.isValid(item):
+                item.set_selected_highlight(item.annotation_id == ann_id)
+
     def scroll_to_page_y(self, page_idx: int, y: float):
         self._scroll_to_destination(page_idx, y, y_is_pdf_coords=False)
 
     def _annotation_hit_at_scene_pos(self, scene_pos: QPointF) -> Optional[str]:
         for item in self._scene.items(scene_pos):
-            if not isinstance(item, QGraphicsRectItem):
-                continue
-            ann_id = item.data(0)
-            if ann_id:
-                return str(ann_id)
+            if isinstance(item, AnnotationItem):
+                return item.annotation_id
         return None
 
     def _rebuild_annotation_items(self):
@@ -689,46 +764,104 @@ class PdfView(QGraphicsView):
                 continue
             x, y, w, h = ann.rect
             base_rect = QRectF(float(x), float(y), max(0.0, float(w)), max(0.0, float(h)))
-            if base_rect.width() <= 0 and base_rect.height() <= 0:
+            # For non-rect types (freehand/line/arrow) allow zero-area rects as long as points exist
+            if base_rect.width() <= 0 and base_rect.height() <= 0 and ann.type not in ("freehand",):
                 continue
 
             page = self._pages[ann.page]
-            color = QColor(ann.color or "#f7c948")
-            opacity = max(0.0, min(1.0, ann.opacity))
-
-            if ann.type == "highlight":
-                item = QGraphicsRectItem(base_rect)
-                pen = QPen(QColor(color.red(), color.green(), color.blue(), 180))
-                pen.setWidthF(0.6)
-                pen.setCosmetic(True)
-                item.setPen(pen)
-                item.setBrush(QBrush(QColor(color.red(), color.green(), color.blue(), int(255 * opacity))))
-            elif ann.type == "underline":
-                line_h = max(1.2, min(3.2, base_rect.height() * 0.12))
-                line_rect = QRectF(base_rect.x(), base_rect.bottom() - line_h, base_rect.width(), line_h)
-                item = QGraphicsRectItem(line_rect)
-                item.setPen(Qt.PenStyle.NoPen)
-                item.setBrush(QBrush(QColor(color.red(), color.green(), color.blue(), 235)))
-            else:
-                # Note icon marker anchored near annotation rect.
-                icon_size = 12.0
-                note_rect = QRectF(base_rect.x(), base_rect.y(), icon_size, icon_size)
-                item = QGraphicsRectItem(note_rect)
-                pen = QPen(QColor(250, 250, 250, 220))
-                pen.setWidthF(0.8)
-                pen.setCosmetic(True)
-                item.setPen(pen)
-                item.setBrush(QBrush(QColor(color.red(), color.green(), color.blue(), 230)))
-                if ann.contents:
-                    item.setToolTip(ann.contents)
-
-            item.setData(0, ann.id)
-            item.setData(1, ann.type)
+            item = AnnotationItem(ann)
+            if ann.contents and ann.type in ("note", "text-box"):
+                item.setToolTip(ann.contents)
             item.setPos(page.pos())
             item.setScale(self._zoom)
-            item.setZValue(880)
+            # Restore selection state
+            if ann.id == self._selected_annotation_id:
+                item.set_selected_highlight(True)
             self._scene.addItem(item)
             self._annotation_items.append((ann.page, item))
+
+    # ------------------------------------------------------------------
+    # Annotate tool helpers
+    # ------------------------------------------------------------------
+
+    def _cancel_annotate_drawing(self):
+        """Abort any in-progress annotation drawing."""
+        self._annotate_creating = False
+        self._annotate_start = None
+        self._annotate_page = -1
+        self._annotate_freehand_points = []
+        if self._annotate_preview_rect and shiboken6.isValid(self._annotate_preview_rect):
+            self._scene.removeItem(self._annotate_preview_rect)
+        self._annotate_preview_rect = None
+        if self._annotate_freehand_path_item and shiboken6.isValid(self._annotate_freehand_path_item):
+            self._scene.removeItem(self._annotate_freehand_path_item)
+        self._annotate_freehand_path_item = None
+
+    def _ensure_annotate_preview(self) -> QGraphicsRectItem:
+        if self._annotate_preview_rect and shiboken6.isValid(self._annotate_preview_rect):
+            return self._annotate_preview_rect
+        item = QGraphicsRectItem()
+        pen = QPen(QColor(91, 141, 246, 200))
+        pen.setWidthF(1.0)
+        pen.setStyle(Qt.PenStyle.DashLine)
+        pen.setCosmetic(True)
+        item.setPen(pen)
+        item.setBrush(QBrush(QColor(91, 141, 246, 30)))
+        item.setZValue(950)
+        self._scene.addItem(item)
+        self._annotate_preview_rect = item
+        return item
+
+    def _commit_annotate_rect(self, rect: QRectF):
+        """Create an AnnotationRecord from a drawn rect and emit annotation_created."""
+        from uuid import uuid4
+        from neoview.models.view_state import AnnotationRecord
+        t = self._annotate_type
+        contents = ""
+        if t in ("note", "text-box"):
+            label = "Note text:" if t == "note" else "Text:"
+            text, ok = QInputDialog.getMultiLineText(self, "Add Annotation", label)
+            if not ok:
+                return
+            contents = text
+
+        record = AnnotationRecord(
+            id=uuid4().hex,
+            type=t,
+            page=self._annotate_page,
+            rect=(float(rect.x()), float(rect.y()), float(rect.width()), float(rect.height())),
+            color=self._annotate_color,
+            opacity=self._annotate_opacity,
+            contents=contents,
+            border_color="",
+            border_width=self._annotate_border_width,
+            font_size=self._annotate_font_size,
+        )
+        self.annotation_created.emit(record)
+
+    def _commit_annotate_freehand(self):
+        """Commit accumulated freehand points as an annotation."""
+        from uuid import uuid4
+        from neoview.models.view_state import AnnotationRecord
+        pts = self._annotate_freehand_points
+        if len(pts) < 2:
+            return
+        xs = [p[0] for p in pts]
+        ys = [p[1] for p in pts]
+        rx, ry = min(xs), min(ys)
+        rw = max(xs) - rx
+        rh = max(ys) - ry
+        record = AnnotationRecord(
+            id=uuid4().hex,
+            type="freehand",
+            page=self._annotate_page,
+            rect=(rx, ry, max(1.0, rw), max(1.0, rh)),
+            color=self._annotate_color,
+            opacity=self._annotate_opacity,
+            border_width=self._annotate_border_width,
+            points=list(pts),
+        )
+        self.annotation_created.emit(record)
 
     def _rebuild_search_highlights(self):
         self._clear_search_items()
@@ -1161,19 +1294,49 @@ class PdfView(QGraphicsView):
         self._measure_badge.raise_()
 
     def mousePressEvent(self, e: QMouseEvent):
+        scene_pos = self.mapToScene(e.position().toPoint())
+
+        if e.button() == Qt.MouseButton.RightButton:
+            ann_id = self._annotation_hit_at_scene_pos(scene_pos)
+            if ann_id:
+                self._show_annotation_context_menu(ann_id, e.globalPosition().toPoint())
+                e.accept()
+                return
+            super().mousePressEvent(e)
+            return
+
         if e.button() != Qt.MouseButton.LeftButton:
             super().mousePressEvent(e)
             return
 
         self._clear_link_press()
-        scene_pos = self.mapToScene(e.position().toPoint())
         self._update_link_hover(scene_pos, e.position().toPoint())
+
+        # In ANNOTATE mode: left-click starts drawing (don't intercept for annotation click)
+        if self._tool == ToolMode.ANNOTATE:
+            page_idx = self._get_page_at(scene_pos)
+            if page_idx >= 0:
+                local_pos = self._scene_to_page(scene_pos, page_idx)
+                self._annotate_creating = True
+                self._annotate_page = page_idx
+                self._annotate_start = local_pos
+                if self._annotate_type == "freehand":
+                    self._annotate_freehand_points = [[local_pos.x(), local_pos.y()]]
+                e.accept()
+                return
+            e.accept()
+            return
 
         ann_id = self._annotation_hit_at_scene_pos(scene_pos)
         if ann_id:
             self.annotation_clicked.emit(ann_id)
+            self.select_annotation(ann_id)
             e.accept()
             return
+
+        # Click on empty space deselects annotation
+        if self._selected_annotation_id:
+            self.select_annotation(None)
 
         if self._hover_link and self._tool in (ToolMode.HAND, ToolMode.SELECT):
             self._pressed_link = self._hover_link
@@ -1238,6 +1401,54 @@ class PdfView(QGraphicsView):
         scene_pos = self.mapToScene(e.position().toPoint())
         self._update_link_hover(scene_pos, e.position().toPoint())
 
+        if self._tool == ToolMode.ANNOTATE and self._annotate_creating and self._annotate_page >= 0:
+            local_pos = self._scene_to_page(scene_pos, self._annotate_page)
+            page = self._pages[self._annotate_page] if 0 <= self._annotate_page < len(self._pages) else None
+            if page:
+                local_pos = QPointF(
+                    max(0, min(local_pos.x(), page.page_rect.width())),
+                    max(0, min(local_pos.y(), page.page_rect.height())),
+                )
+            if self._annotate_type == "freehand":
+                self._annotate_freehand_points.append([local_pos.x(), local_pos.y()])
+                pts = self._annotate_freehand_points
+                if len(pts) >= 2:
+                    path = QPainterPath()
+                    path.moveTo(QPointF(pts[0][0], pts[0][1]))
+                    for pt in pts[1:]:
+                        path.lineTo(QPointF(pt[0], pt[1]))
+                    if self._annotate_freehand_path_item and shiboken6.isValid(self._annotate_freehand_path_item):
+                        self._annotate_freehand_path_item.setPath(path)
+                    else:
+                        path_item = QGraphicsPathItem(path)
+                        pen = QPen(QColor(self._annotate_color))
+                        pen.setWidthF(self._annotate_border_width)
+                        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+                        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+                        pen.setCosmetic(True)
+                        path_item.setPen(pen)
+                        path_item.setBrush(Qt.BrushStyle.NoBrush)
+                        path_item.setZValue(950)
+                        if page:
+                            path_item.setPos(page.pos())
+                            path_item.setScale(self._zoom)
+                        self._scene.addItem(path_item)
+                        self._annotate_freehand_path_item = path_item
+            elif self._annotate_start is not None:
+                rect = QRectF(self._annotate_start, local_pos).normalized()
+                preview = self._ensure_annotate_preview()
+                if page:
+                    page_pos = page.pos()
+                    scene_rect = QRectF(
+                        page_pos.x() + rect.x() * self._zoom,
+                        page_pos.y() + rect.y() * self._zoom,
+                        rect.width() * self._zoom,
+                        rect.height() * self._zoom,
+                    )
+                    preview.setRect(scene_rect)
+            e.accept()
+            return
+
         if self._tool == ToolMode.HAND and self._panning and self._pan_start is not None:
             delta = e.position() - self._pan_start
             self._pan_start = e.position()
@@ -1300,8 +1511,48 @@ class PdfView(QGraphicsView):
 
         super().mouseMoveEvent(e)
 
+    def mouseDoubleClickEvent(self, e: QMouseEvent):
+        if e.button() == Qt.MouseButton.LeftButton:
+            scene_pos = self.mapToScene(e.position().toPoint())
+            ann_id = self._annotation_hit_at_scene_pos(scene_pos)
+            if ann_id:
+                self.annotation_edit_requested.emit(ann_id)
+                e.accept()
+                return
+        super().mouseDoubleClickEvent(e)
+
     def mouseReleaseEvent(self, e: QMouseEvent):
         if e.button() == Qt.MouseButton.LeftButton:
+            if self._tool == ToolMode.ANNOTATE and self._annotate_creating:
+                self._annotate_creating = False
+                scene_pos = self.mapToScene(e.position().toPoint())
+                local_pos = self._scene_to_page(scene_pos, self._annotate_page)
+                page = self._pages[self._annotate_page] if 0 <= self._annotate_page < len(self._pages) else None
+                if page:
+                    local_pos = QPointF(
+                        max(0, min(local_pos.x(), page.page_rect.width())),
+                        max(0, min(local_pos.y(), page.page_rect.height())),
+                    )
+                if self._annotate_type == "freehand":
+                    self._annotate_freehand_points.append([local_pos.x(), local_pos.y()])
+                    if self._annotate_freehand_path_item and shiboken6.isValid(self._annotate_freehand_path_item):
+                        self._scene.removeItem(self._annotate_freehand_path_item)
+                    self._annotate_freehand_path_item = None
+                    self._commit_annotate_freehand()
+                    self._annotate_freehand_points = []
+                elif self._annotate_start is not None:
+                    rect = QRectF(self._annotate_start, local_pos).normalized()
+                    if self._annotate_preview_rect and shiboken6.isValid(self._annotate_preview_rect):
+                        self._scene.removeItem(self._annotate_preview_rect)
+                    self._annotate_preview_rect = None
+                    min_size = 3.0
+                    if rect.width() >= min_size or rect.height() >= min_size:
+                        self._commit_annotate_rect(rect)
+                self._annotate_start = None
+                self._annotate_page = -1
+                e.accept()
+                return
+
             if self._pressed_link and self._pressed_pos is not None:
                 moved = e.position() - self._pressed_pos
                 moved_too_far = abs(moved.x()) + abs(moved.y()) > 6
@@ -1383,8 +1634,29 @@ class PdfView(QGraphicsView):
         super().wheelEvent(e)
 
     def keyPressEvent(self, e: QKeyEvent):
+        key = e.key()
+
+        # Delete/Backspace removes selected annotation
+        if key in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
+            if self._selected_annotation_id:
+                ann_id = self._selected_annotation_id
+                self.select_annotation(None)
+                self.annotation_deleted.emit(ann_id)
+                e.accept()
+                return
+
+        # Escape cancels annotate drawing or deselects
+        if key == Qt.Key.Key_Escape:
+            if self._tool == ToolMode.ANNOTATE and self._annotate_creating:
+                self._cancel_annotate_drawing()
+                e.accept()
+                return
+            if self._selected_annotation_id:
+                self.select_annotation(None)
+                e.accept()
+                return
+
         if self._selection:
-            key = e.key()
             mods = e.modifiers()
             step = 10.0 if mods & Qt.KeyboardModifier.ShiftModifier else 1.0
             resize = bool(mods & Qt.KeyboardModifier.ControlModifier)
@@ -1431,6 +1703,22 @@ class PdfView(QGraphicsView):
                 return
 
         super().keyPressEvent(e)
+
+    def _show_annotation_context_menu(self, ann_id: str, global_pos):
+        ann = self._annotation_index.get(ann_id)
+        if ann is None:
+            return
+        self.select_annotation(ann_id)
+        menu = QMenu(self)
+        edit_action = menu.addAction("Edit / Properties")
+        menu.addSeparator()
+        delete_action = menu.addAction("Delete Annotation")
+        chosen = menu.exec(global_pos)
+        if chosen == edit_action:
+            self.annotation_edit_requested.emit(ann_id)
+        elif chosen == delete_action:
+            self.select_annotation(None)
+            self.annotation_deleted.emit(ann_id)
 
     def event(self, e):
         if e.type() == e.Type.Gesture:
