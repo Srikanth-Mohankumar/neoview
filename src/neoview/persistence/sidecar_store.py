@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import tempfile
 from datetime import datetime, timezone
@@ -16,7 +17,12 @@ from neoview.models.view_state import (
 )
 
 
+<<<<<<< claude/fix-pdf-annotations-nhxrE
 SCHEMA_VERSION = 2
+=======
+SCHEMA_VERSION = 1
+LOG = logging.getLogger(__name__)
+>>>>>>> main
 
 
 def _utc_now_iso() -> str:
@@ -246,12 +252,19 @@ def save_sidecar(pdf_path: str, state: DocumentSidecarState) -> None:
         "bookmarks": [_bookmark_to_dict(item) for item in state.bookmarks],
     }
 
-    fd, tmp_path = tempfile.mkstemp(prefix=".neoview.", suffix=".tmp", dir=directory)
+    try:
+        fd, tmp_path = tempfile.mkstemp(prefix=".neoview.", suffix=".tmp", dir=directory)
+    except OSError as exc:
+        LOG.warning("Failed to create temporary sidecar file for %s: %s", pdf_path, exc)
+        return
+
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, indent=2)
             handle.write("\n")
         os.replace(tmp_path, path)
+    except OSError as exc:
+        LOG.warning("Failed to save sidecar for %s: %s", pdf_path, exc)
     finally:
         if os.path.exists(tmp_path):
             try:

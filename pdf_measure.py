@@ -163,7 +163,7 @@ class PdfView(QWidget):
 class MainWindow(QMainWindow):
     def __init__(self, pdf_path: str):
         super().__init__()
-        self.setWindowTitle("PDF Rectangle Measure (pt / pica / mm)")
+        self.setWindowTitle("NeoView Legacy Measure Tool")
 
         self.viewer = PdfView(pdf_path, page_index=0)
 
