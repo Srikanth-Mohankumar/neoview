@@ -17,12 +17,8 @@ from neoview.models.view_state import (
 )
 
 
-<<<<<<< claude/fix-pdf-annotations-nhxrE
-SCHEMA_VERSION = 2
-=======
 SCHEMA_VERSION = 1
 LOG = logging.getLogger(__name__)
->>>>>>> main
 
 
 def _utc_now_iso() -> str:
