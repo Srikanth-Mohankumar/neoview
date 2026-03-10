@@ -78,7 +78,6 @@ def test_clamp_sidecar_for_page_count():
     assert [b.id for b in clamped.bookmarks] == ["b1"]
 
 
-<<<<<<< claude/fix-pdf-annotations-nhxrE
 def test_all_annotation_types_round_trip(tmp_path):
     """Every ANNOTATION_TYPES value should survive a save/load cycle."""
     pdf_path = tmp_path / "multi.pdf"
@@ -158,7 +157,8 @@ def test_annotation_record_extra_fields_preserved(tmp_path):
     assert loaded.annotations[0].border_color == "#0000ff"
     assert loaded.annotations[0].border_width == 3.0
     assert loaded.annotations[0].extra == {"custom": "value"}
-=======
+
+
 def test_save_sidecar_write_error_is_fail_soft(tmp_path: Path, monkeypatch):
     pdf_path = tmp_path / "sample.pdf"
     pdf_path.write_bytes(b"%PDF-1.4")
@@ -174,4 +174,3 @@ def test_save_sidecar_write_error_is_fail_soft(tmp_path: Path, monkeypatch):
 
     # Should not raise on write/replace failure.
     save_sidecar(str(pdf_path), state)
->>>>>>> main
