@@ -11,5 +11,9 @@ def test_pt_to_pica():
 
 def test_format_size():
     text = format_size(72.0, 36.0)
-    assert "W: 72.0pt" in text
-    assert "H: 36.0pt" in text
+    assert text == "W: 72.0pt (6.00pc, 25.40mm)  H: 36.0pt (3.00pc, 12.70mm)"
+
+
+def test_format_size_zero_and_negative_values():
+    text = format_size(0.0, -12.0)
+    assert text == "W: 0.0pt (0.00pc, 0.00mm)  H: -12.0pt (-1.00pc, -4.23mm)"
