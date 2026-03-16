@@ -335,6 +335,7 @@ class PdfView(QGraphicsView):
             self._page_positions.clear()
             self._page_links.clear()
             self._annotation_items.clear()
+            self._selected_annotation_id = None
             self._hover_link = None
             self._pressed_link = None
             self._pressed_pos = None
@@ -389,6 +390,7 @@ class PdfView(QGraphicsView):
         self._annotations.clear()
         self._annotation_index.clear()
         self._annotation_items.clear()
+        self._selected_annotation_id = None
         self._link_highlight_item = None
         self._hover_link = None
         self._pressed_link = None
@@ -408,6 +410,7 @@ class PdfView(QGraphicsView):
         self._page_positions.clear()
         self._page_links.clear()
         self._annotation_items.clear()
+        self._selected_annotation_id = None
         self._link_highlight_item = None
         self._hover_link = None
         self._pressed_link = None

@@ -112,6 +112,12 @@ class MainWindow(QMainWindow):
     ROLE_ANNOTATION_ID = int(Qt.ItemDataRole.UserRole) + 3
     MAX_SEARCH_RESULTS = 2000
 
+    # Inspector tab indices — must match the order tabs are added in _setup_docks
+    _INSPECTOR_TAB_MEASURE = 0
+    _INSPECTOR_TAB_FONT = 1
+    _INSPECTOR_TAB_ANNOTATIONS = 2
+    _INSPECTOR_TAB_DOCUMENT = 3
+
     def __init__(self, pdf_path: Optional[str] = None):
         super().__init__()
 
@@ -837,10 +843,12 @@ class MainWindow(QMainWindow):
         self._panel_select_btn = QPushButton("Select")
         self._panel_hand_btn = QPushButton("Hand")
         self._panel_measure_btn = QPushButton("Measure")
+        self._panel_annotate_btn = QPushButton("Annotate")
         for btn, mode in (
             (self._panel_select_btn, ToolMode.SELECT),
             (self._panel_hand_btn, ToolMode.HAND),
             (self._panel_measure_btn, ToolMode.MEASURE),
+            (self._panel_annotate_btn, ToolMode.ANNOTATE),
         ):
             btn.setCheckable(True)
             btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -851,6 +859,7 @@ class MainWindow(QMainWindow):
         self._panel_select_btn.setToolTip("Select tool (1)")
         self._panel_hand_btn.setToolTip("Hand tool (2)")
         self._panel_measure_btn.setToolTip("Measure tool (3)")
+        self._panel_annotate_btn.setToolTip("Annotate tool (4)")
         m_root.addLayout(tool_row)
         m_root.addStretch()
 
@@ -953,12 +962,6 @@ class MainWindow(QMainWindow):
         d_root.addStretch()
 
         self._inspector_tabs.addTab(doc_tab, "Document")
-
-        # Default tab indices
-        self._INSPECTOR_TAB_MEASURE = 0
-        self._INSPECTOR_TAB_FONT = 1
-        self._INSPECTOR_TAB_ANNOTATIONS = 2
-        self._INSPECTOR_TAB_DOCUMENT = 3
 
         self._info_dock.setWidget(inspector_widget)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._info_dock)
@@ -1754,7 +1757,6 @@ class MainWindow(QMainWindow):
         return text
 
     def _populate_annotation_list(self):
-        view = self.current_view()
         ctx = self.current_context()
 
         self._annotation_list.clear()
@@ -1786,8 +1788,9 @@ class MainWindow(QMainWindow):
             item.setToolTip(tip)
             self._annotation_list.addItem(item)
 
-        all_annotations = ctx.sidecar_state.annotations + ctx.native_annotations
-        view.set_annotations(all_annotations)
+        # Do not call view.set_annotations() here — that triggers a full scene
+        # rebuild on every filter change.  set_annotations() is called only when
+        # annotation data actually changes (load, create, delete, edit).
 
     def _find_annotation_by_id(self, ann_id: str) -> Optional[AnnotationRecord]:
         ctx = self.current_context()
@@ -2575,6 +2578,7 @@ class MainWindow(QMainWindow):
         self._select_action.setChecked(tool == ToolMode.SELECT)
         self._hand_action.setChecked(tool == ToolMode.HAND)
         self._measure_action.setChecked(tool == ToolMode.MEASURE)
+        self._annotate_action.setChecked(tool == ToolMode.ANNOTATE)
         self._toolbar_select_action.setChecked(tool == ToolMode.SELECT)
         self._toolbar_hand_action.setChecked(tool == ToolMode.HAND)
         self._toolbar_measure_action.setChecked(tool == ToolMode.MEASURE)
@@ -2583,6 +2587,7 @@ class MainWindow(QMainWindow):
         self._panel_select_btn.setChecked(tool == ToolMode.SELECT)
         self._panel_hand_btn.setChecked(tool == ToolMode.HAND)
         self._panel_measure_btn.setChecked(tool == ToolMode.MEASURE)
+        self._panel_annotate_btn.setChecked(tool == ToolMode.ANNOTATE)
 
         # Show/hide annotation toolbar
         self._ann_toolbar.setVisible(tool == ToolMode.ANNOTATE)
@@ -2686,9 +2691,11 @@ class MainWindow(QMainWindow):
         self._toolbar_select_action.setChecked(view.tool == ToolMode.SELECT)
         self._toolbar_hand_action.setChecked(view.tool == ToolMode.HAND)
         self._toolbar_measure_action.setChecked(view.tool == ToolMode.MEASURE)
+        self._toolbar_annotate_action.setChecked(view.tool == ToolMode.ANNOTATE)
         self._panel_select_btn.setChecked(view.tool == ToolMode.SELECT)
         self._panel_hand_btn.setChecked(view.tool == ToolMode.HAND)
         self._panel_measure_btn.setChecked(view.tool == ToolMode.MEASURE)
+        self._panel_annotate_btn.setChecked(view.tool == ToolMode.ANNOTATE)
 
     # ----------------------- Performance mode helpers -----------------------
     def _on_performance_mode_toggled(self, checked: bool) -> None:

@@ -1,6 +1,6 @@
 import fitz
 import time
-from PySide6.QtCore import QPointF, QRect, QRectF, Qt
+from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QWindowStateChangeEvent
 from PySide6.QtWidgets import QApplication
 
@@ -423,13 +423,10 @@ def test_enforce_maximized_geometry_reapplies_when_state_dropped(monkeypatch):
 
     monkeypatch.setattr(win, "isFullScreen", lambda: False)
     monkeypatch.setattr(win, "isMaximized", lambda: False)
-    monkeypatch.setattr(win, "_best_available_geometry", lambda: QRect(0, 0, 1600, 900))
-    monkeypatch.setattr(win, "setGeometry", lambda rect: calls.append(rect))
+    monkeypatch.setattr(win, "showMaximized", lambda: calls.append("showMaximized"))
 
     win._enforce_maximized_geometry()
-    assert len(calls) == 1
-    assert calls[0].width() == 1600
-    assert calls[0].height() == 900
+    assert calls == ["showMaximized"]
     win.close()
 
 
@@ -462,7 +459,7 @@ def test_change_event_schedules_fallback_after_maximize_bounce(monkeypatch):
     event = QWindowStateChangeEvent(Qt.WindowState.WindowMaximized)
     win.changeEvent(event)
 
-    assert calls == [0, "enforce"]
+    assert calls == [50, "enforce"]
     win.close()
 
 
