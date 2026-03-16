@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QColorDialog,
@@ -94,6 +94,8 @@ class AnnotationToolbar(QToolBar):
     # ------------------------------------------------------------------
 
     def _build(self):
+        self.setIconSize(QSize(18, 18))
+
         # ---- annotation type buttons ----
         for type_key, label, tip in _ANNOTATION_TOOLS:
             btn = QToolButton(self)
@@ -101,7 +103,7 @@ class AnnotationToolbar(QToolBar):
             btn.setToolTip(tip)
             btn.setCheckable(True)
             btn.setChecked(type_key == self._current_type)
-            btn.setFixedSize(28, 28)
+            btn.setMinimumSize(30, 28)
             btn.clicked.connect(lambda checked, k=type_key: self._on_type_clicked(k))
             self.addWidget(btn)
             self._type_buttons[type_key] = btn
@@ -110,37 +112,42 @@ class AnnotationToolbar(QToolBar):
 
         # ---- color button ----
         self._color_btn = QToolButton(self)
-        self._color_btn.setIcon(_color_icon(self._current_color))
+        self._color_btn.setIcon(_color_icon(self._current_color, 14))
         self._color_btn.setToolTip("Annotation color")
-        self._color_btn.setFixedSize(28, 28)
+        self._color_btn.setMinimumSize(30, 28)
         self._color_btn.clicked.connect(self._on_color_clicked)
         self.addWidget(self._color_btn)
 
         self.addSeparator()
 
         # ---- opacity ----
-        self.addWidget(QLabel("Opacity:"))
+        opacity_lbl = QLabel("Opacity")
+        opacity_lbl.setStyleSheet("font-size: 11px; color: #888; padding: 0 2px;")
+        self.addWidget(opacity_lbl)
         self._opacity_slider = QSlider(Qt.Orientation.Horizontal)
         self._opacity_slider.setRange(5, 100)
         self._opacity_slider.setValue(30)
-        self._opacity_slider.setFixedWidth(80)
+        self._opacity_slider.setFixedWidth(90)
         self._opacity_slider.setToolTip("Annotation opacity")
         self._opacity_slider.valueChanged.connect(self._on_opacity_changed)
         self.addWidget(self._opacity_slider)
         self._opacity_label = QLabel("30%")
-        self._opacity_label.setFixedWidth(34)
+        self._opacity_label.setFixedWidth(36)
+        self._opacity_label.setStyleSheet("font-size: 11px;")
         self.addWidget(self._opacity_label)
 
         self.addSeparator()
 
         # ---- stroke width (for shapes, freehand, line, arrow) ----
-        self.addWidget(QLabel("Width:"))
+        width_lbl = QLabel("Stroke")
+        width_lbl.setStyleSheet("font-size: 11px; color: #888; padding: 0 2px;")
+        self.addWidget(width_lbl)
         self._width_spin = QDoubleSpinBox()
         self._width_spin.setRange(0.5, 20.0)
         self._width_spin.setSingleStep(0.5)
         self._width_spin.setValue(2.0)
         self._width_spin.setDecimals(1)
-        self._width_spin.setFixedWidth(58)
+        self._width_spin.setFixedWidth(62)
         self._width_spin.setToolTip("Stroke / border width (pt)")
         self._width_spin.valueChanged.connect(self._on_width_changed)
         self.addWidget(self._width_spin)

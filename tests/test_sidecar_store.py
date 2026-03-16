@@ -1,5 +1,6 @@
 import json
 import os
+import tempfile
 from pathlib import Path
 
 from neoview.models.view_state import ANNOTATION_TYPES, AnnotationRecord, BookmarkRecord, DocumentSidecarState
@@ -13,7 +14,8 @@ from neoview.persistence.sidecar_store import (
 
 
 def test_sidecar_path_for():
-    path = sidecar_path_for("/tmp/demo.pdf")
+    pdf_path = str(Path(tempfile.gettempdir()) / "demo.pdf")
+    path = sidecar_path_for(pdf_path)
     assert path.endswith("demo.pdf.neoview.json")
 
 

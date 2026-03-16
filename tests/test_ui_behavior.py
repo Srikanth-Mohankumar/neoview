@@ -1,12 +1,18 @@
 import fitz
+import tempfile
 import time
-from PySide6.QtCore import QPointF, QRect, QRectF, Qt
+from pathlib import Path
+from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QWindowStateChangeEvent
 from PySide6.QtWidgets import QApplication
 
 from neoview.ui.main_window import MainWindow
 from neoview.ui.page_item import PageItem
 from neoview.ui.pdf_view import PdfView
+
+# Cross-platform temp paths used as fake PDF file path strings in tests.
+_TMP_PDF = str(Path(tempfile.gettempdir()) / "demo.pdf")
+_TMP_ACTIVE = str(Path(tempfile.gettempdir()) / "active.pdf")
 
 
 def test_find_panel_toggle():
@@ -274,8 +280,8 @@ def test_restore_document_session_applies_zoom_and_page(monkeypatch):
 
     win = MainWindow()
     win._view._doc = DummyDoc()
-    win._current_file = "/tmp/demo.pdf"
-    win._document_sessions = {"/tmp/demo.pdf": {"page": 2, "zoom": 1.4}}
+    win._current_file = _TMP_PDF
+    win._document_sessions = {_TMP_PDF: {"page": 2, "zoom": 1.4}}
 
     applied_zoom = []
     jumps = []
@@ -288,7 +294,7 @@ def test_restore_document_session_applies_zoom_and_page(monkeypatch):
     )
     monkeypatch.setattr(win._view, "go_to_page", lambda p: jumps.append(p))
 
-    restored = win._restore_document_session("/tmp/demo.pdf")
+    restored = win._restore_document_session(_TMP_PDF)
     QApplication.processEvents()
 
     assert restored is True
@@ -306,9 +312,9 @@ def test_restore_document_session_applies_fit_width_mode(monkeypatch):
 
     win = MainWindow()
     win._view._doc = DummyDoc()
-    win._current_file = "/tmp/demo.pdf"
+    win._current_file = _TMP_PDF
     win._document_sessions = {
-        "/tmp/demo.pdf": {"page": 1, "zoom": 1.0, "zoom_mode": PdfView.ZOOM_MODE_FIT_WIDTH}
+        _TMP_PDF: {"page": 1, "zoom": 1.0, "zoom_mode": PdfView.ZOOM_MODE_FIT_WIDTH}
     }
 
     fit_calls = []
@@ -316,7 +322,7 @@ def test_restore_document_session_applies_fit_width_mode(monkeypatch):
     monkeypatch.setattr(win._view, "fit_width", lambda: fit_calls.append(True))
     monkeypatch.setattr(win._view, "go_to_page", lambda p: jumps.append(p))
 
-    restored = win._restore_document_session("/tmp/demo.pdf")
+    restored = win._restore_document_session(_TMP_PDF)
     QApplication.processEvents()
 
     assert restored is True
@@ -327,7 +333,7 @@ def test_restore_document_session_applies_fit_width_mode(monkeypatch):
 
 def test_on_change_ignores_unrelated_paths(monkeypatch):
     win = MainWindow()
-    win._current_file = "/tmp/active.pdf"
+    win._current_file = _TMP_ACTIVE
     win._auto_reload_enabled = True
     win._last_file_sig = (1, 100, 1)
 
@@ -335,14 +341,15 @@ def test_on_change_ignores_unrelated_paths(monkeypatch):
     monkeypatch.setattr(win, "_file_signature", lambda _path: (2, 100, 1))
     monkeypatch.setattr(win._reload_timer, "start", lambda ms: starts.append(ms))
 
-    win._on_change("/var/other.pdf")
+    # Use a path outside the temp directory tree so it is treated as unrelated.
+    win._on_change(str(Path(tempfile.gettempdir()).parent / "nv_unrelated" / "other.pdf"))
     assert starts == []
     win.close()
 
 
 def test_on_change_schedules_reload_for_current_file(monkeypatch):
     win = MainWindow()
-    win._current_file = "/tmp/active.pdf"
+    win._current_file = _TMP_ACTIVE
     win._auto_reload_enabled = True
     win._last_file_sig = (1, 100, 1)
 
@@ -350,7 +357,7 @@ def test_on_change_schedules_reload_for_current_file(monkeypatch):
     monkeypatch.setattr(win, "_file_signature", lambda _path: (2, 100, 1))
     monkeypatch.setattr(win._reload_timer, "start", lambda ms: starts.append(ms))
 
-    win._on_change("/tmp/active.pdf")
+    win._on_change(_TMP_ACTIVE)
     assert starts == [200]
     win.close()
 
@@ -358,7 +365,7 @@ def test_on_change_schedules_reload_for_current_file(monkeypatch):
 def test_do_reload_skips_when_file_not_modified(monkeypatch):
     win = MainWindow()
     ctx = win.current_context()
-    ctx.file_path = "/tmp/demo.pdf"
+    ctx.file_path = _TMP_PDF
     win._last_file_sig = (10, 2048, 1)
 
     monkeypatch.setattr("neoview.ui.main_window.os.path.exists", lambda _path: True)
@@ -374,7 +381,7 @@ def test_do_reload_skips_when_file_not_modified(monkeypatch):
 def test_force_reload_runs_even_when_mtime_is_unchanged(monkeypatch):
     win = MainWindow()
     ctx = win.current_context()
-    ctx.file_path = "/tmp/demo.pdf"
+    ctx.file_path = _TMP_PDF
     win._last_file_sig = (10, 2048, 1)
     win._auto_reload_enabled = False
 
@@ -423,13 +430,10 @@ def test_enforce_maximized_geometry_reapplies_when_state_dropped(monkeypatch):
 
     monkeypatch.setattr(win, "isFullScreen", lambda: False)
     monkeypatch.setattr(win, "isMaximized", lambda: False)
-    monkeypatch.setattr(win, "_best_available_geometry", lambda: QRect(0, 0, 1600, 900))
-    monkeypatch.setattr(win, "setGeometry", lambda rect: calls.append(rect))
+    monkeypatch.setattr(win, "showMaximized", lambda: calls.append("showMaximized"))
 
     win._enforce_maximized_geometry()
-    assert len(calls) == 1
-    assert calls[0].width() == 1600
-    assert calls[0].height() == 900
+    assert calls == ["showMaximized"]
     win.close()
 
 
@@ -458,11 +462,13 @@ def test_change_event_schedules_fallback_after_maximize_bounce(monkeypatch):
         "neoview.ui.main_window.QTimer.singleShot",
         lambda delay, cb: (calls.append(delay), cb()),
     )
+    # The bounce-back guard is Linux-only; force the platform for this test.
+    monkeypatch.setattr("neoview.ui.main_window.sys.platform", "linux")
 
     event = QWindowStateChangeEvent(Qt.WindowState.WindowMaximized)
     win.changeEvent(event)
 
-    assert calls == [0, "enforce"]
+    assert calls == [50, "enforce"]
     win.close()
 
 
