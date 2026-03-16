@@ -483,6 +483,39 @@ QPushButton#PanelToggleBtn:checked {
     background: #37547a;
     color: #ffffff;
 }
+
+/* ── Inspector tab widget ── */
+QTabWidget#InspectorTabs::pane {
+    border: none;
+    background: transparent;
+}
+QTabWidget#InspectorTabs > QTabBar {
+    background: #2d2d2d;
+    border-bottom: 1px solid #3d3d3d;
+}
+QTabWidget#InspectorTabs > QTabBar::tab {
+    background: #2d2d2d;
+    border: none;
+    padding: 5px 10px;
+    font-size: 11px;
+    color: #888888;
+    min-width: 0;
+    max-width: 9999px;
+}
+QTabWidget#InspectorTabs > QTabBar::tab:selected {
+    background: #252526;
+    color: #e2e4e9;
+    border-bottom: 2px solid #4a90d9;
+}
+QTabWidget#InspectorTabs > QTabBar::tab:hover:!selected {
+    background: #333333;
+    color: #bbbbbb;
+}
+
+/* ── Annotation list alternating rows ── */
+QListWidget#annotation_list::item:alternate {
+    background: #2a2a2a;
+}
 """
 
 LIGHT_STYLE = """
@@ -967,5 +1000,38 @@ QPushButton#PanelToggleBtn:hover {
 QPushButton#PanelToggleBtn:checked {
     background: #dce7f5;
     color: #1a5fb4;
+}
+
+/* ── Inspector tab widget ── */
+QTabWidget#InspectorTabs::pane {
+    border: none;
+    background: transparent;
+}
+QTabWidget#InspectorTabs > QTabBar {
+    background: #ebebeb;
+    border-bottom: 1px solid #d1d1d1;
+}
+QTabWidget#InspectorTabs > QTabBar::tab {
+    background: #ebebeb;
+    border: none;
+    padding: 5px 10px;
+    font-size: 11px;
+    color: #888888;
+    min-width: 0;
+    max-width: 9999px;
+}
+QTabWidget#InspectorTabs > QTabBar::tab:selected {
+    background: #f5f5f5;
+    color: #222222;
+    border-bottom: 2px solid #2680eb;
+}
+QTabWidget#InspectorTabs > QTabBar::tab:hover:!selected {
+    background: #e0e0e0;
+    color: #555555;
+}
+
+/* ── Annotation list alternating rows ── */
+QListWidget::item:alternate {
+    background: #fafafa;
 }
 """
