@@ -24,7 +24,7 @@ def main() -> None:
     theme_mode = os.getenv("NEOVIEW_THEME", "light").strip().lower()
     if theme_mode == "dark":
         app.setStyleSheet(DARK_STYLE)
-        app.setFont(QFont("JetBrains Mono", 10))
+        app.setFont(QFont("Segoe UI", 10))
     else:
         app.setStyleSheet(LIGHT_STYLE)
         app.setFont(QFont("Segoe UI", 10))

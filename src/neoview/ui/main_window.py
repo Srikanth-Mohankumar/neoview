@@ -510,7 +510,7 @@ class MainWindow(QMainWindow):
         tb.setObjectName("MainToolbar")
         tb.setMovable(False)
         tb.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
-        tb.setIconSize(QSize(16, 16))
+        tb.setIconSize(QSize(18, 18))
         self.addToolBar(tb)
 
         tb.addAction(self._open_action)
@@ -523,11 +523,27 @@ class MainWindow(QMainWindow):
         tb.addWidget(self._recent_btn)
         tb.addSeparator()
 
+        # -- Page navigation --
+        self._page_nav_combo = QComboBox(self)
+        self._page_nav_combo.setEditable(True)
+        self._page_nav_combo.setMinimumWidth(70)
+        self._page_nav_combo.setMaximumWidth(90)
+        self._page_nav_combo.setToolTip("Go to page")
+        self._page_nav_combo.currentTextChanged.connect(self._on_page_nav_changed)
+        tb.addWidget(self._page_nav_combo)
+
+        self._page_total_lbl = QLabel(" / 0 ")
+        self._page_total_lbl.setStyleSheet("color: #888; font-size: 11px; padding: 0 4px;")
+        tb.addWidget(self._page_total_lbl)
+        tb.addSeparator()
+
+        # -- Zoom controls --
         tb.addAction(self._zoom_out_action)
 
         self._zoom_combo = QComboBox(self)
         self._zoom_combo.setEditable(True)
-        self._zoom_combo.setMinimumWidth(84)
+        self._zoom_combo.setMinimumWidth(78)
+        self._zoom_combo.setMaximumWidth(90)
         self._zoom_combo.addItems(["50%", "75%", "100%", "125%", "150%", "200%", "300%"])
         self._zoom_combo.setCurrentText("100%")
         self._zoom_combo.currentTextChanged.connect(self._on_zoom_combo_changed)
@@ -535,9 +551,11 @@ class MainWindow(QMainWindow):
 
         tb.addAction(self._zoom_in_action)
         tb.addAction(self._fit_width_action)
+        tb.addAction(self._fit_page_action)
         tb.addAction(self._actual_size_action)
         tb.addSeparator()
 
+        # -- Tool group --
         self._toolbar_select_action = QAction(self._icon("cursor-arrow", QStyle.StandardPixmap.SP_ArrowRight), "Select", self)
         self._toolbar_select_action.setToolTip("Select tool (1)")
         self._toolbar_select_action.setCheckable(True)
@@ -570,19 +588,7 @@ class MainWindow(QMainWindow):
         tb.addAction(self._toolbar_select_action)
         tb.addAction(self._toolbar_hand_action)
         tb.addAction(self._toolbar_measure_action)
-        tb.addSeparator()
 
-        self._toolbar_export_action = QAction(self._icon("document-save", QStyle.StandardPixmap.SP_DialogSaveButton), "Export", self)
-        self._toolbar_export_action.setToolTip("Export selection")
-        self._toolbar_export_action.triggered.connect(self._export)
-        tb.addAction(self._toolbar_export_action)
-
-        self._toolbar_copy_action = QAction(self._icon("edit-copy", QStyle.StandardPixmap.SP_FileIcon), "Copy Measurements", self)
-        self._toolbar_copy_action.setToolTip("Copy measurements (Ctrl+C)")
-        self._toolbar_copy_action.triggered.connect(self._copy)
-        tb.addAction(self._toolbar_copy_action)
-
-        # Add Annotate toggle to main toolbar
         self._toolbar_annotate_action = QAction(
             self._icon("draw-brush", QStyle.StandardPixmap.SP_FileDialogDetailedView),
             "Annotate",
@@ -595,8 +601,51 @@ class MainWindow(QMainWindow):
         tb.addAction(self._toolbar_annotate_action)
         tb.addSeparator()
 
-        self._toolbar_export_action.setParent(self)  # already added above, keep order
-        self._toolbar_copy_action.setParent(self)
+        # -- Actions --
+        self._toolbar_export_action = QAction(self._icon("document-save", QStyle.StandardPixmap.SP_DialogSaveButton), "Export", self)
+        self._toolbar_export_action.setToolTip("Export selection")
+        self._toolbar_export_action.triggered.connect(self._export)
+        tb.addAction(self._toolbar_export_action)
+
+        self._toolbar_copy_action = QAction(self._icon("edit-copy", QStyle.StandardPixmap.SP_FileIcon), "Copy Measurements", self)
+        self._toolbar_copy_action.setToolTip("Copy measurements (Ctrl+C)")
+        self._toolbar_copy_action.triggered.connect(self._copy)
+        tb.addAction(self._toolbar_copy_action)
+        tb.addSeparator()
+
+        # -- Panel toggle buttons (right side) --
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        tb.addWidget(spacer)
+
+        self._tb_search_btn = QPushButton("Search")
+        self._tb_search_btn.setObjectName("PanelToggleBtn")
+        self._tb_search_btn.setCheckable(True)
+        self._tb_search_btn.setToolTip("Toggle search panel (Ctrl+Shift+F)")
+        self._tb_search_btn.clicked.connect(self._toggle_search_dock)
+        tb.addWidget(self._tb_search_btn)
+
+        self._tb_nav_btn = QPushButton("Outline")
+        self._tb_nav_btn.setObjectName("PanelToggleBtn")
+        self._tb_nav_btn.setCheckable(True)
+        self._tb_nav_btn.setToolTip("Toggle outline panel (Ctrl+Shift+O)")
+        self._tb_nav_btn.clicked.connect(self._toggle_outline_dock)
+        tb.addWidget(self._tb_nav_btn)
+
+        self._tb_thumb_btn = QPushButton("Thumbs")
+        self._tb_thumb_btn.setObjectName("PanelToggleBtn")
+        self._tb_thumb_btn.setCheckable(True)
+        self._tb_thumb_btn.setToolTip("Toggle thumbnails panel (Ctrl+Shift+T)")
+        self._tb_thumb_btn.clicked.connect(self._toggle_thumbs_dock)
+        tb.addWidget(self._tb_thumb_btn)
+
+        self._tb_info_btn = QPushButton("Inspector")
+        self._tb_info_btn.setObjectName("PanelToggleBtn")
+        self._tb_info_btn.setCheckable(True)
+        self._tb_info_btn.setChecked(True)
+        self._tb_info_btn.setToolTip("Toggle inspector panel (Ctrl+Shift+I)")
+        self._tb_info_btn.clicked.connect(self._toggle_info_dock)
+        tb.addWidget(self._tb_info_btn)
 
     def _setup_annotation_toolbar(self):
         """Create and add the dedicated annotation toolbar (shown below main toolbar)."""
@@ -622,6 +671,12 @@ class MainWindow(QMainWindow):
 
         self._status.addWidget(self._status_dot)
         self._status.addWidget(self._file_lbl)
+
+        # Spacer to push remaining items right
+        status_spacer = QWidget()
+        status_spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self._status.addWidget(status_spacer)
+
         self._status.addWidget(self._page_count_lbl)
         self._perf_label = QLabel("")
         self._status.addPermanentWidget(self._perf_label)
@@ -637,11 +692,12 @@ class MainWindow(QMainWindow):
         )
         search_widget = QWidget()
         search_layout = QVBoxLayout(search_widget)
-        search_layout.setContentsMargins(6, 6, 6, 6)
+        search_layout.setContentsMargins(8, 8, 8, 8)
         search_layout.setSpacing(6)
 
         search_top = QHBoxLayout()
         search_top.setContentsMargins(0, 0, 0, 0)
+        search_top.setSpacing(4)
 
         self._search_input = QLineEdit()
         self._search_input.setPlaceholderText("Find text...")
@@ -656,7 +712,7 @@ class MainWindow(QMainWindow):
         self._search_close_btn.setProperty("secondary", True)
         self._search_count_lbl = QLabel("")
 
-        search_top.addWidget(self._search_input)
+        search_top.addWidget(self._search_input, 1)
         search_top.addWidget(self._search_case_chk)
         search_top.addWidget(self._search_prev_btn)
         search_top.addWidget(self._search_next_btn)
@@ -687,7 +743,7 @@ class MainWindow(QMainWindow):
 
         nav_widget = QWidget()
         nav_layout = QVBoxLayout(nav_widget)
-        nav_layout.setContentsMargins(6, 6, 6, 6)
+        nav_layout.setContentsMargins(8, 8, 8, 8)
         nav_layout.setSpacing(6)
 
         self._outline_filter = QLineEdit()
@@ -728,16 +784,17 @@ class MainWindow(QMainWindow):
 
         self._info_dock = QDockWidget("Inspector", self)
         self._info_dock.setObjectName("InspectorDock")
-        self._info_dock.setAllowedAreas(Qt.DockWidgetArea.RightDockWidgetArea)
-        self._info_dock.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
+        self._info_dock.setAllowedAreas(
+            Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
+        )
 
         inspector_widget = QWidget()
         inspector_widget.setObjectName("InspectorPanel")
-        inspector_widget.setMinimumWidth(260)
-        inspector_widget.setMaximumWidth(260)
+        inspector_widget.setMinimumWidth(220)
+        inspector_widget.setMaximumWidth(400)
 
         inspector_layout = QVBoxLayout(inspector_widget)
-        inspector_layout.setContentsMargins(12, 12, 12, 12)
+        inspector_layout.setContentsMargins(10, 10, 10, 10)
         inspector_layout.setSpacing(0)
 
         measure_section = CollapsibleSection("Measurements")
@@ -837,14 +894,16 @@ class MainWindow(QMainWindow):
 
         self._info_dock.setWidget(inspector_widget)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._info_dock)
-        self._info_dock.setMinimumWidth(260)
-        self._info_dock.setMaximumWidth(260)
+        self._info_dock.setMinimumWidth(220)
+        self._info_dock.setMaximumWidth(400)
 
     # --------------------------- Dock toggles ---------------------------
     def _toggle_search_dock(self):
         visible = not self._search_dock.isVisible()
         self._search_dock.setVisible(visible)
         self._settings.setValue("window/show_search", visible)
+        if hasattr(self, "_tb_search_btn"):
+            self._tb_search_btn.setChecked(visible)
         if visible:
             self._search_input.setFocus()
             self._search_input.selectAll()
@@ -853,16 +912,22 @@ class MainWindow(QMainWindow):
         visible = not self._outline_dock.isVisible()
         self._outline_dock.setVisible(visible)
         self._settings.setValue("window/show_outline", visible)
+        if hasattr(self, "_tb_nav_btn"):
+            self._tb_nav_btn.setChecked(visible)
 
     def _toggle_thumbs_dock(self):
         visible = not self._thumbs_dock.isVisible()
         self._thumbs_dock.setVisible(visible)
         self._settings.setValue("window/show_thumbnails", visible)
+        if hasattr(self, "_tb_thumb_btn"):
+            self._tb_thumb_btn.setChecked(visible)
 
     def _toggle_info_dock(self):
         visible = not self._info_dock.isVisible()
         self._info_dock.setVisible(visible)
         self._settings.setValue("window/show_inspector", visible)
+        if hasattr(self, "_tb_info_btn"):
+            self._tb_info_btn.setChecked(visible)
 
     # --------------------------- Settings ---------------------------
     def _load_json_setting(self, key: str, default):
@@ -901,6 +966,13 @@ class MainWindow(QMainWindow):
             self._outline_dock.setVisible(self._settings.value("window/show_outline", False, type=bool))
             self._thumbs_dock.setVisible(self._settings.value("window/show_thumbnails", False, type=bool))
             self._info_dock.setVisible(self._settings.value("window/show_inspector", True, type=bool))
+
+        # Sync panel toggle buttons with dock visibility
+        if hasattr(self, "_tb_search_btn"):
+            self._tb_search_btn.setChecked(self._search_dock.isVisible())
+            self._tb_nav_btn.setChecked(self._outline_dock.isVisible())
+            self._tb_thumb_btn.setChecked(self._thumbs_dock.isVisible())
+            self._tb_info_btn.setChecked(self._info_dock.isVisible())
 
         start_state = self._settings.value("window/start_state", "normal", type=str)
         if start_state == "fullscreen":
@@ -1008,6 +1080,12 @@ class MainWindow(QMainWindow):
         self._outline_dock.setVisible(False)
         self._thumbs_dock.setVisible(False)
         self._info_dock.setVisible(True)
+
+        if hasattr(self, "_tb_search_btn"):
+            self._tb_search_btn.setChecked(False)
+            self._tb_nav_btn.setChecked(False)
+            self._tb_thumb_btn.setChecked(False)
+            self._tb_info_btn.setChecked(True)
 
         self._settings.remove("window/geometry")
         self._settings.remove("window/state")
@@ -1205,6 +1283,10 @@ class MainWindow(QMainWindow):
             self._doc_page.setText("0 / 0")
             self._doc_zoom.setText("--")
             self._page_count_lbl.setText("Pages: 0")
+            self._page_total_lbl.setText(" / 0 ")
+            self._page_nav_combo.blockSignals(True)
+            self._page_nav_combo.clear()
+            self._page_nav_combo.blockSignals(False)
             self._outline_tree.clear()
             self._thumbs_list.clear()
             self._clear_thumbnail_queue()
@@ -1219,6 +1301,12 @@ class MainWindow(QMainWindow):
         self._doc_page.setText(f"{view.current_page + 1} / {doc.page_count}")
         self._doc_zoom.setText(f"{view.zoom * 100:.0f}%")
         self._page_count_lbl.setText(f"Pages: {doc.page_count}")
+        self._page_total_lbl.setText(f" / {doc.page_count} ")
+        self._page_nav_combo.blockSignals(True)
+        self._page_nav_combo.clear()
+        self._page_nav_combo.addItems([str(i + 1) for i in range(doc.page_count)])
+        self._page_nav_combo.setCurrentText(str(view.current_page + 1))
+        self._page_nav_combo.blockSignals(False)
         self.setWindowTitle(f"{APP_NAME} - {name}")
 
         self._populate_outline()
@@ -2106,12 +2194,28 @@ class MainWindow(QMainWindow):
             self._update_status()
         self._schedule_session_save()
 
+    def _on_page_nav_changed(self, text: str):
+        raw = text.strip()
+        if not raw:
+            return
+        try:
+            page = int(raw)
+        except ValueError:
+            return
+        view = self.current_view()
+        if view.document and 1 <= page <= view.page_count:
+            view.go_to_page(page - 1)
+
     def _on_view_page_changed(self, view: PdfView, current: int, total: int):
         if not self._is_current_view(view):
             return
 
         self._doc_page.setText(f"{current} / {total}")
         self._page_count_lbl.setText(f"Pages: {total}")
+        self._page_total_lbl.setText(f" / {total} ")
+        self._page_nav_combo.blockSignals(True)
+        self._page_nav_combo.setCurrentText(str(current))
+        self._page_nav_combo.blockSignals(False)
 
         if total == self._thumbs_list.count() and total > 0:
             idx = current - 1
@@ -2469,6 +2573,10 @@ class MainWindow(QMainWindow):
             self._doc_zoom.setText(zoom_text)
             self._doc_page.setText(f"{view.current_page + 1} / {view.page_count}")
             self._page_count_lbl.setText(f"Pages: {view.page_count}")
+            self._page_total_lbl.setText(f" / {view.page_count} ")
+            self._page_nav_combo.blockSignals(True)
+            self._page_nav_combo.setCurrentText(str(view.current_page + 1))
+            self._page_nav_combo.blockSignals(False)
 
             self._sync_zoom_combo()
             self._update_measurements_panel(view.selection_rect)
@@ -2479,6 +2587,7 @@ class MainWindow(QMainWindow):
 
             self._file_lbl.setText("No file")
             self._page_count_lbl.setText("Pages: 0")
+            self._page_total_lbl.setText(" / 0 ")
             self._zoom_lbl.setText("--")
             self._doc_name.setText("No file")
             self._doc_page.setText("0 / 0")
@@ -2522,8 +2631,8 @@ class MainWindow(QMainWindow):
 
         app = QApplication.instance()
         is_dark = str(app.property("theme_mode") or "").lower() == "dark" if app else False
-        line_color = QColor("#e8e8ed") if is_dark else QColor("#1f2430")
-        fill_color = QColor("#2b3f72") if is_dark else QColor("#ffffff")
+        line_color = QColor("#cccccc") if is_dark else QColor("#555555")
+        fill_color = QColor("#37547a") if is_dark else QColor("#ffffff")
 
         pix = QPixmap(20, 20)
         pix.fill(Qt.GlobalColor.transparent)
