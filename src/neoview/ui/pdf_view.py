@@ -887,6 +887,66 @@ class PdfView(QGraphicsView):
             self._scene.addItem(item)
             self._search_items.append(item)
 
+    def select_all_text_on_page(self, page_idx: int = -1):
+        """Select and copy all text on the given page (or current page)."""
+        if page_idx < 0:
+            page_idx = self.current_page
+        if not (0 <= page_idx < len(self._pages)):
+            return
+        page_item = self._pages[page_idx]
+        page_rect = QRectF(0, 0, page_item._width, page_item._height)
+        text = self.extract_text_in_rect(page_idx, page_rect)
+        if text:
+            self.clear_text_selection()
+            self._highlight_text_in_rect(page_idx, page_rect)
+            self.text_selected.emit(text)
+
+    def contextMenuEvent(self, event):
+        """Right-click context menu for text operations."""
+        scene_pos = self.mapToScene(event.pos())
+        page_idx = self._get_page_at(scene_pos)
+
+        # Check if right-click is on an annotation
+        if self._selected_annotation_id:
+            self._show_annotation_context_menu(self._selected_annotation_id, event.globalPos())
+            event.accept()
+            return
+
+        menu = QMenu(self)
+
+        # "Copy Text" — enabled when text highlights exist
+        has_selection = bool(self._text_highlight_items)
+        copy_action = menu.addAction("Copy Text")
+        copy_action.setEnabled(has_selection)
+
+        menu.addSeparator()
+
+        # "Select All on Page" — enabled when a page is visible
+        select_all_action = menu.addAction("Select All on Page")
+        select_all_action.setEnabled(page_idx >= 0 or len(self._pages) > 0)
+
+        chosen = menu.exec(event.globalPos())
+        if chosen == copy_action and has_selection:
+            # Gather text from highlighted spans
+            first_page = self._text_highlight_items[0][0] if self._text_highlight_items else -1
+            rects = [
+                item.rect() for pi, item in self._text_highlight_items
+                if shiboken6.isValid(item)
+            ]
+            if rects and first_page >= 0:
+                union = rects[0]
+                for r in rects[1:]:
+                    union = union.united(r)
+                text = self.extract_text_in_rect(first_page, union)
+                if text:
+                    QApplication.clipboard().setText(text)
+                    self.text_selected.emit(text)
+        elif chosen == select_all_action:
+            target = page_idx if page_idx >= 0 else self.current_page
+            self.select_all_text_on_page(target)
+
+        event.accept()
+
     def extract_text_in_rect(self, page_idx: int, rect: QRectF) -> str:
         if 0 <= page_idx < len(self._pages):
             page_item = self._pages[page_idx]
@@ -1643,6 +1703,37 @@ class PdfView(QGraphicsView):
 
     def keyPressEvent(self, e: QKeyEvent):
         key = e.key()
+        mods = e.modifiers()
+
+        # Ctrl+C — copy active text selection to clipboard
+        if key == Qt.Key.Key_C and mods & Qt.KeyboardModifier.ControlModifier:
+            if self._text_highlight_items:
+                # Re-extract text from the highlighted region
+                for page_idx, item in self._text_highlight_items:
+                    break  # just need the page_idx
+                # Gather bounding box of all highlights on that page
+                rects = [
+                    item.rect() for pi, item in self._text_highlight_items
+                    if shiboken6.isValid(item)
+                ]
+                if rects:
+                    union = rects[0]
+                    for r in rects[1:]:
+                        union = union.united(r)
+                    text = self.extract_text_in_rect(page_idx, union)
+                    if text:
+                        QApplication.clipboard().setText(text)
+                        self.text_selected.emit(text)
+                        e.accept()
+                        return
+            super().keyPressEvent(e)
+            return
+
+        # Ctrl+A — select all text on the current page
+        if key == Qt.Key.Key_A and mods & Qt.KeyboardModifier.ControlModifier:
+            self.select_all_text_on_page()
+            e.accept()
+            return
 
         # Delete/Backspace removes selected annotation
         if key in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):

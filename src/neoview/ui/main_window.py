@@ -2101,6 +2101,13 @@ class MainWindow(QMainWindow):
                 color_obj = QColor(ann_rec.color or "#f7c948")
                 rgb = (color_obj.redF(), color_obj.greenF(), color_obj.blueF())
 
+                # Resolve border/stroke color
+                if ann_rec.border_color:
+                    bc_obj = QColor(ann_rec.border_color)
+                    stroke_rgb = (bc_obj.redF(), bc_obj.greenF(), bc_obj.blueF())
+                else:
+                    stroke_rgb = rgb
+
                 t = ann_rec.type
                 if t == "highlight":
                     a = page.add_highlight_annot(rect)
@@ -2127,8 +2134,33 @@ class MainWindow(QMainWindow):
                     continue
 
                 try:
-                    a.set_colors(stroke=rgb, fill=rgb)
+                    # Apply colors per annotation type
+                    if t in ("highlight", "underline", "strikethrough"):
+                        # Text markup: only color matters (no stroke/fill distinction)
+                        a.set_colors(stroke=rgb)
+                    elif t in ("rectangle", "ellipse"):
+                        # Shapes: stroke = border_color, fill = color
+                        a.set_colors(stroke=stroke_rgb, fill=rgb)
+                    elif t in ("line", "arrow", "freehand"):
+                        # Lines/paths: stroke only
+                        a.set_colors(stroke=stroke_rgb)
+                    elif t == "note":
+                        a.set_colors(fill=rgb)
+                    elif t == "text-box":
+                        pass  # colors set via add_freetext_annot params
+                    else:
+                        a.set_colors(stroke=rgb, fill=rgb)
+
                     a.set_opacity(ann_rec.opacity)
+
+                    # Apply border width for shapes, lines, and freehand
+                    if t in ("rectangle", "ellipse", "line", "arrow", "freehand"):
+                        a.set_border(width=ann_rec.border_width)
+
+                    # Arrow line ending
+                    if t == "arrow":
+                        a.set_line_ends(_fitz.PDF_ANNOT_LE_NONE, _fitz.PDF_ANNOT_LE_CLOSED_ARROW)
+
                     if ann_rec.contents and t not in ("note", "text-box", "freehand"):
                         a.set_info(content=ann_rec.contents)
                     a.update()

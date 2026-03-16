@@ -462,6 +462,8 @@ def test_change_event_schedules_fallback_after_maximize_bounce(monkeypatch):
         "neoview.ui.main_window.QTimer.singleShot",
         lambda delay, cb: (calls.append(delay), cb()),
     )
+    # The bounce-back guard is Linux-only; force the platform for this test.
+    monkeypatch.setattr("neoview.ui.main_window.sys.platform", "linux")
 
     event = QWindowStateChangeEvent(Qt.WindowState.WindowMaximized)
     win.changeEvent(event)
