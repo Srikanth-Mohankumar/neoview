@@ -1950,7 +1950,9 @@ class MainWindow(QMainWindow):
         if len(ctx.sidecar_state.annotations) == before:
             return
 
-        self._mark_sidecar_dirty(self.current_view())
+        cur_view = self.current_view()
+        self._mark_sidecar_dirty(cur_view)
+        cur_view.set_annotations(ctx.sidecar_state.annotations + ctx.native_annotations)
         self._populate_annotation_list()
         self._status.showMessage("Annotation deleted", 1200)
 
@@ -1999,6 +2001,7 @@ class MainWindow(QMainWindow):
 
         ctx.sidecar_state.annotations.append(record)
         self._mark_sidecar_dirty(view)
+        view.set_annotations(ctx.sidecar_state.annotations + ctx.native_annotations)
         self._populate_annotation_list()
         self._status.showMessage(f"Added {ann_type}", 1200)
 
@@ -2023,6 +2026,7 @@ class MainWindow(QMainWindow):
             return
         ctx.sidecar_state.annotations.append(record)
         self._mark_sidecar_dirty(view)
+        view.set_annotations(ctx.sidecar_state.annotations + ctx.native_annotations)
         self._populate_annotation_list()
         self._status.showMessage(f"Added {record.type}", 1200)
 
@@ -2035,6 +2039,7 @@ class MainWindow(QMainWindow):
         ctx.sidecar_state.annotations = [a for a in ctx.sidecar_state.annotations if a.id != ann_id]
         if len(ctx.sidecar_state.annotations) < before:
             self._mark_sidecar_dirty(view)
+            view.set_annotations(ctx.sidecar_state.annotations + ctx.native_annotations)
             self._populate_annotation_list()
             self._status.showMessage("Annotation deleted", 1200)
 
