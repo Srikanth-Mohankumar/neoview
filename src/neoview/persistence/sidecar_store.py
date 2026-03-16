@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import tempfile
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional
@@ -18,6 +19,15 @@ from neoview.models.view_state import (
 
 
 SCHEMA_VERSION = 1
+
+# Hard caps to prevent DoS via crafted sidecar files.
+_MAX_ANNOTATIONS = 10_000
+_MAX_BOOKMARKS = 5_000
+_MAX_POINTS = 50_000
+_MAX_EXTRA_BYTES = 65_536
+_MAX_ID_LEN = 128
+_ID_RE = re.compile(r'^[a-zA-Z0-9\-_]+$')
+_HEX_COLOR_RE = re.compile(r'^#[0-9a-fA-F]{3}(?:[0-9a-fA-F]{3})?$')
 LOG = logging.getLogger(__name__)
 
 
@@ -42,6 +52,13 @@ def _coerce_rect(value: Any) -> Optional[tuple[float, float, float, float]]:
     if h < 0:
         h = 0.0
     return (x, y, w, h)
+
+
+def _coerce_color(value: str, default: str = "#f7c948") -> str:
+    """Return value if it is a valid 3- or 6-digit hex color, else the default."""
+    if _HEX_COLOR_RE.match(value):
+        return value
+    return default
 
 
 def _coerce_points(value: Any) -> List[List[float]]:
@@ -76,10 +93,10 @@ def _annotation_from_dict(item: Dict[str, Any]) -> Optional[AnnotationRecord]:
         return None
 
     aid = str(item.get("id", "")).strip()
-    if not aid:
+    if not aid or len(aid) > _MAX_ID_LEN or not _ID_RE.match(aid):
         return None
 
-    color = str(item.get("color", "#f7c948")).strip() or "#f7c948"
+    color = _coerce_color(str(item.get("color", "#f7c948")).strip())
     try:
         opacity = float(item.get("opacity", 0.25))
     except (TypeError, ValueError):
@@ -98,10 +115,13 @@ def _annotation_from_dict(item: Dict[str, Any]) -> Optional[AnnotationRecord]:
         font_size = 12.0
     font_size = max(6.0, min(72.0, font_size))
 
-    border_color = str(item.get("border_color") or "").strip()
-    points = _coerce_points(item.get("points", []))
+    border_color = _coerce_color(str(item.get("border_color") or "").strip(), default="")
+    points = _coerce_points(item.get("points", []))[:_MAX_POINTS]
     extra = item.get("extra", {})
     if not isinstance(extra, dict):
+        extra = {}
+    # Cap extra to prevent memory exhaustion via oversized embedded dicts.
+    if len(json.dumps(extra)) > _MAX_EXTRA_BYTES:
         extra = {}
 
     created = str(item.get("created_at") or _utc_now_iso())
@@ -201,12 +221,12 @@ def _iter_records(source: Any) -> Iterable[Dict[str, Any]]:
 def load_sidecar(pdf_path: str) -> DocumentSidecarState:
     """Load sidecar state for a document. Malformed files fail-soft to empty state."""
     path = sidecar_path_for(pdf_path)
-    if not os.path.exists(path):
-        return DocumentSidecarState(version=SCHEMA_VERSION)
-
+    # Open directly without os.path.exists() pre-check to avoid TOCTOU race.
     try:
         with open(path, "r", encoding="utf-8") as handle:
             payload = json.load(handle)
+    except FileNotFoundError:
+        return DocumentSidecarState(version=SCHEMA_VERSION)
     except (OSError, json.JSONDecodeError):
         _rename_broken(path)
         return DocumentSidecarState(version=SCHEMA_VERSION)
@@ -222,13 +242,13 @@ def load_sidecar(pdf_path: str) -> DocumentSidecarState:
         version = SCHEMA_VERSION
 
     annotations = []
-    for item in _iter_records(payload.get("annotations", [])):
+    for item in _iter_records(payload.get("annotations", []))[:_MAX_ANNOTATIONS]:
         parsed = _annotation_from_dict(item)
         if parsed is not None:
             annotations.append(parsed)
 
     bookmarks = []
-    for item in _iter_records(payload.get("bookmarks", [])):
+    for item in _iter_records(payload.get("bookmarks", []))[:_MAX_BOOKMARKS]:
         parsed = _bookmark_from_dict(item)
         if parsed is not None:
             bookmarks.append(parsed)
@@ -259,6 +279,12 @@ def save_sidecar(pdf_path: str, state: DocumentSidecarState) -> None:
             json.dump(payload, handle, indent=2)
             handle.write("\n")
         os.replace(tmp_path, path)
+        # Ensure owner-only read/write; mkstemp already creates 0600 but
+        # os.replace may inherit the target file's umask on some systems.
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
     except OSError as exc:
         LOG.warning("Failed to save sidecar for %s: %s", pdf_path, exc)
     finally:

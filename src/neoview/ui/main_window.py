@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import deque
+import html
 import json
 import os
 import sys
@@ -1663,7 +1664,7 @@ class MainWindow(QMainWindow):
         self._search_results_list.clear()
 
         for i, match in enumerate(ctx.search_results):
-            item = QListWidgetItem(f"p{match.page_idx + 1}: {match.snippet}")
+            item = QListWidgetItem(f"p{match.page_idx + 1}: {html.escape(match.snippet)}")
             item.setData(Qt.ItemDataRole.UserRole, i)
             self._search_results_list.addItem(item)
 
@@ -1785,7 +1786,7 @@ class MainWindow(QMainWindow):
             item.setData(Qt.ItemDataRole.UserRole, ann.id)
             tip = f"Native PDF annotation ({ann.type}) — read-only"
             if ann.contents:
-                tip += f"\n{ann.contents}"
+                tip += f"\n{html.escape(ann.contents)}"
             item.setToolTip(tip)
             self._annotation_list.addItem(item)
 
@@ -2791,6 +2792,7 @@ class MainWindow(QMainWindow):
         key.setObjectName("InfoLabel")
         val = QLabel(value)
         val.setObjectName("InfoValue")
+        val.setTextFormat(Qt.TextFormat.PlainText)
         row.addWidget(key)
         row.addStretch()
         row.addWidget(val)

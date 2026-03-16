@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from bisect import bisect_right
+import html
 import os
 import re
 from urllib.parse import unquote
@@ -774,7 +775,7 @@ class PdfView(QGraphicsView):
             page = self._pages[ann.page]
             item = AnnotationItem(ann)
             if ann.contents and ann.type in ("note", "text-box"):
-                item.setToolTip(ann.contents)
+                item.setToolTip(html.escape(ann.contents))
             item.setPos(page.pos())
             item.setScale(self._zoom)
             # Restore selection state
@@ -1215,11 +1216,14 @@ class PdfView(QGraphicsView):
         link = link_info["link"]
         self._hide_link_badge()
 
+        _ALLOWED_URI_SCHEMES = {"http", "https", "mailto"}
         kind = link.get("kind")
         uri = link.get("uri")
         if uri:
             if kind == fitz.LINK_URI and not str(uri).startswith("#"):
-                QDesktopServices.openUrl(QUrl(uri))
+                parsed = QUrl(uri)
+                if parsed.scheme().lower() in _ALLOWED_URI_SCHEMES:
+                    QDesktopServices.openUrl(parsed)
                 return
             page_id, y = self._resolve_uri_destination(str(uri))
             if isinstance(page_id, int):
@@ -1413,7 +1417,8 @@ class PdfView(QGraphicsView):
                     max(0, min(local_pos.y(), page.page_rect.height())),
                 )
             if self._annotate_type == "freehand":
-                self._annotate_freehand_points.append([local_pos.x(), local_pos.y()])
+                if len(self._annotate_freehand_points) < 50_000:
+                    self._annotate_freehand_points.append([local_pos.x(), local_pos.y()])
                 pts = self._annotate_freehand_points
                 if len(pts) >= 2:
                     path = QPainterPath()
