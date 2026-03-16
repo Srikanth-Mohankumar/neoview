@@ -430,7 +430,7 @@ QLabel#InfoValue {
 }
 QLabel#MonoValue {
     color: #e8e8e8;
-    font-family: "JetBrains Mono", "Fira Code", "Consolas", monospace;
+    font-family: "JetBrains Mono", "Fira Code", "Consolas", "Courier New", "DejaVu Sans Mono", monospace;
     font-size: 13px;
     font-weight: 600;
 }
@@ -455,7 +455,7 @@ QLabel#FloatingMeasureBadge {
     border-radius: 4px;
     padding: 3px 8px;
     color: #e2e4e9;
-    font-family: "JetBrains Mono", "Fira Code", "Consolas", monospace;
+    font-family: "JetBrains Mono", "Fira Code", "Consolas", "Courier New", "DejaVu Sans Mono", monospace;
     font-size: 11px;
     font-weight: 600;
 }
@@ -948,7 +948,7 @@ QLabel#InfoValue {
 }
 QLabel#MonoValue {
     color: #222222;
-    font-family: "JetBrains Mono", "Fira Code", "Consolas", monospace;
+    font-family: "JetBrains Mono", "Fira Code", "Consolas", "Courier New", "DejaVu Sans Mono", monospace;
     font-size: 13px;
     font-weight: 600;
 }
@@ -973,7 +973,7 @@ QLabel#FloatingMeasureBadge {
     border-radius: 4px;
     padding: 3px 8px;
     color: #333333;
-    font-family: "JetBrains Mono", "Fira Code", "Consolas", monospace;
+    font-family: "JetBrains Mono", "Fira Code", "Consolas", "Courier New", "DejaVu Sans Mono", monospace;
     font-size: 11px;
     font-weight: 600;
 }

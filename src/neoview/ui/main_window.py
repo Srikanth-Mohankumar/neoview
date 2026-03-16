@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import deque
 import json
 import os
+import sys
 import time
 from typing import Dict, List, Optional, Tuple
 from uuid import uuid4
@@ -1184,8 +1185,8 @@ class MainWindow(QMainWindow):
             old_maximized = bool(event.oldState() & Qt.WindowState.WindowMaximized)
 
         # Some Linux WMs briefly enter maximized then bounce back to normal.
-        # Re-request showMaximized() — it is safe to call even if already maximized.
-        if old_maximized and self._last_maximize_at > 0 and (time.monotonic() - self._last_maximize_at) < 1.5:
+        # Re-request showMaximized() — not needed on Windows where the WM behaves correctly.
+        if sys.platform != "win32" and old_maximized and self._last_maximize_at > 0 and (time.monotonic() - self._last_maximize_at) < 1.5:
             QTimer.singleShot(50, self._enforce_maximized_geometry)
 
     def _schedule_session_save(self):

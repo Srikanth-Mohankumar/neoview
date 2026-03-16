@@ -24,11 +24,13 @@ def main() -> None:
     theme_mode = os.getenv("NEOVIEW_THEME", "light").strip().lower()
     if theme_mode == "dark":
         app.setStyleSheet(DARK_STYLE)
-        app.setFont(QFont("Segoe UI", 10))
     else:
         app.setStyleSheet(LIGHT_STYLE)
-        app.setFont(QFont("Segoe UI", 10))
         theme_mode = "light"
+    # Segoe UI is a Windows-native font; let the stylesheet font-family stack
+    # drive selection on Linux so the system default is not overridden.
+    if sys.platform == "win32":
+        app.setFont(QFont("Segoe UI", 10))
     app.setProperty("theme_mode", theme_mode)
 
     icon = load_app_icon()
