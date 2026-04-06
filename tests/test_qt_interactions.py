@@ -205,6 +205,10 @@ def test_live_search_stays_responsive_with_tabs_and_annotations(tmp_path: Path, 
     assert win._search_operation is None
     assert win.current_view() is annotated_view
 
+    win.close()
+    qtbot.waitUntil(lambda: not win.isVisible(), timeout=2000)
+    qtbot.wait(300)
+
 
 def test_add_bookmark_action_via_qtbot(tmp_path: Path, qtbot, monkeypatch):
     pdf = tmp_path / "bookmark.pdf"

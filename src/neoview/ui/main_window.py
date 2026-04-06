@@ -305,6 +305,10 @@ class MainWindow(QMainWindow):
         if not isinstance(widget, PdfView):
             return
 
+        if widget is self.current_view():
+            self._search_timer.stop()
+            self._cancel_search_operation()
+
         if self._tabs.count() == 1:
             self._save_sidecar_for_view(widget)
             widget.close_document()
@@ -1715,11 +1719,19 @@ class MainWindow(QMainWindow):
 
         view = operation["view"]
         ctx = operation["ctx"]
-        if view is not self.current_view() or ctx is not self.current_context():
+        if (
+            view is not self.current_view()
+            or ctx is not self.current_context()
+            or view.document is not operation["doc"]
+        ):
             self._cancel_search_operation()
             return
 
-        completed = self._scan_search_batch(operation)
+        try:
+            completed = self._scan_search_batch(operation)
+        except Exception:
+            self._cancel_search_operation()
+            return
         if not completed:
             self._search_batch_timer.start(0)
             return
@@ -2979,6 +2991,10 @@ class MainWindow(QMainWindow):
         return val
 
     def closeEvent(self, e):
+        self._search_timer.stop()
+        self._cancel_search_operation()
+        self._reload_timer.stop()
+        self._thumb_timer.stop()
         self._session_save_timer.stop()
 
         for idx in range(self._tabs.count()):
