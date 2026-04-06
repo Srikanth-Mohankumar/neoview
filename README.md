@@ -177,5 +177,7 @@ MIT
 
 ```bash
 python3 -m pip install -e .[dev]
-pytest
+PYTHONPATH=src pytest -q
 ```
+
+For Qt interaction tests, the suite uses `pytest-qt` and runs headless with `QT_QPA_PLATFORM=offscreen`.

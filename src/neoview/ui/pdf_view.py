@@ -537,7 +537,8 @@ class PdfView(QGraphicsView):
         for idx in range(start_idx, len(self._pages)):
             page = self._pages[idx]
             page_top = page.pos().y()
-            page_bottom = page_top + page.page_rect.height() * self._zoom
+            page_rect = getattr(page, "page_rect", QRectF())
+            page_bottom = page_top + page_rect.height() * self._zoom
             if page_top > bottom:
                 break
             if page_bottom < top:
@@ -562,7 +563,8 @@ class PdfView(QGraphicsView):
     def _visible_page_needs_rerender(self) -> bool:
         for idx in self._visible_page_indices():
             page = self._pages[idx]
-            if abs(page.render_zoom - self._zoom) >= 0.01:
+            render_zoom = getattr(page, "render_zoom", self._zoom)
+            if abs(render_zoom - self._zoom) >= 0.01:
                 return True
         return False
 
@@ -573,7 +575,8 @@ class PdfView(QGraphicsView):
         rerendered = False
         for idx in self._visible_page_indices(overscan=2):
             page = self._pages[idx]
-            if page.rerender(self._zoom):
+            rerender = getattr(page, "rerender", None)
+            if callable(rerender) and rerender(self._zoom):
                 page.setScale(1.0 / PageItem.RENDER_SCALE)
                 rerendered = True
 
@@ -894,7 +897,7 @@ class PdfView(QGraphicsView):
         if not (0 <= page_idx < len(self._pages)):
             return
         page_item = self._pages[page_idx]
-        page_rect = QRectF(0, 0, page_item._width, page_item._height)
+        page_rect = QRectF(0, 0, page_item.page_rect.width(), page_item.page_rect.height())
         text = self.extract_text_in_rect(page_idx, page_rect)
         if text:
             self.clear_text_selection()

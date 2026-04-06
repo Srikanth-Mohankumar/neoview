@@ -18,6 +18,16 @@ def _create_pdf(path: Path, pages: int = 1, text_prefix: str = "Page"):
     doc.close()
 
 
+def _rewrite_pdf_for_reload(win: MainWindow, path: Path, pages: int, text_prefix: str) -> None:
+    # Windows does not allow overwriting the same PDF while PyMuPDF still has it open.
+    if os.name == "nt":
+        view = win.current_view()
+        if view._doc is not None:
+            view._doc.close()
+            view._doc = None
+    _create_pdf(path, pages=pages, text_prefix=text_prefix)
+
+
 def test_open_file_reuses_existing_tab(tmp_path: Path):
     pdf = tmp_path / "sample.pdf"
     _create_pdf(pdf, pages=2)
@@ -136,7 +146,7 @@ def test_force_reload_refreshes_active_search_results(tmp_path: Path):
     assert win.current_view().page_count == 1
     assert len(win.current_context().search_results) == 1
 
-    _create_pdf(pdf, pages=3, text_prefix="Reloadable")
+    _rewrite_pdf_for_reload(win, pdf, pages=3, text_prefix="Reloadable")
     win._force_reload()
     QApplication.processEvents()
 
@@ -157,7 +167,7 @@ def test_force_reload_invalidates_page_pixmap_cache_for_same_path(tmp_path: Path
     before_text = win.current_view().document.load_page(0).get_text("text")
     before_key = win.current_view()._pages[0].pixmap().cacheKey()
 
-    _create_pdf(pdf, pages=1, text_prefix="After")
+    _rewrite_pdf_for_reload(win, pdf, pages=1, text_prefix="After")
     win._force_reload()
     QApplication.processEvents()
 
