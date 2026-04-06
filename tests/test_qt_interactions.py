@@ -1,10 +1,13 @@
+import os
 from pathlib import Path
+import time
 
 import fitz
-from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtCore import QPoint, QPointF, Qt, QTimer
 from PySide6.QtGui import QContextMenuEvent
 from PySide6.QtWidgets import QApplication, QDialog, QFileDialog, QInputDialog, QSlider, QTextEdit
 
+from neoview.models.view_state import AnnotationRecord
 from neoview.ui.main_window import MainWindow
 from neoview.ui.pdf_view import ToolMode
 
@@ -16,6 +19,15 @@ def _create_pdf(path: Path, pages: int = 1, text_prefix: str = "Page"):
         page.insert_text((72, 120), f"{text_prefix} {idx + 1} sample text search-target")
     doc.save(str(path))
     doc.close()
+
+
+def _rewrite_pdf_for_reload(win: MainWindow, path: Path, pages: int = 1, text_prefix: str = "Page"):
+    if os.name == "nt":
+        view = win.current_view()
+        if view._doc is not None:
+            view._doc.close()
+            view._doc = None
+    _create_pdf(path, pages=pages, text_prefix=text_prefix)
 
 
 def _create_pdf_with_toc(path: Path):
@@ -132,7 +144,7 @@ def test_reload_action_refreshes_same_path_pdf_via_qtbot(tmp_path: Path, qtbot):
     before_key = win.current_view()._pages[0].pixmap().cacheKey()
     assert "Before" in win.current_view().document.load_page(0).get_text("text")
 
-    _create_pdf(pdf, pages=3, text_prefix="After")
+    _rewrite_pdf_for_reload(win, pdf, pages=3, text_prefix="After")
     win._reload_action.trigger()
 
     qtbot.waitUntil(lambda: win.current_view().page_count == 3, timeout=3000)
@@ -143,6 +155,55 @@ def test_reload_action_refreshes_same_path_pdf_via_qtbot(tmp_path: Path, qtbot):
 
     after_key = win.current_view()._pages[0].pixmap().cacheKey()
     assert before_key != after_key
+
+
+def test_live_search_stays_responsive_with_tabs_and_annotations(tmp_path: Path, qtbot, monkeypatch):
+    plain_pdf = tmp_path / "plain.pdf"
+    annotated_pdf = tmp_path / "annotated.pdf"
+    _create_pdf(plain_pdf, pages=1, text_prefix="Plain")
+    _create_pdf(annotated_pdf, pages=36, text_prefix="Annotated")
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.show()
+    win._open_file(str(plain_pdf))
+    win._open_file(str(annotated_pdf))
+    annotated_view = win.current_view()
+    annotated_ctx = win.current_context()
+    annotated_ctx.sidecar_state.annotations = [
+        AnnotationRecord(
+            id=f"ann-{idx}",
+            type="highlight",
+            page=idx % annotated_view.page_count,
+            rect=(72.0, 108.0, 180.0, 18.0),
+            color="#f7c948",
+            opacity=0.35,
+        )
+        for idx in range(24)
+    ]
+    annotated_view.set_annotations(annotated_ctx.sidecar_state.annotations)
+
+    original_search_page_rects = win._search_page_rects
+
+    def slow_search(page, query):
+        time.sleep(0.03)
+        return original_search_page_rects(page, query)
+
+    monkeypatch.setattr(win, "_search_page_rects", slow_search)
+
+    win._find_action.trigger()
+    win._search_input.setText("search-target")
+    QApplication.processEvents()
+
+    heartbeat = []
+    QTimer.singleShot(0, win._execute_live_search_current)
+    QTimer.singleShot(50, lambda: heartbeat.append("tick"))
+
+    qtbot.waitUntil(lambda: bool(heartbeat), timeout=500)
+    qtbot.waitUntil(lambda: len(annotated_ctx.search_results) >= 36, timeout=5000)
+
+    assert win._search_operation is None
+    assert win.current_view() is annotated_view
 
 
 def test_add_bookmark_action_via_qtbot(tmp_path: Path, qtbot, monkeypatch):

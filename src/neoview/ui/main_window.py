@@ -115,6 +115,9 @@ class MainWindow(QMainWindow):
     MAX_SEARCH_RESULTS = 2000
     MAX_LIVE_SEARCH_RESULTS = 250
     MIN_LIVE_SEARCH_CHARS = 2
+    SEARCH_SYNC_PAGE_THRESHOLD = 8
+    SEARCH_BATCH_PAGES = 6
+    SEARCH_BATCH_TIME_BUDGET_MS = 18.0
 
     # Inspector tab indices — must match the order tabs are added in _setup_docks
     _INSPECTOR_TAB_MEASURE = 0
@@ -178,6 +181,10 @@ class MainWindow(QMainWindow):
         self._search_timer = QTimer(self)
         self._search_timer.setSingleShot(True)
         self._search_timer.timeout.connect(self._execute_live_search_current)
+        self._search_batch_timer = QTimer(self)
+        self._search_batch_timer.setSingleShot(True)
+        self._search_batch_timer.timeout.connect(self._process_search_batch)
+        self._search_operation: Optional[Dict[str, object]] = None
         self._reload_in_progress = False
         self._last_maximize_at: float = 0.0
 
@@ -267,6 +274,7 @@ class MainWindow(QMainWindow):
         self._settings.setValue("session/last_active_file", self._current_file or "")
 
     def _on_tab_changed(self, _index: int):
+        self._cancel_search_operation()
         view = self.current_view()
         self._view = view
         ctx = self._context_for_view(view)
@@ -1582,6 +1590,7 @@ class MainWindow(QMainWindow):
     def _on_search_text_changed(self, text: str):
         if self._search_input_updating:
             return
+        self._cancel_search_operation()
         ctx = self.current_context()
         ctx.search_query = text.strip()
         ctx.search_index = -1
@@ -1590,6 +1599,7 @@ class MainWindow(QMainWindow):
     def _on_search_options_changed(self, _checked: bool):
         if self._search_input_updating:
             return
+        self._cancel_search_operation()
         self._search_timer.start(240)
 
     def _execute_live_search_current(self):
@@ -1606,6 +1616,7 @@ class MainWindow(QMainWindow):
 
     def _clear_search(self):
         self._search_timer.stop()
+        self._cancel_search_operation()
         ctx = self.current_context()
         ctx.search_query = ""
         ctx.search_results = []
@@ -1619,6 +1630,9 @@ class MainWindow(QMainWindow):
         query = ctx.search_query.strip()
         if not query:
             self._search_count_lbl.setText("")
+            return
+        if self._search_operation and self._search_operation.get("ctx") is ctx:
+            self._search_count_lbl.setText("Searching...")
             return
         if ctx.search_results and 0 <= ctx.search_index < len(ctx.search_results):
             self._search_count_lbl.setText(f"{ctx.search_index + 1}/{len(ctx.search_results)}")
@@ -1634,13 +1648,101 @@ class MainWindow(QMainWindow):
         text = page.get_textbox(clip).strip().replace("\n", " ")
         return text[:160] if text else "(match)"
 
-    def _execute_search_current(self, allow_short_query: bool = True, max_results: Optional[int] = None):
+    def _cancel_search_operation(self):
+        self._search_batch_timer.stop()
+        self._search_operation = None
+
+    def _search_page_rects(self, page: fitz.Page, query: str) -> List[fitz.Rect]:
+        return list(page.search_for(query))
+
+    def _scan_search_batch(self, operation: Dict[str, object]) -> bool:
+        doc = operation["doc"]
+        query = operation["query"]
+        case_sensitive = bool(operation["case_sensitive"])
+        result_limit = int(operation["result_limit"])
+        results = operation["results"]
+        page_idx = int(operation["page_idx"])
+        processed_pages = 0
+        started_at = time.perf_counter()
+
+        while page_idx < doc.page_count:
+            page = doc.load_page(page_idx)
+            found = self._search_page_rects(page, query)
+            for rect in found:
+                if case_sensitive:
+                    text = page.get_textbox(rect)
+                    if query not in text:
+                        continue
+                snippet = self._search_snippet(page, rect)
+                results.append(
+                    SearchMatch(
+                        page_idx=page_idx,
+                        rect=(float(rect.x0), float(rect.y0), float(rect.width), float(rect.height)),
+                        snippet=snippet,
+                    )
+                )
+                if len(results) >= result_limit:
+                    operation["page_idx"] = page_idx + 1
+                    return True
+
+            page_idx += 1
+            processed_pages += 1
+            if processed_pages >= self.SEARCH_BATCH_PAGES:
+                break
+            if (time.perf_counter() - started_at) * 1000.0 >= self.SEARCH_BATCH_TIME_BUDGET_MS:
+                break
+
+        operation["page_idx"] = page_idx
+        return page_idx >= doc.page_count or len(results) >= result_limit
+
+    def _apply_search_results(self, view: PdfView, ctx: TabContext, results: List[SearchMatch], post_nav: int = 0):
+        ctx.search_results = list(results)
+        ctx.search_index = 0 if results else -1
+
+        self._populate_search_results_list()
+        self._update_search_highlights()
+
+        if results and post_nav:
+            ctx.search_index = (ctx.search_index + post_nav) % len(ctx.search_results)
+            self._go_to_search_result()
+        else:
+            self._update_search_count_label(ctx)
+
+    def _process_search_batch(self):
+        operation = self._search_operation
+        if operation is None:
+            return
+
+        view = operation["view"]
+        ctx = operation["ctx"]
+        if view is not self.current_view() or ctx is not self.current_context():
+            self._cancel_search_operation()
+            return
+
+        completed = self._scan_search_batch(operation)
+        if not completed:
+            self._search_batch_timer.start(0)
+            return
+
+        results = list(operation["results"])
+        post_nav = int(operation.get("post_nav", 0))
+        self._cancel_search_operation()
+        self._apply_search_results(view, ctx, results, post_nav=post_nav)
+
+    def _execute_search_current(
+        self,
+        allow_short_query: bool = True,
+        max_results: Optional[int] = None,
+        post_nav: int = 0,
+    ):
+        self._search_timer.stop()
         view = self.current_view()
         ctx = self.current_context()
         doc = view.document
         query = ctx.search_query.strip()
         result_limit = max_results if max_results is not None else self.MAX_SEARCH_RESULTS
 
+        self._cancel_search_operation()
         if not doc:
             self._clear_search()
             return
@@ -1660,35 +1762,37 @@ class MainWindow(QMainWindow):
             return
 
         case_sensitive = self._search_case_chk.isChecked()
-        results: List[SearchMatch] = []
+        if doc.page_count <= self.SEARCH_SYNC_PAGE_THRESHOLD:
+            operation: Dict[str, object] = {
+                "doc": doc,
+                "query": query,
+                "case_sensitive": case_sensitive,
+                "result_limit": result_limit,
+                "results": [],
+                "page_idx": 0,
+            }
+            while not self._scan_search_batch(operation):
+                pass
+            self._apply_search_results(view, ctx, operation["results"], post_nav=post_nav)
+            return
 
-        for page_idx in range(doc.page_count):
-            page = doc.load_page(page_idx)
-            found = page.search_for(query)
-            for rect in found:
-                if case_sensitive:
-                    text = page.get_textbox(rect)
-                    if query not in text:
-                        continue
-                snippet = self._search_snippet(page, rect)
-                results.append(
-                    SearchMatch(
-                        page_idx=page_idx,
-                        rect=(float(rect.x0), float(rect.y0), float(rect.width), float(rect.height)),
-                        snippet=snippet,
-                    )
-                )
-                if len(results) >= result_limit:
-                    break
-            if len(results) >= result_limit:
-                break
-
-        ctx.search_results = results
-        ctx.search_index = 0 if results else -1
-
+        ctx.search_results = []
+        ctx.search_index = -1
         self._populate_search_results_list()
-        self._update_search_highlights()
+        view.set_search_highlights([])
+        self._search_operation = {
+            "view": view,
+            "ctx": ctx,
+            "doc": doc,
+            "query": query,
+            "case_sensitive": case_sensitive,
+            "result_limit": result_limit,
+            "results": [],
+            "page_idx": 0,
+            "post_nav": post_nav,
+        }
         self._update_search_count_label(ctx)
+        self._process_search_batch()
 
     def _populate_search_results_list(self):
         ctx = self.current_context()
@@ -1757,7 +1861,9 @@ class MainWindow(QMainWindow):
             return
         if query != ctx.search_query or not ctx.search_results:
             ctx.search_query = query
-            self._execute_search_current()
+            self._execute_search_current(post_nav=1)
+            if self._search_operation is not None:
+                return
         if not ctx.search_results:
             self._status.showMessage("No matches", 1500)
             self._update_search_count_label(ctx)
@@ -1773,7 +1879,9 @@ class MainWindow(QMainWindow):
             return
         if query != ctx.search_query or not ctx.search_results:
             ctx.search_query = query
-            self._execute_search_current()
+            self._execute_search_current(post_nav=-1)
+            if self._search_operation is not None:
+                return
         if not ctx.search_results:
             self._status.showMessage("No matches", 1500)
             self._update_search_count_label(ctx)
@@ -2579,6 +2687,7 @@ class MainWindow(QMainWindow):
             return
 
         self._search_timer.stop()
+        self._cancel_search_operation()
         self._reload_in_progress = True
         reloaded = False
         try:
