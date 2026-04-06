@@ -185,37 +185,9 @@ Output:
 dist\neoview.exe
 ```
 
-## Docker / Container Usage
+## Advanced Usage
 
-### Build
-
-```bash
-docker build -t pdf-measure .
-```
-
-### Wayland
-
-```bash
-docker run -it --rm \
-  -e XDG_RUNTIME_DIR=/run/user/$(id -u) \
-  -e WAYLAND_DISPLAY=$WAYLAND_DISPLAY \
-  -e QT_QPA_PLATFORM=wayland \
-  -v $XDG_RUNTIME_DIR/$WAYLAND_DISPLAY:/run/user/$(id -u)/$WAYLAND_DISPLAY \
-  -v /path/to/pdfs:/pdfs \
-  pdf-measure /pdfs/document.pdf
-```
-
-### X11
-
-```bash
-xhost +local:docker
-docker run -it --rm \
-  -e DISPLAY=$DISPLAY \
-  -e QT_QPA_PLATFORM=xcb \
-  -v /tmp/.X11-unix:/tmp/.X11-unix \
-  -v /path/to/pdfs:/pdfs \
-  pdf-measure /pdfs/document.pdf
-```
+Container usage exists for niche reproducible-environment or development scenarios, but it is not a primary installation path for NeoView. Most users should prefer the native Linux install or the Windows executable.
 
 ## Keyboard Shortcuts
 
