@@ -75,6 +75,32 @@ def test_search_panel_builds_snippet_results(tmp_path: Path):
     win.close()
 
 
+def test_live_search_waits_for_two_chars_but_explicit_single_char_search_still_works(tmp_path: Path):
+    pdf = tmp_path / "single_char_search.pdf"
+    _create_pdf(pdf, pages=2, text_prefix="Alpha")
+
+    win = MainWindow()
+    win._open_file(str(pdf))
+    win._show_find()
+    QApplication.processEvents()
+
+    win._search_input.setText("a")
+    win._execute_live_search_current()
+    QApplication.processEvents()
+
+    ctx = win.current_context()
+    assert ctx.search_query == "a"
+    assert ctx.search_results == []
+    assert win._search_count_lbl.text() == "Type 2+ chars"
+
+    win._find_next()
+    QApplication.processEvents()
+
+    assert len(ctx.search_results) >= 2
+    assert win._search_count_lbl.text() == f"{ctx.search_index + 1}/{len(ctx.search_results)}"
+    win.close()
+
+
 def test_add_highlight_annotation_updates_state(tmp_path: Path):
     pdf = tmp_path / "annot.pdf"
     _create_pdf(pdf, pages=1)
@@ -91,6 +117,56 @@ def test_add_highlight_annotation_updates_state(tmp_path: Path):
     assert len(ctx.sidecar_state.annotations) == 1
     assert ctx.sidecar_state.annotations[0].type == "highlight"
     assert len(view._annotations) == 1
+    win.close()
+
+
+def test_force_reload_refreshes_active_search_results(tmp_path: Path):
+    pdf = tmp_path / "reload_search.pdf"
+    _create_pdf(pdf, pages=1, text_prefix="Reloadable")
+
+    win = MainWindow()
+    win._open_file(str(pdf))
+    win._show_find()
+    QApplication.processEvents()
+
+    win._search_input.setText("search-target")
+    win._execute_search_current()
+    QApplication.processEvents()
+
+    assert win.current_view().page_count == 1
+    assert len(win.current_context().search_results) == 1
+
+    _create_pdf(pdf, pages=3, text_prefix="Reloadable")
+    win._force_reload()
+    QApplication.processEvents()
+
+    assert win.current_view().page_count == 3
+    assert len(win.current_context().search_results) == 3
+    assert win._search_count_lbl.text() == "1/3"
+    win.close()
+
+
+def test_force_reload_invalidates_page_pixmap_cache_for_same_path(tmp_path: Path):
+    pdf = tmp_path / "same_path_reload.pdf"
+    _create_pdf(pdf, pages=1, text_prefix="Before")
+
+    win = MainWindow()
+    win._open_file(str(pdf))
+    QApplication.processEvents()
+
+    before_text = win.current_view().document.load_page(0).get_text("text")
+    before_key = win.current_view()._pages[0].pixmap().cacheKey()
+
+    _create_pdf(pdf, pages=1, text_prefix="After")
+    win._force_reload()
+    QApplication.processEvents()
+
+    after_text = win.current_view().document.load_page(0).get_text("text")
+    after_key = win.current_view()._pages[0].pixmap().cacheKey()
+
+    assert "Before" in before_text
+    assert "After" in after_text
+    assert before_key != after_key
     win.close()
 
 

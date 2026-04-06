@@ -113,6 +113,8 @@ class MainWindow(QMainWindow):
     ROLE_BOOKMARK_ID = int(Qt.ItemDataRole.UserRole) + 2
     ROLE_ANNOTATION_ID = int(Qt.ItemDataRole.UserRole) + 3
     MAX_SEARCH_RESULTS = 2000
+    MAX_LIVE_SEARCH_RESULTS = 250
+    MIN_LIVE_SEARCH_CHARS = 2
 
     # Inspector tab indices — must match the order tabs are added in _setup_docks
     _INSPECTOR_TAB_MEASURE = 0
@@ -175,7 +177,7 @@ class MainWindow(QMainWindow):
 
         self._search_timer = QTimer(self)
         self._search_timer.setSingleShot(True)
-        self._search_timer.timeout.connect(self._execute_search_current)
+        self._search_timer.timeout.connect(self._execute_live_search_current)
         self._reload_in_progress = False
         self._last_maximize_at: float = 0.0
 
@@ -712,7 +714,7 @@ class MainWindow(QMainWindow):
         self._search_input.textChanged.connect(self._on_search_text_changed)
 
         self._search_case_chk = QCheckBox("Case")
-        self._search_case_chk.toggled.connect(lambda _checked: self._search_timer.start(180))
+        self._search_case_chk.toggled.connect(self._on_search_options_changed)
 
         self._search_prev_btn = QPushButton("Prev")
         self._search_next_btn = QPushButton("Next")
@@ -1583,7 +1585,15 @@ class MainWindow(QMainWindow):
         ctx = self.current_context()
         ctx.search_query = text.strip()
         ctx.search_index = -1
-        self._search_timer.start(180)
+        self._search_timer.start(240)
+
+    def _on_search_options_changed(self, _checked: bool):
+        if self._search_input_updating:
+            return
+        self._search_timer.start(240)
+
+    def _execute_live_search_current(self):
+        self._execute_search_current(allow_short_query=False, max_results=self.MAX_LIVE_SEARCH_RESULTS)
 
     def _load_search_from_context(self):
         ctx = self.current_context()
@@ -1592,8 +1602,10 @@ class MainWindow(QMainWindow):
         self._search_input_updating = False
         self._populate_search_results_list()
         self._update_search_highlights()
+        self._update_search_count_label(ctx)
 
     def _clear_search(self):
+        self._search_timer.stop()
         ctx = self.current_context()
         ctx.search_query = ""
         ctx.search_results = []
@@ -1602,17 +1614,32 @@ class MainWindow(QMainWindow):
         self._search_results_list.clear()
         self._search_count_lbl.setText("")
 
+    def _update_search_count_label(self, ctx: Optional[TabContext] = None):
+        ctx = ctx or self.current_context()
+        query = ctx.search_query.strip()
+        if not query:
+            self._search_count_lbl.setText("")
+            return
+        if ctx.search_results and 0 <= ctx.search_index < len(ctx.search_results):
+            self._search_count_lbl.setText(f"{ctx.search_index + 1}/{len(ctx.search_results)}")
+            return
+        if len(query) < self.MIN_LIVE_SEARCH_CHARS:
+            self._search_count_lbl.setText(f"Type {self.MIN_LIVE_SEARCH_CHARS}+ chars")
+            return
+        self._search_count_lbl.setText("0/0")
+
     def _search_snippet(self, page: fitz.Page, rect: fitz.Rect) -> str:
         clip = fitz.Rect(rect.x0 - 80, rect.y0 - 10, rect.x1 + 80, rect.y1 + 10)
         clip &= page.rect
         text = page.get_textbox(clip).strip().replace("\n", " ")
         return text[:160] if text else "(match)"
 
-    def _execute_search_current(self):
+    def _execute_search_current(self, allow_short_query: bool = True, max_results: Optional[int] = None):
         view = self.current_view()
         ctx = self.current_context()
         doc = view.document
-        query = ctx.search_query
+        query = ctx.search_query.strip()
+        result_limit = max_results if max_results is not None else self.MAX_SEARCH_RESULTS
 
         if not doc:
             self._clear_search()
@@ -1622,7 +1649,14 @@ class MainWindow(QMainWindow):
             ctx.search_index = -1
             self._populate_search_results_list()
             view.set_search_highlights([])
-            self._search_count_lbl.setText("0/0")
+            self._update_search_count_label(ctx)
+            return
+        if not allow_short_query and len(query) < self.MIN_LIVE_SEARCH_CHARS:
+            ctx.search_results = []
+            ctx.search_index = -1
+            self._populate_search_results_list()
+            view.set_search_highlights([])
+            self._update_search_count_label(ctx)
             return
 
         case_sensitive = self._search_case_chk.isChecked()
@@ -1644,9 +1678,9 @@ class MainWindow(QMainWindow):
                         snippet=snippet,
                     )
                 )
-                if len(results) >= self.MAX_SEARCH_RESULTS:
+                if len(results) >= result_limit:
                     break
-            if len(results) >= self.MAX_SEARCH_RESULTS:
+            if len(results) >= result_limit:
                 break
 
         ctx.search_results = results
@@ -1654,10 +1688,7 @@ class MainWindow(QMainWindow):
 
         self._populate_search_results_list()
         self._update_search_highlights()
-        if results:
-            self._search_count_lbl.setText(f"{ctx.search_index + 1}/{len(results)}")
-        else:
-            self._search_count_lbl.setText("0/0")
+        self._update_search_count_label(ctx)
 
     def _populate_search_results_list(self):
         ctx = self.current_context()
@@ -1724,12 +1755,12 @@ class MainWindow(QMainWindow):
         query = self._active_search_text()
         if not query:
             return
-        if query != ctx.search_query:
+        if query != ctx.search_query or not ctx.search_results:
             ctx.search_query = query
             self._execute_search_current()
         if not ctx.search_results:
             self._status.showMessage("No matches", 1500)
-            self._search_count_lbl.setText("0/0")
+            self._update_search_count_label(ctx)
             return
 
         ctx.search_index = (ctx.search_index + 1) % len(ctx.search_results)
@@ -1740,12 +1771,12 @@ class MainWindow(QMainWindow):
         query = self._active_search_text()
         if not query:
             return
-        if query != ctx.search_query:
+        if query != ctx.search_query or not ctx.search_results:
             ctx.search_query = query
             self._execute_search_current()
         if not ctx.search_results:
             self._status.showMessage("No matches", 1500)
-            self._search_count_lbl.setText("0/0")
+            self._update_search_count_label(ctx)
             return
 
         ctx.search_index = (ctx.search_index - 1) % len(ctx.search_results)
@@ -2451,6 +2482,8 @@ class MainWindow(QMainWindow):
         ctx.native_annotations = native
 
     def _on_view_document_loaded(self, view: PdfView):
+        if self._reload_in_progress:
+            return
         ctx = self._context_for_view(view)
         if ctx.file_path:
             ctx.sidecar_state = clamp_sidecar_for_page_count(ctx.sidecar_state, view.page_count)
@@ -2545,6 +2578,7 @@ class MainWindow(QMainWindow):
         except OSError:
             return
 
+        self._search_timer.stop()
         self._reload_in_progress = True
         reloaded = False
         try:
@@ -2558,8 +2592,12 @@ class MainWindow(QMainWindow):
             view.set_annotations(ctx.sidecar_state.annotations + ctx.native_annotations)
             self._last_file_sig = current_sig
             self._status.showMessage("Reloaded", 1000)
-            self._populate_annotation_list()
-            self._populate_outline()
+            if self._is_current_view(view):
+                self._refresh_document_info()
+                if ctx.search_query:
+                    self._execute_search_current(allow_short_query=bool(ctx.search_results))
+                else:
+                    self._update_search_count_label(ctx)
             if self._auto_reload_enabled:
                 if ctx.file_path not in self._watcher.files():
                     self._watcher.addPath(ctx.file_path)

@@ -35,8 +35,9 @@ class PageItem(QGraphicsPixmapItem):
     def _cache_key(cls, page: fitz.Page, scale: float) -> tuple:
         doc = getattr(page, "parent", None)
         doc_name = getattr(doc, "name", "") or f"doc-{id(doc)}"
+        doc_identity = id(doc)
         page_num = getattr(page, "number", -1)
-        return (doc_name, page_num, round(scale, 2), cls.RENDER_SCALE)
+        return (doc_name, doc_identity, page_num, round(scale, 2), cls.RENDER_SCALE)
 
     @classmethod
     def _cache_get(cls, key: tuple) -> Optional[QPixmap]:
