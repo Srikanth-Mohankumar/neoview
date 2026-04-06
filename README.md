@@ -1,16 +1,29 @@
 # NeoView
 
-NeoView is a desktop PDF viewer for Linux and Windows built with PySide6 and PyMuPDF. It started as a precise crop and measurement tool, and has grown into a practical technical-PDF viewer with fast reloads, search, bookmarks, annotations, thumbnails, outline navigation, and export workflows.
+NeoView is a free all-in-one desktop PDF viewer for Linux and Windows. It brings together font inspection, measurement, crop/export, annotations, search, bookmarks, thumbnails, and reload in one practical workspace.
 
-It is aimed at LaTeX, proofreading, QA, layout review, and document-inspection workflows where you want a lightweight viewer but still need tools beyond simple reading.
+It started as a precise crop and measurement tool, and has grown into a practical review app for LaTeX, proofreading, QA, layout checks, and document-inspection workflows where a normal PDF reader is not enough.
+
+## Why NeoView
+
+Most free PDF viewers only cover part of the workflow. NeoView is built for the moments where you need more than reading:
+
+- inspect fonts and text details
+- measure layout regions precisely
+- crop/export selected areas
+- annotate and review in place
+- search, bookmark, and navigate longer PDFs
+- reload changing PDFs without losing your session
 
 ## Highlights
 
+- Free all-in-one PDF viewer for technical review workflows
 - Live PDF reload while external tools rebuild the file
 - Multi-tab viewing with per-document session restore
 - Text find panel with live results, search navigation, and highlight overlays
 - Outline, bookmarks, thumbnails, and page info side panels
 - Measurement and rectangular selection tools with pt, pica, and mm readouts
+- Crop/export workflow for selected regions as PNG
 - Annotation workflows:
   - highlight, underline, note
   - rectangle, ellipse, text-box, line, arrow, freehand
@@ -48,6 +61,8 @@ It is aimed at LaTeX, proofreading, QA, layout review, and document-inspection w
 - Website page: [docs/index.html](/data/neopage/repos/neoview/docs/index.html)
 
 ## Feature Overview
+
+NeoView is designed to reduce tool switching. Instead of opening one app for reading, another for measuring, another for markup, and another for export, it keeps the common PDF review tasks in one place.
 
 ### Viewing and navigation
 
