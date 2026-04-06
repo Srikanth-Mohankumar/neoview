@@ -9,6 +9,9 @@ on:
 jobs:
   quality:
     runs-on: ${{ matrix.os }}
+    env:
+      PYTHONPATH: src
+      QT_QPA_PLATFORM: offscreen
     strategy:
       fail-fast: false
       matrix:
@@ -39,12 +42,14 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e .[dev] twine
+      - name: Environment Info
+        run: |
+          python -c "import os, sys; print('python', sys.version); print('executable', sys.executable); print('PYTHONPATH', os.environ.get('PYTHONPATH')); print('QT_QPA_PLATFORM', os.environ.get('QT_QPA_PLATFORM'))"
+          python -c "import fitz, PySide6, pytest; print('PyMuPDF', fitz.__doc__.splitlines()[0]); print('PySide6', PySide6.__version__); print('pytest', pytest.__version__)"
       - name: Lint
         if: matrix.run-lint == true
         run: ruff check .
       - name: Tests
-        env:
-          PYTHONPATH: src
         run: python -m pytest -q
       - name: Build
         run: python -m build
