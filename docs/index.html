@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="NeoView - A production-quality PDF viewer with measurement tools for LaTeX workflows. Auto-reload, precise measurements, and PNG export for Linux and Windows.">
-    <meta name="keywords" content="PDF viewer, LaTeX, measurement tool, Linux, Windows, SumatraPDF alternative">
-    <title>NeoView - PDF Viewer with Measurement Tools</title>
+    <meta name="description" content="NeoView - A technical PDF viewer for Linux and Windows with tabs, live reload, find, bookmarks, annotations, thumbnails, measurements, and PDF export.">
+    <meta name="keywords" content="PDF viewer, LaTeX, annotations, bookmarks, measurement tool, Linux, Windows, technical PDF workflow">
+    <title>NeoView - Technical PDF Viewer for Search, Annotation, and Measurement</title>
     <link rel="icon" href="assets/feather-logo.png" type="image/png">
     <link rel="stylesheet" href="style.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -24,8 +24,8 @@
                 <h1 class="hero-title">
                     <span class="gradient-text">NeoView</span>
                 </h1>
-                <p class="hero-tagline">Production-quality PDF viewer with precision measurement tools</p>
-                <p class="hero-subtitle">Designed for LaTeX workflows. Auto-reload, measurements in pt/mm/picas, and PNG export.</p>
+                <p class="hero-tagline">Technical PDF viewer for search, annotation, measurement, and live reload</p>
+                <p class="hero-subtitle">Built for LaTeX, proofreading, QA, and document review with tabs, find, bookmarks, thumbnails, annotations, PNG export, and annotated PDF export.</p>
                 
                 <div class="cta-buttons">
                     <a href="https://github.com/Srikanth-Mohankumar/neoview/releases/latest/download/neoview.exe" class="btn btn-primary" rel="noopener">
@@ -38,7 +38,7 @@
                         <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
                             <path d="M12.504 0c-.155 0-.313.015-.467.045C7.49.456 4 4.475 4 9.308c0 .614.064 1.228.192 1.827l-2.106 3.644c-.106.185-.113.405-.017.596.097.191.278.32.482.345l1.876.228-.016.06c-.034.13-.054.263-.054.4 0 .944.775 1.707 1.728 1.707.318 0 .619-.085.881-.239l2.16 1.25c-.004.048-.008.097-.008.146 0 .944.775 1.707 1.728 1.707.168 0 .33-.024.484-.07.344-.102.637-.305.866-.576l.122.073c-.012.035-.022.07-.033.106-.142.477-.213.974-.213 1.479C12 23.122 13.13 24 14.5 24c1.37 0 2.5-.878 2.5-1.96 0-.148-.016-.296-.047-.44l.51-.294c.506.416 1.137.694 1.837.694 1.592 0 2.7-1.36 2.7-2.853 0-.93-.477-1.781-1.246-2.291l-.002-.015c.137-.385.214-.8.214-1.234 0-1.93-1.507-3.56-3.453-3.756-.11-.007-.22-.01-.33-.01-.74 0-1.444.174-2.075.486l-.24-.125c.032-.11.055-.225.068-.344.02-.18.03-.362.03-.544 0-2.513-1.637-4.684-3.952-5.456-.32-.106-.652-.175-.992-.206C13.102.014 12.803 0 12.504 0"/>
                         </svg>
-                        Linux / pip install
+                        Linux / source install
                     </a>
                     <a href="https://github.com/Srikanth-Mohankumar/neoview" class="btn btn-ghost">
                         <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
@@ -67,28 +67,28 @@
     <section class="gallery" id="gallery">
         <div class="container">
             <h2 class="section-title">See NeoView in Action</h2>
-            <p class="section-subtitle">Precision tools for technical PDF workflows</p>
+            <p class="section-subtitle">Search, inspect, annotate, and measure technical PDFs without leaving one viewer</p>
             
             <div class="gallery-grid">
                 <div class="gallery-item">
                     <img src="assets/img1.png" alt="NeoView Measurement Tool" class="gallery-image">
                     <div class="gallery-caption">
-                        <h4>Precise Measurements</h4>
-                        <p>Rectangle selection with live dimensions in points, picas, and millimeters</p>
+                        <h4>Measure and Export</h4>
+                        <p>Selection rectangles with live dimensions in pt, picas, and mm plus PNG export at multiple DPI levels</p>
                     </div>
                 </div>
                 <div class="gallery-item">
                     <img src="assets/img2.png" alt="NeoView Font Inspection" class="gallery-image">
                     <div class="gallery-caption">
-                        <h4>Font Information</h4>
-                        <p>View font names and sizes for accurate typography verification</p>
+                        <h4>Inspect and Search</h4>
+                        <p>Font inspection, live find, current-match highlighting, and per-tab document state</p>
                     </div>
                 </div>
                 <div class="gallery-item">
                     <img src="assets/img3.png" alt="NeoView Export Tool" class="gallery-image">
                     <div class="gallery-caption">
-                        <h4>High-Quality Export</h4>
-                        <p>Export selections as PNG at 150, 300, or 600 DPI</p>
+                        <h4>Annotate and Review</h4>
+                        <p>Create highlights, notes, shapes, arrows, and freehand markup, then export a PDF copy with embedded annotations</p>
                     </div>
                 </div>
             </div>
@@ -99,7 +99,7 @@
     <section class="advantages" id="advantages">
         <div class="container">
             <h2 class="section-title">Why Choose NeoView?</h2>
-            <p class="section-subtitle">Built for professionals who need more than just a PDF viewer</p>
+            <p class="section-subtitle">A practical viewer for PDF-heavy editing, review, and inspection workflows</p>
 
             <!-- Key Advantages -->
             <div class="advantage-cards">
@@ -110,8 +110,8 @@
                             <path d="M12 6v6l4 2"/>
                         </svg>
                     </div>
-                    <h3>Auto-Reload for LaTeX</h3>
-                    <p>Automatically refreshes when your PDF is rebuilt. No more closing and reopening — just compile and see your changes instantly. <strong>Perfect for LaTeX, Typst, and any PDF workflow.</strong></p>
+                    <h3>Live Reload for Build Loops</h3>
+                    <p>Automatically refreshes when your PDF is rebuilt, keeping page position, annotations, and search state aligned with ongoing LaTeX or generated-PDF work.</p>
                 </div>
 
                 <div class="advantage-card highlight">
@@ -120,8 +120,8 @@
                             <path d="M4 8h16M4 16h16M8 4v16M16 4v16"/>
                         </svg>
                     </div>
-                    <h3>Precision Measurement Tools</h3>
-                    <p>Draw rectangles and get instant measurements in <strong>points (pt), picas, and millimeters</strong>. Essential for layout verification, proofreading, and QA work.</p>
+                    <h3>Measurement and Selection Tools</h3>
+                    <p>Draw, move, resize, and fine-tune selections with mouse or keyboard, then inspect exact dimensions in <strong>points, picas, and millimeters</strong>.</p>
                 </div>
 
                 <div class="advantage-card highlight">
@@ -130,8 +130,8 @@
                             <path d="M4 7V4h16v3M9 20h6M12 4v16"/>
                         </svg>
                     </div>
-                    <h3>Font & Text Inspection</h3>
-                    <p>Inspect text to see <strong>font names and sizes</strong>. Ideal for verifying typography, checking font embedding, and ensuring design consistency.</p>
+                    <h3>Search, Annotation, and Inspection</h3>
+                    <p>Use live find, bookmarks, thumbnails, and outline navigation while reviewing PDFs, then add <strong>highlights, notes, shapes, arrows, text boxes, and freehand markup</strong>.</p>
                 </div>
             </div>
 
@@ -173,6 +173,20 @@
                             </tr>
                             <tr>
                                 <td>Export selection as PNG</td>
+                                <td class="highlight-col"><span class="check">✓</span></td>
+                                <td><span class="cross">✗</span></td>
+                                <td><span class="check">✓</span></td>
+                                <td><span class="cross">✗</span></td>
+                            </tr>
+                            <tr>
+                                <td>Bookmarks + thumbnails + outline</td>
+                                <td class="highlight-col"><span class="check">✓</span></td>
+                                <td><span class="cross">✗</span></td>
+                                <td><span class="check">✓</span></td>
+                                <td><span class="check">✓</span></td>
+                            </tr>
+                            <tr>
+                                <td>Canvas and sidecar annotations</td>
                                 <td class="highlight-col"><span class="check">✓</span></td>
                                 <td><span class="cross">✗</span></td>
                                 <td><span class="check">✓</span></td>
@@ -224,7 +238,7 @@
     <section class="features" id="features">
         <div class="container">
             <h2 class="section-title">Complete Feature List</h2>
-            <p class="section-subtitle">Everything you need in a professional PDF viewer</p>
+            <p class="section-subtitle">Core reader features plus practical review and inspection tools</p>
             
             <div class="features-grid">
                 <div class="feature-card">
@@ -235,7 +249,7 @@
                         </svg>
                     </div>
                     <h3>Auto-Reload</h3>
-                    <p>Watches file for external changes and refreshes automatically. Selection and page position are preserved during reload.</p>
+                    <p>Watches file changes and refreshes automatically. Page position, search state, and viewer context stay aligned during rebuild-heavy workflows.</p>
                 </div>
 
                 <div class="feature-card">
@@ -244,8 +258,8 @@
                             <path d="M4 8h16M4 16h16M8 4v16M16 4v16"/>
                         </svg>
                     </div>
-                    <h3>Rectangle Measurement</h3>
-                    <p>Click and drag to create measurement rectangles. Live display in points (pt), picas, and millimeters (mm).</p>
+                    <h3>Measure and Select</h3>
+                    <p>Click and drag to create precise rectangles, then move or resize them with handles and keyboard nudges.</p>
                 </div>
 
                 <div class="feature-card">
@@ -254,8 +268,8 @@
                             <path d="M4 7V4h16v3M9 20h6M12 4v16"/>
                         </svg>
                     </div>
-                    <h3>Font Inspection</h3>
-                    <p>View font names and text sizes. Essential for typography verification and design consistency checks.</p>
+                    <h3>Find and Highlight</h3>
+                    <p>Use live search, next/previous match navigation, and highlighted results without leaving the document.</p>
                 </div>
 
                 <div class="feature-card">
@@ -264,8 +278,8 @@
                             <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/>
                         </svg>
                     </div>
-                    <h3>PNG Export</h3>
-                    <p>Export any selection as high-quality PNG at 150, 300, or 600 DPI. Perfect for documentation and sharing.</p>
+                    <h3>Bookmarks and Outline</h3>
+                    <p>Jump through the PDF using the document TOC, your own bookmarks, and filtered navigation panels.</p>
                 </div>
 
                 <div class="feature-card">
@@ -275,8 +289,8 @@
                             <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/>
                         </svg>
                     </div>
-                    <h3>Multi-Page Navigation</h3>
-                    <p>Open and navigate multi-page PDFs with ease. Page Up/Down keys for quick browsing.</p>
+                    <h3>Thumbnails and Tabs</h3>
+                    <p>Work across multiple open PDFs with thumbnails, per-tab state, and smart reuse of already-open files.</p>
                 </div>
 
                 <div class="feature-card">
@@ -285,8 +299,8 @@
                             <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>
                         </svg>
                     </div>
-                    <h3>Smooth Zoom</h3>
-                    <p>Pinch gestures, Ctrl+wheel, Fit Width (W), and Actual Size (1). Measurements remain accurate at any zoom.</p>
+                    <h3>Zoom and Rotation</h3>
+                    <p>Fit Width, Fit Page, Actual Size, Ctrl+wheel, pinch zoom, and rotation controls for detailed review.</p>
                 </div>
 
                 <div class="feature-card">
@@ -296,8 +310,8 @@
                             <path d="M7 11V7a5 5 0 0110 0v4"/>
                         </svg>
                     </div>
-                    <h3>Precise Adjustments</h3>
-                    <p>Drag edges and corners to resize selections. Arrow keys for 1pt nudges, Shift+Arrow for 10pt increments.</p>
+                    <h3>Annotations</h3>
+                    <p>Create highlights, underline, notes, shapes, arrows, text boxes, and freehand drawings directly on the canvas.</p>
                 </div>
 
                 <div class="feature-card">
@@ -307,8 +321,8 @@
                             <path d="M8 21h8M12 17v4"/>
                         </svg>
                     </div>
-                    <h3>Cross-Platform</h3>
-                    <p>Windows standalone executable. Linux via pip install. Works with both X11 and Wayland.</p>
+                    <h3>Annotation Export</h3>
+                    <p>Save a copy of the current PDF with your NeoView annotations embedded into the exported file.</p>
                 </div>
 
                 <div class="feature-card">
@@ -317,8 +331,8 @@
                             <path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/>
                         </svg>
                     </div>
-                    <h3>Docker Ready</h3>
-                    <p>Run in containers with Wayland or X11 forwarding. Perfect for reproducible environments.</p>
+                    <h3>Native PDF Annotation Viewing</h3>
+                    <p>See annotations already embedded in the source PDF alongside your own sidecar-managed annotations.</p>
                 </div>
 
                 <div class="feature-card">
@@ -328,8 +342,8 @@
                             <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
                         </svg>
                     </div>
-                    <h3>Copy Measurements</h3>
-                    <p>Ctrl+C copies measurement values to clipboard. Ready to paste into documents or spreadsheets.</p>
+                    <h3>PNG Export</h3>
+                    <p>Export any selected area as a high-quality PNG at 150, 300, or 600 DPI.</p>
                 </div>
 
                 <div class="feature-card">
@@ -341,8 +355,8 @@
                             <rect x="3" y="14" width="7" height="7"/>
                         </svg>
                     </div>
-                    <h3>Keyboard-Driven</h3>
-                    <p>Comprehensive keyboard shortcuts for all actions. Power users can work without touching the mouse.</p>
+                    <h3>Performance Mode</h3>
+                    <p>Reduce expensive rerenders while zooming and scrolling through larger documents.</p>
                 </div>
 
                 <div class="feature-card">
@@ -352,8 +366,8 @@
                             <circle cx="12" cy="12" r="9"/>
                         </svg>
                     </div>
-                    <h3>Desktop Integration</h3>
-                    <p>Optional Linux desktop launcher with icon. Integrates with your application menu and file associations.</p>
+                    <h3>Cross-Platform and Scriptable Workflows</h3>
+                    <p>Linux and Windows support, optional desktop integration, and container-friendly execution for controlled environments.</p>
                 </div>
             </div>
         </div>
@@ -391,7 +405,7 @@
                 <div class="tab-pane active" id="windows">
                     <div class="install-option">
                         <h4>Option 1: Download Executable (Recommended)</h4>
-                        <p>Download the standalone executable — no Python required.</p>
+                        <p>Download the standalone executable with the full viewer, annotation, and navigation toolset. No Python required.</p>
                         <a href="https://github.com/Srikanth-Mohankumar/neoview/releases/latest/download/neoview.exe" class="btn btn-primary btn-small" rel="noopener">
                             Download latest neoview.exe
                         </a>
@@ -458,6 +472,7 @@
                             <li>Python 3.10+</li>
                             <li>PySide6</li>
                             <li>PyMuPDF</li>
+                            <li>Optional dev tools: pytest, pytest-qt, pyinstaller</li>
                         </ul>
                     </div>
                 </div>
@@ -509,7 +524,7 @@
     <section class="shortcuts" id="shortcuts">
         <div class="container">
             <h2 class="section-title">Keyboard Shortcuts</h2>
-            <p class="section-subtitle">Precision at your fingertips</p>
+            <p class="section-subtitle">Core shortcuts for navigation, search, review, and annotation</p>
 
             <div class="shortcuts-grid">
                 <div class="shortcut-group">
@@ -526,10 +541,14 @@
                         <kbd>Ctrl</kbd> + <kbd>Q</kbd>
                         <span>Exit application</span>
                     </div>
+                    <div class="shortcut-item">
+                        <kbd>Ctrl</kbd> + <kbd>D</kbd>
+                        <span>Add bookmark</span>
+                    </div>
                 </div>
 
                 <div class="shortcut-group">
-                    <h4>Zoom</h4>
+                    <h4>Zoom and Search</h4>
                     <div class="shortcut-item">
                         <kbd>Ctrl</kbd> + <kbd>Wheel</kbd>
                         <span>Zoom in/out</span>
@@ -539,7 +558,15 @@
                         <span>Fit to width</span>
                     </div>
                     <div class="shortcut-item">
-                        <kbd>1</kbd>
+                        <kbd>F</kbd>
+                        <span>Fit page</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <kbd>Ctrl</kbd> + <kbd>F</kbd>
+                        <span>Find</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <kbd>Ctrl</kbd> + <kbd>1</kbd>
                         <span>Actual size (100%)</span>
                     </div>
                 </div>
@@ -561,7 +588,7 @@
                 </div>
 
                 <div class="shortcut-group">
-                    <h4>Resize & Export</h4>
+                    <h4>Resize, Export, Annotate</h4>
                     <div class="shortcut-item">
                         <kbd>Ctrl</kbd> + <kbd>Arrow</kbd>
                         <span>Resize by 1 pt</span>
@@ -573,6 +600,10 @@
                     <div class="shortcut-item">
                         <kbd>Ctrl</kbd> + <kbd>C</kbd>
                         <span>Copy measurements</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>H</kbd>
+                        <span>Add highlight from selection</span>
                     </div>
                 </div>
             </div>
@@ -614,7 +645,7 @@
                 </div>
 
                 <p class="footer-copyright">
-                    Built with ❤️ for the LaTeX community
+                    Built for technical PDF workflows on Linux and Windows
                 </p>
             </div>
         </div>

@@ -1,23 +1,107 @@
 # NeoView
 
-NeoView is a production-quality PDF viewer with a rectangular crop/measure tool for Linux and Windows.
+NeoView is a desktop PDF viewer for Linux and Windows built with PySide6 and PyMuPDF. It started as a precise crop and measurement tool, and has grown into a practical technical-PDF viewer with fast reloads, search, bookmarks, annotations, thumbnails, outline navigation, and export workflows.
 
-NeoView is designed as a practical alternative to SumatraPDF for Linux users, while adding features useful for technical and LaTeX workflows.
-Key advantages:
-- **Auto-reload**: automatically refreshes PDFs when LaTeX rebuilds, so you don't have to close/reopen the viewer.
-- **Measurement tools**: precise rectangle measurement with units in pt/mm for layout and proofreading.
-- **Export selections**: save regions as PNG at multiple DPI values.
+It is aimed at LaTeX, proofreading, QA, layout review, and document-inspection workflows where you want a lightweight viewer but still need tools beyond simple reading.
 
-## Features
+## Highlights
 
-- **PDF Viewing**: Open and navigate multi-page PDFs
-- **Zoom**: Pinch gestures, Ctrl+wheel, Fit Width, Actual Size
-- **Selection Tool**: Click+drag to create measurement rectangle
-- **Precise Adjustment**: Drag edges/corners to resize, keyboard nudges
-- **Measurements**: Live display in points, picas, and millimeters
-- **Export**: Save selection as PNG at 150/300/600 DPI
-- **Auto-reload**: Watch file for external changes
-- **Container-ready**: Works with Wayland or X11 forwarding
+- Live PDF reload while external tools rebuild the file
+- Multi-tab viewing with per-document session restore
+- Text find panel with live results, search navigation, and highlight overlays
+- Outline, bookmarks, thumbnails, and page info side panels
+- Measurement and rectangular selection tools with pt, pica, and mm readouts
+- Annotation workflows:
+  - highlight, underline, note
+  - rectangle, ellipse, text-box, line, arrow, freehand
+  - on-canvas drawing and properties editing
+  - export a PDF copy with annotations embedded
+- Native PDF annotation visibility in the viewer
+- Font inspection for text under the cursor
+- PNG export from selections at multiple DPI values
+- Keyboard-driven navigation, editing, and selection adjustment
+- Automated test coverage for logic and Qt interaction flows
+
+## Repo Overview
+
+### Main code areas
+
+- [src/neoview/ui](/data/neopage/repos/neoview/src/neoview/ui)  
+  Qt main window, viewer widget, dialogs, annotation UI, toolbars, and page rendering.
+- [src/neoview/models](/data/neopage/repos/neoview/src/neoview/models)  
+  Typed state records for annotations, bookmarks, search results, and per-tab state.
+- [src/neoview/persistence](/data/neopage/repos/neoview/src/neoview/persistence)  
+  Sidecar storage for annotations and bookmarks.
+- [src/neoview/utils](/data/neopage/repos/neoview/src/neoview/utils)  
+  Small helpers such as unit formatting.
+- [src/neoview/assets](/data/neopage/repos/neoview/src/neoview/assets)  
+  Packaged icons and app assets.
+- [tests](/data/neopage/repos/neoview/tests)  
+  Fast pytest coverage, including `pytest-qt` interaction tests.
+
+### Important entry points
+
+- App entry: [src/neoview/app.py](/data/neopage/repos/neoview/src/neoview/app.py)
+- Main window: [src/neoview/ui/main_window.py](/data/neopage/repos/neoview/src/neoview/ui/main_window.py)
+- Viewer widget: [src/neoview/ui/pdf_view.py](/data/neopage/repos/neoview/src/neoview/ui/pdf_view.py)
+- Legacy shim: [pdf_crop_measure.py](/data/neopage/repos/neoview/pdf_crop_measure.py)
+- Website page: [docs/index.html](/data/neopage/repos/neoview/docs/index.html)
+
+## Feature Overview
+
+### Viewing and navigation
+
+- Open one or many PDFs in tabs
+- Reuse an already-open tab for the same file
+- Page navigation with page combo, PgUp/PgDn, Home/End
+- Fit Width, Fit Page, Actual Size, custom zoom, Ctrl+wheel, and pinch zoom
+- Rotation controls and fullscreen mode
+- Outline panel for PDF table of contents
+- Thumbnail panel for quick page jumping
+- Page info / document info panel
+
+### Search
+
+- Find panel with live typing updates
+- Explicit next/previous search navigation
+- Highlight overlays for current and visible-page matches
+- Search state preserved per tab
+- Batched search execution to keep the UI responsive on larger PDFs
+
+### Selection and measurement
+
+- Drag to create a selection rectangle
+- Resize by handles or keyboard
+- Move by drag or keyboard
+- Measurements in points, picas, and millimeters
+- Copy measurement values to the clipboard
+- Export selection as PNG at multiple DPI levels
+
+### Annotations
+
+- Create annotations from a selection or directly on the canvas
+- Supported types include:
+  - highlight
+  - underline
+  - note
+  - text-box
+  - rectangle
+  - ellipse
+  - line
+  - arrow
+  - freehand
+- Annotation list with filtering
+- Annotation properties editing
+- Delete annotations from the list, keyboard, or context menu
+- Export annotated PDF copies
+- Read-only viewing of annotations already embedded in the source PDF
+
+### Bookmarking and session behavior
+
+- Add custom bookmarks per document
+- Rename and delete bookmarks
+- Restore last page and zoom per file
+- Auto-reload on file changes for LaTeX / Typst / generated PDF workflows
 
 ## Requirements
 
@@ -27,88 +111,90 @@ Key advantages:
 
 ## Installation
 
+### Install from PyPI
+
 ```bash
 pip install neoview
 ```
 
-## Downloads
-
-Prebuilt Windows executable releases are available from the GitHub Releases page for this project.
-Each tagged release will include a `neoview.exe` download.
-
-### Install from source (launchable)
+### Install from source
 
 ```bash
-pip install .
+python3 -m pip install .
 ```
 
-This installs a `neoview` launcher. Run it to open the app, then use File → Open to choose a PDF.
-
-Optional desktop launcher (Linux):
+### Editable development install
 
 ```bash
-./install_desktop.sh
+python3 -m pip install -e .[dev]
 ```
 
-### Windows notes
+### Recommended local launcher
 
-If you run on Windows, install with:
+```bash
+./run.sh
+```
+
+This bootstraps a virtual environment and launches NeoView.
+
+## Running NeoView
+
+### Installed command
+
+```bash
+neoview
+neoview /path/to/document.pdf
+```
+
+### Module entry
+
+```bash
+python -m neoview
+```
+
+### Legacy shim
+
+```bash
+python pdf_crop_measure.py
+python pdf_crop_measure.py /path/to/document.pdf
+```
+
+## Windows
+
+### Install via pip
+
 ```powershell
 py -m pip install neoview
-```
-
-Launch:
-```powershell
 neoview
 ```
 
-### Windows .exe build (optional)
+### Standalone executable
 
-If you want a standalone executable on Windows:
+Tagged releases can include a prebuilt `neoview.exe` from GitHub Releases.
+
+### Build the Windows executable yourself
 
 ```powershell
 py -m pip install .[dev]
 pyinstaller neoview.spec
 ```
 
-The executable will be at `dist\\neoview.exe`.
+Output:
 
-## Usage
-
-### Direct Run
-
-```bash
-# Open with file dialog
-python pdf_crop_measure.py
-
-# Open specific PDF
-python pdf_crop_measure.py /path/to/document.pdf
+```text
+dist\neoview.exe
 ```
 
-### Installed App
+## Docker / Container Usage
 
-```bash
-# Open the app
-neoview
+### Build
 
-# Open specific PDF
-neoview /path/to/document.pdf
-```
-
-### Module Run
-
-```bash
-python -m neoview
-```
-
-### Container Run
-
-**Build:**
 ```bash
 docker build -t pdf-measure .
 ```
 
-**Wayland (GNOME Wayland - preferred):**
+### Wayland
+
 ```bash
 docker run -it --rm \
   -e XDG_RUNTIME_DIR=/run/user/$(id -u) \
@@ -119,7 +205,8 @@ docker run -it --rm \
   pdf-measure /pdfs/document.pdf
 ```
 
-**X11 (fallback, most compatible):**
+### X11
+
 ```bash
 xhost +local:docker
 docker run -it --rm \
@@ -134,50 +221,81 @@ docker run -it --rm \
 
 | Shortcut | Action |
 |----------|--------|
-| `Ctrl+O` | Open PDF file |
-| `Ctrl+Q` | Exit application |
-| `Ctrl+C` | Copy measurements to clipboard |
+| `Ctrl+O` | Open PDF |
+| `Ctrl+Q` | Quit |
+| `Ctrl+F` | Find |
+| `Ctrl+Shift+F` | Toggle search panel |
+| `Ctrl+Shift+O` | Toggle navigation panel |
+| `Ctrl+Shift+T` | Toggle thumbnails panel |
+| `Ctrl+Shift+I` | Toggle page info panel |
+| `Ctrl+D` | Add bookmark |
+| `Ctrl+Wheel` | Zoom in or out |
+| `W` | Fit width |
+| `F` | Fit page |
+| `Ctrl+1` | Actual size |
+| `PgUp` / `PgDn` | Previous / next page |
+| `Home` / `End` | First / last page |
+| `Ctrl+L` / `Ctrl+R` | Rotate left / right |
+| `Ctrl+0` | Reset rotation |
+| `Ctrl+C` | Copy measurements or selected text context |
 | `Ctrl+S` | Export selection as PNG |
-| `PgUp` / `PgDn` | Previous / Next page |
-| `Ctrl+Wheel` | Zoom in/out |
-| `W` | Fit to width |
-| `1` | Actual size (100%) |
+| `Ctrl+Shift+H` | Add highlight from selection |
+| `Ctrl+Shift+U` | Add underline from selection |
+| `Ctrl+Shift+N` | Add note from selection |
 | `Arrow` | Move selection by 1 pt |
 | `Shift+Arrow` | Move selection by 10 pt |
 | `Ctrl+Arrow` | Resize selection by 1 pt |
 | `Ctrl+Shift+Arrow` | Resize selection by 10 pt |
+| `Delete` / `Backspace` | Delete selected annotation |
 | `Escape` | Clear selection |
 
-## Selection Tool
+## Development
 
-1. **Create**: Click and drag on the PDF page
-2. **Move**: Drag inside the selection
-3. **Resize**: Drag edges or corners
-4. **Fine-tune**: Use arrow keys with modifiers
-5. **Measure**: See live measurements in status bar
+### Install dependencies
 
-All measurements are in PDF coordinate space (points) and remain accurate at any zoom level.
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+python3 -m pip install -e .[dev]
+```
 
-## Export
+### Run tests
 
-1. Create a selection
-2. Press `Ctrl+S` or click Export button
-3. Choose DPI (150/300/600)
-4. Save as PNG
+```bash
+PYTHONPATH=src pytest -q
+```
 
-## Auto-reload
+On Windows PowerShell:
 
-Enable "Auto-reload on file change" in Options menu to automatically refresh when the PDF is modified externally. Selection and page position are preserved.
+```powershell
+$env:PYTHONPATH = "src"
+python -m pytest -q
+```
+
+### Current automated coverage
+
+- Unit tests for measurement and state helpers
+- Sidecar persistence tests
+- UI behavior tests for reload, session restore, and navigation
+- `pytest-qt` interaction tests for:
+  - search
+  - reload
+  - thumbnails
+  - outline navigation
+  - bookmarks
+  - annotation create/edit/delete flows
+  - export flows
+  - text selection and copy
+
+The suite is intended to stay fast enough for local development and CI.
+
+## Packaging
+
+- Canonical metadata: [pyproject.toml](/data/neopage/repos/neoview/pyproject.toml)
+- Older editable-install support: [setup.py](/data/neopage/repos/neoview/setup.py)
+- Windows build spec: [neoview.spec](/data/neopage/repos/neoview/neoview.spec)
+- Publish helper: [publish.sh](/data/neopage/repos/neoview/publish.sh)
 
 ## License
 
 MIT
-
-## Development
-
-```bash
-python3 -m pip install -e .[dev]
-PYTHONPATH=src pytest -q
-```
-
-For Qt interaction tests, the suite uses `pytest-qt` and runs headless with `QT_QPA_PLATFORM=offscreen`.
