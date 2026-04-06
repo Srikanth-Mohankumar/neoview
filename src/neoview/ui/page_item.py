@@ -6,7 +6,7 @@ from collections import OrderedDict
 from typing import Optional
 
 import fitz
-from PySide6.QtCore import QRectF, QPointF
+from PySide6.QtCore import QRectF, QPointF, Qt
 from PySide6.QtGui import QColor, QImage, QPixmap
 from PySide6.QtWidgets import QGraphicsDropShadowEffect, QGraphicsPixmapItem
 
@@ -14,7 +14,9 @@ from PySide6.QtWidgets import QGraphicsDropShadowEffect, QGraphicsPixmapItem
 class PageItem(QGraphicsPixmapItem):
     """A single PDF page rendered at optimized quality."""
 
-    RENDER_SCALE = 2.0
+    BASE_RENDER_SCALE = 2.0
+    TARGET_RENDER_SCALE = 3.0
+    MAX_RENDER_PIXELS = 16_000_000
     CACHE_LIMIT = 96
     _PIXMAP_CACHE: "OrderedDict[tuple, QPixmap]" = OrderedDict()
 
@@ -24,6 +26,8 @@ class PageItem(QGraphicsPixmapItem):
         self.page_rect = QRectF(0, 0, page.rect.width, page.rect.height)
         self._fitz_page = page
         self.render_zoom: float = scale
+        self.render_scale_factor: float = self.BASE_RENDER_SCALE
+        self.setTransformationMode(Qt.TransformationMode.SmoothTransformation)
         self._shadow = QGraphicsDropShadowEffect()
         self._shadow.setBlurRadius(24.0)
         self._shadow.setOffset(0.0, 4.0)
@@ -32,12 +36,21 @@ class PageItem(QGraphicsPixmapItem):
         self._render(page, scale)
 
     @classmethod
-    def _cache_key(cls, page: fitz.Page, scale: float) -> tuple:
+    def _effective_render_scale(cls, page: fitz.Page, scale: float) -> float:
+        page_rect = getattr(page, "rect", None)
+        width = float(getattr(page_rect, "width", 0.0) or 0.0)
+        height = float(getattr(page_rect, "height", 0.0) or 0.0)
+        scaled_area = max(1.0, width * height * max(scale, 0.25) * max(scale, 0.25))
+        max_scale = (cls.MAX_RENDER_PIXELS / scaled_area) ** 0.5
+        return max(cls.BASE_RENDER_SCALE, min(cls.TARGET_RENDER_SCALE, max_scale))
+
+    @classmethod
+    def _cache_key(cls, page: fitz.Page, scale: float, render_scale: float) -> tuple:
         doc = getattr(page, "parent", None)
         doc_name = getattr(doc, "name", "") or f"doc-{id(doc)}"
         doc_identity = id(doc)
         page_num = getattr(page, "number", -1)
-        return (doc_name, doc_identity, page_num, round(scale, 2), cls.RENDER_SCALE)
+        return (doc_name, doc_identity, page_num, round(scale, 2), round(render_scale, 2))
 
     @classmethod
     def _cache_get(cls, key: tuple) -> Optional[QPixmap]:
@@ -56,20 +69,22 @@ class PageItem(QGraphicsPixmapItem):
 
     def _render(self, page: fitz.Page, scale: float):
         self.render_zoom = scale
-        key = self._cache_key(page, scale)
+        render_factor = self._effective_render_scale(page, scale)
+        self.render_scale_factor = render_factor
+        key = self._cache_key(page, scale, render_factor)
         cached = self._cache_get(key)
         if cached is not None:
             self.setPixmap(cached)
-            self.setScale(1.0 / self.RENDER_SCALE)
+            self.setScale(1.0 / render_factor)
             return
 
-        render_scale = scale * self.RENDER_SCALE
+        render_scale = scale * render_factor
         mat = fitz.Matrix(render_scale, render_scale)
         pix = page.get_pixmap(matrix=mat, alpha=False)
         img = QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format.Format_RGB888)
         pixmap = QPixmap.fromImage(img.copy())
         self.setPixmap(pixmap)
-        self.setScale(1.0 / self.RENDER_SCALE)
+        self.setScale(1.0 / render_factor)
         self._cache_put(key, pixmap)
 
     def rerender(self, scale: float) -> bool:

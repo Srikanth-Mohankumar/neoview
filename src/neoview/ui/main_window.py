@@ -116,7 +116,7 @@ class MainWindow(QMainWindow):
     MAX_LIVE_SEARCH_RESULTS = 250
     MIN_LIVE_SEARCH_CHARS = 2
     SEARCH_SYNC_PAGE_THRESHOLD = 8
-    SEARCH_BATCH_PAGES = 6
+    SEARCH_BATCH_PAGES = 2
     SEARCH_BATCH_TIME_BUDGET_MS = 18.0
 
     # Inspector tab indices — must match the order tabs are added in _setup_docks
@@ -1322,42 +1322,47 @@ class MainWindow(QMainWindow):
 
         self._save_current_document_session()
         self._stop_watch()
+        self.setUpdatesEnabled(False)
+        try:
+            if not target.open_document(norm_path):
+                if create_new_tab:
+                    idx = self._tabs.indexOf(target)
+                    if idx >= 0:
+                        self._close_tab_index(idx)
+                return
 
-        if not target.open_document(norm_path):
-            if create_new_tab:
-                idx = self._tabs.indexOf(target)
-                if idx >= 0:
-                    self._close_tab_index(idx)
-            return
+            target_ctx.file_path = norm_path
+            target_ctx.search_query = ""
+            target_ctx.search_results = []
+            target_ctx.search_index = -1
+            target_ctx.sidecar_error = ""
 
-        target_ctx.file_path = norm_path
-        target_ctx.search_query = ""
-        target_ctx.search_results = []
-        target_ctx.search_index = -1
-        target_ctx.sidecar_error = ""
+            loaded_state = load_sidecar(norm_path)
+            target_ctx.sidecar_state = clamp_sidecar_for_page_count(loaded_state, target.page_count)
+            self._load_native_pdf_annotations(target, target_ctx)
+            target.set_annotations(target_ctx.sidecar_state.annotations + target_ctx.native_annotations)
 
-        loaded_state = load_sidecar(norm_path)
-        target_ctx.sidecar_state = clamp_sidecar_for_page_count(loaded_state, target.page_count)
-        self._load_native_pdf_annotations(target, target_ctx)
-        target.set_annotations(target_ctx.sidecar_state.annotations + target_ctx.native_annotations)
+            self._tabs.setCurrentWidget(target)
+            self._set_tab_title(target)
 
-        self._tabs.setCurrentWidget(target)
-        self._set_tab_title(target)
+            self._add_recent_file(norm_path)
+            if not self._restore_document_session(norm_path):
+                target.fit_width()
 
-        self._add_recent_file(norm_path)
-        if not self._restore_document_session(norm_path):
-            target.fit_width()
+            self._set_current_file(norm_path)
+            self.setWindowTitle(f"{APP_NAME} - {os.path.basename(norm_path)}")
 
-        self._set_current_file(norm_path)
-        self.setWindowTitle(f"{APP_NAME} - {os.path.basename(norm_path)}")
-
-        self._clear_search()
-        self._populate_outline()
-        self._populate_annotation_list()
-        self._update_status()
-        self._update_mtime()
-        self._start_watch()
-        self._schedule_session_save()
+            self._clear_search()
+            self._populate_outline()
+            self._populate_annotation_list()
+            self._update_status()
+            self._update_mtime()
+            self._start_watch()
+            self._schedule_session_save()
+        finally:
+            self.setUpdatesEnabled(True)
+            self.update()
+            target.viewport().update()
 
     def _refresh_document_info(self):
         view = self.current_view()
@@ -2703,9 +2708,13 @@ class MainWindow(QMainWindow):
         self._reload_in_progress = True
         reloaded = False
         try:
+            self.setUpdatesEnabled(False)
             reloaded = view.reload_document()
         finally:
             self._reload_in_progress = False
+            self.setUpdatesEnabled(True)
+            self.update()
+            view.viewport().update()
 
         if reloaded:
             ctx.sidecar_state = clamp_sidecar_for_page_count(ctx.sidecar_state, view.page_count)

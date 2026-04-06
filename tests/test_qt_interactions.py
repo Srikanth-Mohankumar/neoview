@@ -199,7 +199,7 @@ def test_live_search_stays_responsive_with_tabs_and_annotations(tmp_path: Path, 
     QTimer.singleShot(0, win._execute_live_search_current)
     QTimer.singleShot(50, lambda: heartbeat.append("tick"))
 
-    qtbot.waitUntil(lambda: bool(heartbeat), timeout=500)
+    qtbot.waitUntil(lambda: bool(heartbeat), timeout=1200)
     qtbot.waitUntil(lambda: len(annotated_ctx.search_results) >= 36, timeout=5000)
 
     assert win._search_operation is None

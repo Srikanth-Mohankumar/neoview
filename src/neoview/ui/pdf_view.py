@@ -467,7 +467,8 @@ class PdfView(QGraphicsView):
 
         for p in self._pages:
             render_zoom = p.render_zoom if p.render_zoom > 0 else self._zoom
-            p.setScale((self._zoom / render_zoom) / PageItem.RENDER_SCALE)
+            render_factor = getattr(p, "render_scale_factor", PageItem.BASE_RENDER_SCALE)
+            p.setScale((self._zoom / render_zoom) / render_factor)
             p.setPos(0, y)
             y += p.page_rect.height() * self._zoom + gap
 
@@ -568,6 +569,14 @@ class PdfView(QGraphicsView):
                 return True
         return False
 
+    def _pages_need_rerender_for_zoom(self, zoom: float, tolerance: float = 0.002) -> bool:
+        for idx in self._visible_page_indices():
+            page = self._pages[idx]
+            render_zoom = getattr(page, "render_zoom", zoom)
+            if abs(render_zoom - zoom) >= tolerance:
+                return True
+        return False
+
     def _rerender_pages(self):
         if not self._pages:
             return
@@ -577,7 +586,8 @@ class PdfView(QGraphicsView):
             page = self._pages[idx]
             rerender = getattr(page, "rerender", None)
             if callable(rerender) and rerender(self._zoom):
-                page.setScale(1.0 / PageItem.RENDER_SCALE)
+                render_factor = getattr(page, "render_scale_factor", PageItem.BASE_RENDER_SCALE)
+                page.setScale(1.0 / render_factor)
                 rerendered = True
 
         if rerendered:
@@ -594,7 +604,13 @@ class PdfView(QGraphicsView):
             if not self._performance_mode:
                 self._rerender_timer.start(40)
 
-    def set_zoom(self, z: float, immediate: bool = False, zoom_mode: str = ZOOM_MODE_CUSTOM):
+    def set_zoom(
+        self,
+        z: float,
+        immediate: bool = False,
+        zoom_mode: str = ZOOM_MODE_CUSTOM,
+        force_if_close: bool = False,
+    ):
         z = max(0.25, min(z, 5.0))
         if zoom_mode not in {
             self.ZOOM_MODE_CUSTOM,
@@ -606,6 +622,14 @@ class PdfView(QGraphicsView):
 
         if abs(z - self._zoom) < 0.01:
             self._zoom_mode = zoom_mode
+            if force_if_close and self._pages and self._pages_need_rerender_for_zoom(z):
+                self._zoom = z
+                self._layout_pages()
+                if immediate:
+                    self._rerender_timer.stop()
+                    self._rerender_pages()
+                elif not self._performance_mode:
+                    self._rerender_timer.start(55)
             return
 
         self._zoom = z
@@ -654,7 +678,12 @@ class PdfView(QGraphicsView):
             return
         page_width = self._pages[0].page_rect.width()
         view_width = self.viewport().width() - 40
-        self.set_zoom(view_width / page_width, immediate=True, zoom_mode=self.ZOOM_MODE_FIT_WIDTH)
+        self.set_zoom(
+            view_width / page_width,
+            immediate=True,
+            zoom_mode=self.ZOOM_MODE_FIT_WIDTH,
+            force_if_close=True,
+        )
 
     def fit_page(self):
         if not self._pages:
@@ -664,7 +693,12 @@ class PdfView(QGraphicsView):
         view_h = self.viewport().height() - 40
         scale_w = view_w / page.width()
         scale_h = view_h / page.height()
-        self.set_zoom(min(scale_w, scale_h), immediate=True, zoom_mode=self.ZOOM_MODE_FIT_PAGE)
+        self.set_zoom(
+            min(scale_w, scale_h),
+            immediate=True,
+            zoom_mode=self.ZOOM_MODE_FIT_PAGE,
+            force_if_close=True,
+        )
 
     def actual_size(self):
         self.set_zoom(1.0, immediate=True, zoom_mode=self.ZOOM_MODE_ACTUAL_SIZE)
@@ -1842,12 +1876,20 @@ class PdfView(QGraphicsView):
             if self._zoom_mode == self.ZOOM_MODE_FIT_WIDTH:
                 page_width = self._pages[0].page_rect.width()
                 view_width = self.viewport().width() - 40
-                self.set_zoom(view_width / page_width, zoom_mode=self.ZOOM_MODE_FIT_WIDTH)
+                self.set_zoom(
+                    view_width / page_width,
+                    zoom_mode=self.ZOOM_MODE_FIT_WIDTH,
+                    force_if_close=True,
+                )
             else:
                 page = self._pages[0].page_rect
                 view_w = self.viewport().width() - 40
                 view_h = self.viewport().height() - 40
-                self.set_zoom(min(view_w / page.width(), view_h / page.height()), zoom_mode=self.ZOOM_MODE_FIT_PAGE)
+                self.set_zoom(
+                    min(view_w / page.width(), view_h / page.height()),
+                    zoom_mode=self.ZOOM_MODE_FIT_PAGE,
+                    force_if_close=True,
+                )
         self._update_measure_badge()
         self._hide_link_badge()
 
