@@ -3,649 +3,417 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="NeoView - A technical PDF viewer for Linux and Windows with tabs, live reload, find, bookmarks, annotations, thumbnails, measurements, and PDF export.">
-    <meta name="keywords" content="PDF viewer, LaTeX, annotations, bookmarks, measurement tool, Linux, Windows, technical PDF workflow">
-    <title>NeoView - Technical PDF Viewer for Search, Annotation, and Measurement</title>
+    <meta name="description" content="NeoView is a refined PDF viewer for reading, search, markup, measurement, and review on Linux and Windows.">
+    <meta name="keywords" content="PDF viewer, annotations, review workflow, Linux PDF viewer, Windows PDF viewer, technical PDF workflow">
+    <title>NeoView | Premium PDF Review Workspace</title>
     <link rel="icon" href="assets/feather-logo.png" type="image/png">
     <link rel="stylesheet" href="style.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 </head>
 <body>
-    <!-- Hero Section -->
-    <section class="hero">
-        <div class="hero-glow"></div>
-        <div class="container">
-            <div class="hero-content">
-                <div class="logo-wrapper">
-                    <img src="assets/feather-logo.png" alt="NeoView Logo" class="hero-logo">
-                </div>
-                <h1 class="hero-title">
-                    <span class="gradient-text">NeoView</span>
-                </h1>
-                <p class="hero-tagline">Technical PDF viewer for search, annotation, measurement, and live reload</p>
-                <p class="hero-subtitle">Built for LaTeX, proofreading, QA, and document review with tabs, find, bookmarks, thumbnails, annotations, PNG export, and annotated PDF export.</p>
-                
-                <div class="cta-buttons">
-                    <a href="https://github.com/Srikanth-Mohankumar/neoview/releases/latest/download/neoview.exe" class="btn btn-primary" rel="noopener">
-                        <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
-                            <path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801"/>
-                        </svg>
-                        Download for Windows (.exe)
-                    </a>
-                    <a href="#installation" class="btn btn-secondary">
-                        <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
-                            <path d="M12.504 0c-.155 0-.313.015-.467.045C7.49.456 4 4.475 4 9.308c0 .614.064 1.228.192 1.827l-2.106 3.644c-.106.185-.113.405-.017.596.097.191.278.32.482.345l1.876.228-.016.06c-.034.13-.054.263-.054.4 0 .944.775 1.707 1.728 1.707.318 0 .619-.085.881-.239l2.16 1.25c-.004.048-.008.097-.008.146 0 .944.775 1.707 1.728 1.707.168 0 .33-.024.484-.07.344-.102.637-.305.866-.576l.122.073c-.012.035-.022.07-.033.106-.142.477-.213.974-.213 1.479C12 23.122 13.13 24 14.5 24c1.37 0 2.5-.878 2.5-1.96 0-.148-.016-.296-.047-.44l.51-.294c.506.416 1.137.694 1.837.694 1.592 0 2.7-1.36 2.7-2.853 0-.93-.477-1.781-1.246-2.291l-.002-.015c.137-.385.214-.8.214-1.234 0-1.93-1.507-3.56-3.453-3.756-.11-.007-.22-.01-.33-.01-.74 0-1.444.174-2.075.486l-.24-.125c.032-.11.055-.225.068-.344.02-.18.03-.362.03-.544 0-2.513-1.637-4.684-3.952-5.456-.32-.106-.652-.175-.992-.206C13.102.014 12.803 0 12.504 0"/>
-                        </svg>
-                        Linux / source install
-                    </a>
-                    <a href="https://github.com/Srikanth-Mohankumar/neoview" class="btn btn-ghost">
-                        <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
-                            <path d="M12 0C5.374 0 0 5.373 0 12c0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23A11.509 11.509 0 0112 5.803c1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576C20.566 21.797 24 17.3 24 12c0-6.627-5.373-12-12-12z"/>
-                        </svg>
-                        View on GitHub
-                    </a>
-                </div>
-
-                <div class="badges">
-                    <a href="https://pypi.org/project/neoview/" class="badge">
-                        <img src="https://img.shields.io/pypi/v/neoview?style=flat-square&color=f97373" alt="PyPI version">
-                    </a>
-                    <a href="https://github.com/Srikanth-Mohankumar/neoview/blob/main/LICENSE" class="badge">
-                        <img src="https://img.shields.io/badge/license-MIT-f97373?style=flat-square" alt="MIT License">
-                    </a>
-                    <span class="badge">
-                        <img src="https://img.shields.io/badge/python-3.10+-f97373?style=flat-square" alt="Python 3.10+">
-                    </span>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- Gallery Section -->
-    <section class="gallery" id="gallery">
-        <div class="container">
-            <h2 class="section-title">See NeoView in Action</h2>
-            <p class="section-subtitle">A full walkthrough of the viewer: search, tabs, thumbnails, bookmarks, measurement, annotations, and document inspection</p>
-            
-            <div class="gallery-grid">
-                <div class="gallery-item">
-                    <img src="assets/img1.png" alt="NeoView search, outline, and thumbnails" class="gallery-image">
-                    <div class="gallery-caption">
-                        <h4>Search With Navigation Panels</h4>
-                        <p>Live find, match highlighting, outline navigation, and page thumbnails in one technical review layout.</p>
-                    </div>
-                </div>
-                <div class="gallery-item">
-                    <img src="assets/img2.png" alt="NeoView measurement and font inspection" class="gallery-image">
-                    <div class="gallery-caption">
-                        <h4>Measurement and Font Inspection</h4>
-                        <p>Draw precise selections, inspect dimensions, and check font metadata without switching tools.</p>
-                    </div>
-                </div>
-                <div class="gallery-item">
-                    <img src="assets/img3.png" alt="NeoView annotations and bookmarks" class="gallery-image">
-                    <div class="gallery-caption">
-                        <h4>Annotation Review Workspace</h4>
-                        <p>Highlights, shapes, arrows, notes, and bookmarks stay organized in a dedicated review view.</p>
-                    </div>
-                </div>
-                <div class="gallery-item">
-                    <img src="assets/img4.png" alt="NeoView document information panel" class="gallery-image">
-                    <div class="gallery-caption">
-                        <h4>Document Details at a Glance</h4>
-                        <p>Inspect file metadata, page count, and fit-page reading layout from the built-in document panel.</p>
-                    </div>
-                </div>
-                <div class="gallery-item">
-                    <img src="assets/img5.png" alt="NeoView multi-tab workflow" class="gallery-image">
-                    <div class="gallery-caption">
-                        <h4>Multi-Tab PDF Workflow</h4>
-                        <p>Open several PDFs side by side in tabs and keep search state independent for each document.</p>
-                    </div>
-                </div>
-                <div class="gallery-item">
-                    <img src="assets/img6.png" alt="NeoView thumbnails panel" class="gallery-image">
-                    <div class="gallery-caption">
-                        <h4>Thumbnail-Driven Navigation</h4>
-                        <p>Jump through longer documents quickly with page thumbnails and direct page selection.</p>
-                    </div>
-                </div>
-                <div class="gallery-item">
-                    <img src="assets/img7.png" alt="NeoView outline and bookmark filtering" class="gallery-image">
-                    <div class="gallery-caption">
-                        <h4>Outline and Bookmark Filtering</h4>
-                        <p>Use document structure and saved review bookmarks to get back to important sections fast.</p>
-                    </div>
-                </div>
-                <div class="gallery-item">
-                    <img src="assets/img8.png" alt="NeoView freehand and note annotations" class="gallery-image">
-                    <div class="gallery-caption">
-                        <h4>Shapes, Freehand, and Notes</h4>
-                        <p>Mark up drafts with ellipse, freehand, and note annotations for proofreading and QA passes.</p>
-                    </div>
-                </div>
-                <div class="gallery-item">
-                    <img src="assets/img9.png" alt="NeoView deeper search result navigation" class="gallery-image">
-                    <div class="gallery-caption">
-                        <h4>Search Across Longer PDFs</h4>
-                        <p>Move through repeated matches and keep context while reading deeper pages in technical documents.</p>
-                    </div>
-                </div>
-                <div class="gallery-item">
-                    <img src="assets/img10.png" alt="NeoView rotated page and performance mode" class="gallery-image">
-                    <div class="gallery-caption">
-                        <h4>Rotation and Performance Controls</h4>
-                        <p>Rotate pages for awkward scans and switch modes when balancing rendering quality and responsiveness.</p>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- Why NeoView Section -->
-    <section class="advantages" id="advantages">
-        <div class="container">
-            <h2 class="section-title">Why Choose NeoView?</h2>
-            <p class="section-subtitle">A practical viewer for PDF-heavy editing, review, and inspection workflows</p>
-
-            <!-- Key Advantages -->
-            <div class="advantage-cards">
-                <div class="advantage-card highlight">
-                    <div class="advantage-icon">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <circle cx="12" cy="12" r="10"/>
-                            <path d="M12 6v6l4 2"/>
-                        </svg>
-                    </div>
-                    <h3>Live Reload for Build Loops</h3>
-                    <p>Automatically refreshes when your PDF is rebuilt, keeping page position, annotations, and search state aligned with ongoing LaTeX or generated-PDF work.</p>
-                </div>
-
-                <div class="advantage-card highlight">
-                    <div class="advantage-icon">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M4 8h16M4 16h16M8 4v16M16 4v16"/>
-                        </svg>
-                    </div>
-                    <h3>Measurement and Selection Tools</h3>
-                    <p>Draw, move, resize, and fine-tune selections with mouse or keyboard, then inspect exact dimensions in <strong>points, picas, and millimeters</strong>.</p>
-                </div>
-
-                <div class="advantage-card highlight">
-                    <div class="advantage-icon">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M4 7V4h16v3M9 20h6M12 4v16"/>
-                        </svg>
-                    </div>
-                    <h3>Search, Annotation, and Inspection</h3>
-                    <p>Use live find, bookmarks, thumbnails, and outline navigation while reviewing PDFs, then add <strong>highlights, notes, shapes, arrows, text boxes, and freehand markup</strong>.</p>
-                </div>
-            </div>
-
-            <!-- Comparison Table -->
-            <div class="comparison-section">
-                <h3 class="comparison-title">How NeoView Compares</h3>
-                <div class="comparison-table-wrapper">
-                    <table class="comparison-table">
-                        <thead>
-                            <tr>
-                                <th>Feature</th>
-                                <th class="highlight-col">NeoView</th>
-                                <th>SumatraPDF</th>
-                                <th>Adobe Acrobat</th>
-                                <th>Evince</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr>
-                                <td>Auto-reload on file change</td>
-                                <td class="highlight-col"><span class="check">✓</span></td>
-                                <td><span class="check">✓</span></td>
-                                <td><span class="cross">✗</span></td>
-                                <td><span class="check">✓</span></td>
-                            </tr>
-                            <tr>
-                                <td>Measurement tools (pt/mm)</td>
-                                <td class="highlight-col"><span class="check">✓</span></td>
-                                <td><span class="check">✓</span></td>
-                                <td><span class="check">✓</span></td>
-                                <td><span class="cross">✗</span></td>
-                            </tr>
-                            <tr>
-                                <td>Font name/size inspection</td>
-                                <td class="highlight-col"><span class="check">✓</span></td>
-                                <td><span class="cross">✗</span></td>
-                                <td><span class="check">✓</span></td>
-                                <td><span class="cross">✗</span></td>
-                            </tr>
-                            <tr>
-                                <td>Export selection as PNG</td>
-                                <td class="highlight-col"><span class="check">✓</span></td>
-                                <td><span class="cross">✗</span></td>
-                                <td><span class="check">✓</span></td>
-                                <td><span class="cross">✗</span></td>
-                            </tr>
-                            <tr>
-                                <td>Bookmarks + thumbnails + outline</td>
-                                <td class="highlight-col"><span class="check">✓</span></td>
-                                <td><span class="cross">✗</span></td>
-                                <td><span class="check">✓</span></td>
-                                <td><span class="check">✓</span></td>
-                            </tr>
-                            <tr>
-                                <td>Canvas and sidecar annotations</td>
-                                <td class="highlight-col"><span class="check">✓</span></td>
-                                <td><span class="cross">✗</span></td>
-                                <td><span class="check">✓</span></td>
-                                <td><span class="cross">✗</span></td>
-                            </tr>
-                            <tr>
-                                <td>Linux native</td>
-                                <td class="highlight-col"><span class="check">✓</span></td>
-                                <td><span class="cross">✗</span></td>
-                                <td><span class="cross">✗</span></td>
-                                <td><span class="check">✓</span></td>
-                            </tr>
-                            <tr>
-                                <td>Windows native</td>
-                                <td class="highlight-col"><span class="check">✓</span></td>
-                                <td><span class="check">✓</span></td>
-                                <td><span class="check">✓</span></td>
-                                <td><span class="cross">✗</span></td>
-                            </tr>
-                            <tr>
-                                <td>Lightweight & fast</td>
-                                <td class="highlight-col"><span class="check">✓</span></td>
-                                <td><span class="check">✓</span></td>
-                                <td><span class="cross">✗</span></td>
-                                <td><span class="check">✓</span></td>
-                            </tr>
-                            <tr>
-                                <td>Open source</td>
-                                <td class="highlight-col"><span class="check">✓</span></td>
-                                <td><span class="check">✓</span></td>
-                                <td><span class="cross">✗</span></td>
-                                <td><span class="check">✓</span></td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- Complete Features Section -->
-    <section class="features" id="features">
-        <div class="container">
-            <h2 class="section-title">Complete Feature List</h2>
-            <p class="section-subtitle">Core reader features plus practical review and inspection tools</p>
-            
-            <div class="features-grid">
-                <div class="feature-card">
-                    <div class="feature-icon">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <circle cx="12" cy="12" r="10"/>
-                            <path d="M12 6v6l4 2"/>
-                        </svg>
-                    </div>
-                    <h3>Auto-Reload</h3>
-                    <p>Watches file changes and refreshes automatically. Page position, search state, and viewer context stay aligned during rebuild-heavy workflows.</p>
-                </div>
-
-                <div class="feature-card">
-                    <div class="feature-icon">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M4 8h16M4 16h16M8 4v16M16 4v16"/>
-                        </svg>
-                    </div>
-                    <h3>Measure and Select</h3>
-                    <p>Click and drag to create precise rectangles, then move or resize them with handles and keyboard nudges.</p>
-                </div>
-
-                <div class="feature-card">
-                    <div class="feature-icon">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M4 7V4h16v3M9 20h6M12 4v16"/>
-                        </svg>
-                    </div>
-                    <h3>Find and Highlight</h3>
-                    <p>Use live search, next/previous match navigation, and highlighted results without leaving the document.</p>
-                </div>
-
-                <div class="feature-card">
-                    <div class="feature-icon">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/>
-                        </svg>
-                    </div>
-                    <h3>Bookmarks and Outline</h3>
-                    <p>Jump through the PDF using the document TOC, your own bookmarks, and filtered navigation panels.</p>
-                </div>
-
-                <div class="feature-card">
-                    <div class="feature-icon">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
-                            <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/>
-                        </svg>
-                    </div>
-                    <h3>Thumbnails and Tabs</h3>
-                    <p>Work across multiple open PDFs with thumbnails, per-tab state, and smart reuse of already-open files.</p>
-                </div>
-
-                <div class="feature-card">
-                    <div class="feature-icon">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>
-                        </svg>
-                    </div>
-                    <h3>Zoom and Rotation</h3>
-                    <p>Fit Width, Fit Page, Actual Size, Ctrl+wheel, pinch zoom, and rotation controls for detailed review.</p>
-                </div>
-
-                <div class="feature-card">
-                    <div class="feature-icon">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <rect x="3" y="11" width="18" height="11" rx="2"/>
-                            <path d="M7 11V7a5 5 0 0110 0v4"/>
-                        </svg>
-                    </div>
-                    <h3>Annotations</h3>
-                    <p>Create highlights, underline, notes, shapes, arrows, text boxes, and freehand drawings directly on the canvas.</p>
-                </div>
-
-                <div class="feature-card">
-                    <div class="feature-icon">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <rect x="2" y="3" width="20" height="14" rx="2"/>
-                            <path d="M8 21h8M12 17v4"/>
-                        </svg>
-                    </div>
-                    <h3>Annotation Export</h3>
-                    <p>Save a copy of the current PDF with your NeoView annotations embedded into the exported file.</p>
-                </div>
-
-                <div class="feature-card">
-                    <div class="feature-icon">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/>
-                        </svg>
-                    </div>
-                    <h3>Native PDF Annotation Viewing</h3>
-                    <p>See annotations already embedded in the source PDF alongside your own sidecar-managed annotations.</p>
-                </div>
-
-                <div class="feature-card">
-                    <div class="feature-icon">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <rect x="9" y="9" width="13" height="13" rx="2"/>
-                            <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
-                        </svg>
-                    </div>
-                    <h3>PNG Export</h3>
-                    <p>Export any selected area as a high-quality PNG at 150, 300, or 600 DPI.</p>
-                </div>
-
-                <div class="feature-card">
-                    <div class="feature-icon">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <rect x="3" y="3" width="7" height="7"/>
-                            <rect x="14" y="3" width="7" height="7"/>
-                            <rect x="14" y="14" width="7" height="7"/>
-                            <rect x="3" y="14" width="7" height="7"/>
-                        </svg>
-                    </div>
-                    <h3>Performance Mode</h3>
-                    <p>Reduce expensive rerenders while zooming and scrolling through larger documents.</p>
-                </div>
-
-                <div class="feature-card">
-                    <div class="feature-icon">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M12 3v18M3 12h18"/>
-                            <circle cx="12" cy="12" r="9"/>
-                        </svg>
-                    </div>
-                    <h3>Cross-Platform Desktop Use</h3>
-                    <p>Linux and Windows support with native installs, desktop integration, and a Windows executable release.</p>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- Installation Section -->
-    <section class="installation" id="installation">
-        <div class="container">
-            <h2 class="section-title">Installation</h2>
-            <p class="section-subtitle">Choose your platform</p>
-
-            <div class="tabs">
-                <button class="tab-btn active" data-tab="windows">
-                    <svg class="tab-icon" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801"/>
-                    </svg>
-                    Windows
-                </button>
-                <button class="tab-btn" data-tab="linux">
-                    <svg class="tab-icon" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M12.504 0c-.155 0-.313.015-.467.045-4.547.424-8.037 4.443-8.037 9.276 0 .614.064 1.228.192 1.827l-2.106 3.644c-.106.185-.113.405-.017.596.097.191.278.32.482.345l1.876.228-.016.06c-.034.13-.054.263-.054.4 0 .944.775 1.707 1.728 1.707.318 0 .619-.085.881-.239l2.16 1.25c-.004.048-.008.097-.008.146 0 .944.775 1.707 1.728 1.707.168 0 .33-.024.484-.07.344-.102.637-.305.866-.576l.122.073c-.012.035-.022.07-.033.106-.142.477-.213.974-.213 1.479 0 1.082 1.13 1.96 2.5 1.96 1.37 0 2.5-.878 2.5-1.96 0-.148-.016-.296-.047-.44l.51-.294c.506.416 1.137.694 1.837.694 1.592 0 2.7-1.36 2.7-2.853 0-.93-.477-1.781-1.246-2.291l-.002-.015c.137-.385.214-.8.214-1.234 0-1.93-1.507-3.56-3.453-3.756-.11-.007-.22-.01-.33-.01-.74 0-1.444.174-2.075.486l-.24-.125c.032-.11.055-.225.068-.344.02-.18.03-.362.03-.544 0-2.513-1.637-4.684-3.952-5.456-.32-.106-.652-.175-.992-.206-.299-.02-.598-.034-.897-.034"/>
-                    </svg>
-                    Linux
-                </button>
-            </div>
-
-            <div class="tab-content">
-                <!-- Windows Tab -->
-                <div class="tab-pane active" id="windows">
-                    <div class="install-option">
-                        <h4>Option 1: Download Executable (Recommended)</h4>
-                        <p>Download the standalone executable with the full viewer, annotation, and navigation toolset. No Python required.</p>
-                        <a href="https://github.com/Srikanth-Mohankumar/neoview/releases/latest/download/neoview.exe" class="btn btn-primary btn-small" rel="noopener">
-                            Download latest neoview.exe
-                        </a>
-                    </div>
-                    <div class="install-option">
-                        <h4>Option 2: Install via pip</h4>
-                        <div class="code-block">
-                            <code>py -m pip install neoview</code>
-                            <button class="copy-btn" data-copy="py -m pip install neoview">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <rect x="9" y="9" width="13" height="13" rx="2"/>
-                                    <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
-                                </svg>
-                            </button>
-                        </div>
-                        <p class="code-note">Then launch with: <code>neoview</code></p>
-                    </div>
-                    <div class="install-option">
-                        <h4>Option 3: Build from Source</h4>
-                        <div class="code-block">
-                            <code>py -m pip install .[dev]<br>pyinstaller neoview.spec</code>
-                            <button class="copy-btn" data-copy="py -m pip install .[dev]&#10;pyinstaller neoview.spec">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <rect x="9" y="9" width="13" height="13" rx="2"/>
-                                    <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
-                                </svg>
-                            </button>
-                        </div>
-                        <p class="code-note">The executable will be at <code>dist\neoview.exe</code></p>
-                    </div>
-                </div>
-
-                <!-- Linux Tab -->
-                <div class="tab-pane" id="linux">
-                    <div class="install-option">
-                        <h4>Install via pip</h4>
-                        <div class="code-block">
-                            <code>pip install neoview</code>
-                            <button class="copy-btn" data-copy="pip install neoview">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <rect x="9" y="9" width="13" height="13" rx="2"/>
-                                    <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
-                                </svg>
-                            </button>
-                        </div>
-                        <p class="code-note">Launch with: <code>neoview</code> or <code>neoview /path/to/file.pdf</code></p>
-                    </div>
-                    <div class="install-option">
-                        <h4>Desktop Launcher (Optional)</h4>
-                        <p>Create a desktop shortcut for easy access:</p>
-                        <div class="code-block">
-                            <code>git clone https://github.com/Srikanth-Mohankumar/neoview.git<br>cd neoview<br>pip install .<br>./install_desktop.sh</code>
-                            <button class="copy-btn" data-copy="git clone https://github.com/Srikanth-Mohankumar/neoview.git&#10;cd neoview&#10;pip install .&#10;./install_desktop.sh">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <rect x="9" y="9" width="13" height="13" rx="2"/>
-                                    <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
-                                </svg>
-                            </button>
-                        </div>
-                    </div>
-                    <div class="install-option">
-                        <h4>Requirements</h4>
-                        <ul class="requirements-list">
-                            <li>Python 3.10+</li>
-                            <li>PySide6</li>
-                            <li>PyMuPDF</li>
-                            <li>Optional dev tools: pytest, pytest-qt, pyinstaller</li>
-                        </ul>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- Keyboard Shortcuts Section -->
-    <section class="shortcuts" id="shortcuts">
-        <div class="container">
-            <h2 class="section-title">Keyboard Shortcuts</h2>
-            <p class="section-subtitle">Core shortcuts for navigation, search, review, and annotation</p>
-
-            <div class="shortcuts-grid">
-                <div class="shortcut-group">
-                    <h4>Navigation</h4>
-                    <div class="shortcut-item">
-                        <kbd>Ctrl</kbd> + <kbd>O</kbd>
-                        <span>Open PDF file</span>
-                    </div>
-                    <div class="shortcut-item">
-                        <kbd>PgUp</kbd> / <kbd>PgDn</kbd>
-                        <span>Previous / Next page</span>
-                    </div>
-                    <div class="shortcut-item">
-                        <kbd>Ctrl</kbd> + <kbd>Q</kbd>
-                        <span>Exit application</span>
-                    </div>
-                    <div class="shortcut-item">
-                        <kbd>Ctrl</kbd> + <kbd>D</kbd>
-                        <span>Add bookmark</span>
-                    </div>
-                </div>
-
-                <div class="shortcut-group">
-                    <h4>Zoom and Search</h4>
-                    <div class="shortcut-item">
-                        <kbd>Ctrl</kbd> + <kbd>Wheel</kbd>
-                        <span>Zoom in/out</span>
-                    </div>
-                    <div class="shortcut-item">
-                        <kbd>W</kbd>
-                        <span>Fit to width</span>
-                    </div>
-                    <div class="shortcut-item">
-                        <kbd>F</kbd>
-                        <span>Fit page</span>
-                    </div>
-                    <div class="shortcut-item">
-                        <kbd>Ctrl</kbd> + <kbd>F</kbd>
-                        <span>Find</span>
-                    </div>
-                    <div class="shortcut-item">
-                        <kbd>Ctrl</kbd> + <kbd>1</kbd>
-                        <span>Actual size (100%)</span>
-                    </div>
-                </div>
-
-                <div class="shortcut-group">
-                    <h4>Selection</h4>
-                    <div class="shortcut-item">
-                        <kbd>Arrow</kbd>
-                        <span>Move selection by 1 pt</span>
-                    </div>
-                    <div class="shortcut-item">
-                        <kbd>Shift</kbd> + <kbd>Arrow</kbd>
-                        <span>Move selection by 10 pt</span>
-                    </div>
-                    <div class="shortcut-item">
-                        <kbd>Escape</kbd>
-                        <span>Clear selection</span>
-                    </div>
-                </div>
-
-                <div class="shortcut-group">
-                    <h4>Resize, Export, Annotate</h4>
-                    <div class="shortcut-item">
-                        <kbd>Ctrl</kbd> + <kbd>Arrow</kbd>
-                        <span>Resize by 1 pt</span>
-                    </div>
-                    <div class="shortcut-item">
-                        <kbd>Ctrl</kbd> + <kbd>S</kbd>
-                        <span>Export as PNG</span>
-                    </div>
-                    <div class="shortcut-item">
-                        <kbd>Ctrl</kbd> + <kbd>C</kbd>
-                        <span>Copy measurements</span>
-                    </div>
-                    <div class="shortcut-item">
-                        <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>H</kbd>
-                        <span>Add highlight from selection</span>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- Footer -->
-    <footer class="footer">
-        <div class="container">
-            <div class="footer-content">
-                <div class="footer-logo">
-                    <img src="assets/feather-logo.png" alt="NeoView">
+    <div class="page-shell">
+        <header class="site-header">
+            <div class="container header-inner">
+                <a href="#top" class="brand">
+                    <img src="assets/feather-logo.png" alt="NeoView logo" class="brand-logo">
                     <span>NeoView</span>
+                </a>
+                <nav class="site-nav">
+                    <a href="#demo">Demo</a>
+                    <a href="#gallery">Gallery</a>
+                    <a href="#features">Features</a>
+                    <a href="#installation">Install</a>
+                </nav>
+                <a href="https://github.com/Srikanth-Mohankumar/neoview/releases/latest/download/neoview.exe" class="btn btn-nav" rel="noopener">Download</a>
+            </div>
+        </header>
+
+        <main id="top">
+            <section class="hero">
+                <div class="hero-orb hero-orb-left"></div>
+                <div class="hero-orb hero-orb-right"></div>
+                <div class="container hero-grid">
+                    <div class="hero-copy reveal">
+                        <p class="eyebrow">A calmer way to review PDFs</p>
+                        <h1 class="hero-title">A polished PDF workspace for reading, search, markup, and review.</h1>
+                        <p class="hero-subtitle">NeoView brings together tabs, find, bookmarks, thumbnails, annotations, measurement, and fast reload in one clean desktop experience for Linux and Windows.</p>
+
+                        <div class="hero-actions">
+                            <a href="https://github.com/Srikanth-Mohankumar/neoview/releases/latest/download/neoview.exe" class="btn btn-primary" rel="noopener">Download for Windows</a>
+                            <a href="#demo" class="btn btn-secondary">Watch the Demo</a>
+                        </div>
+
+                        <div class="hero-meta">
+                            <div class="meta-pill">Native desktop workflow</div>
+                            <div class="meta-pill">Linux and Windows</div>
+                            <div class="meta-pill">Open source</div>
+                        </div>
+
+                        <div class="hero-stats">
+                            <div class="stat-card">
+                                <strong>Search faster</strong>
+                                <span>Find text, jump matches, and keep context visible.</span>
+                            </div>
+                            <div class="stat-card">
+                                <strong>Review cleanly</strong>
+                                <span>Annotate, bookmark, rotate, and inspect without tool sprawl.</span>
+                            </div>
+                            <div class="stat-card">
+                                <strong>Stay in flow</strong>
+                                <span>Tabs, reload, and navigation panels keep the session intact.</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="hero-visual reveal">
+                        <div class="hero-panel">
+                            <div class="panel-topbar">
+                                <span></span>
+                                <span></span>
+                                <span></span>
+                            </div>
+                            <video class="hero-video" autoplay muted loop playsinline controls poster="assets/img1.png">
+                                <source src="assets/neoview-demo.mp4" type="video/mp4">
+                            </video>
+                        </div>
+                        <div class="floating-note note-one">Search, inspect, annotate</div>
+                        <div class="floating-note note-two">Built for real review sessions</div>
+                    </div>
                 </div>
+            </section>
+
+            <section class="proof-strip">
+                <div class="container proof-grid reveal">
+                    <div class="proof-card">
+                        <p class="proof-label">Focused reading</p>
+                        <h3>Clean viewing with practical tools close by</h3>
+                    </div>
+                    <div class="proof-card">
+                        <p class="proof-label">Review workflow</p>
+                        <h3>Bookmarks, outline, thumbnails, and search in one place</h3>
+                    </div>
+                    <div class="proof-card">
+                        <p class="proof-label">Precise markup</p>
+                        <h3>Highlights, notes, shapes, freehand, measurement, and export</h3>
+                    </div>
+                </div>
+            </section>
+
+            <section class="showcase" id="demo">
+                <div class="container showcase-grid">
+                    <div class="section-intro reveal">
+                        <p class="eyebrow">Product demo</p>
+                        <h2 class="section-title">See the viewer move through a real session.</h2>
+                        <p class="section-subtitle">The demo covers opening files, search, thumbnails, measurement, annotations, tab switching, fit modes, and rotation.</p>
+                    </div>
+
+                    <div class="demo-card reveal">
+                        <div class="demo-frame">
+                            <video class="demo-video" controls playsinline poster="assets/img3.png">
+                                <source src="assets/neoview-demo.mp4" type="video/mp4">
+                            </video>
+                        </div>
+                    </div>
+
+                    <div class="demo-points reveal">
+                        <div class="point-card">
+                            <h3>Find what matters quickly</h3>
+                            <p>Jump through matches while keeping the active document and its surrounding context visible.</p>
+                        </div>
+                        <div class="point-card">
+                            <h3>Review without switching apps</h3>
+                            <p>Measure layouts, add notes, inspect fonts, and manage bookmarks in the same workspace.</p>
+                        </div>
+                        <div class="point-card">
+                            <h3>Keep momentum across files</h3>
+                            <p>Open multiple PDFs in tabs and move between them without losing your place.</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="gallery" id="gallery">
+                <div class="container">
+                    <div class="section-intro reveal">
+                        <p class="eyebrow">Visual tour</p>
+                        <h2 class="section-title">A viewer that feels organized from the first minute.</h2>
+                        <p class="section-subtitle">The interface is designed to keep the document central while still making navigation, review, and inspection feel immediate.</p>
+                    </div>
+
+                    <div class="gallery-spotlight reveal">
+                        <article class="spotlight-copy">
+                            <p class="spotlight-tag">Featured workspace</p>
+                            <h3>Search, outline, thumbnails, and the page itself all stay visible together.</h3>
+                            <p>NeoView is built around the reading surface. Panels stay useful without taking over the experience, and the viewer remains comfortable for long proofing sessions.</p>
+                        </article>
+                        <div class="spotlight-media">
+                            <img src="assets/img1.png" alt="NeoView search with thumbnails and outline" class="spotlight-image">
+                        </div>
+                    </div>
+
+                    <div class="gallery-mosaic">
+                        <figure class="gallery-tile reveal tile-wide">
+                            <img src="assets/img2.png" alt="NeoView measurement and font inspection">
+                            <figcaption>Measurement and inspection</figcaption>
+                        </figure>
+                        <figure class="gallery-tile reveal">
+                            <img src="assets/img3.png" alt="NeoView annotations and bookmarks">
+                            <figcaption>Annotations and bookmarks</figcaption>
+                        </figure>
+                        <figure class="gallery-tile reveal">
+                            <img src="assets/img4.png" alt="NeoView document info view">
+                            <figcaption>Document overview</figcaption>
+                        </figure>
+                        <figure class="gallery-tile reveal">
+                            <img src="assets/img5.png" alt="NeoView multi-tab workflow">
+                            <figcaption>Multi-tab workflow</figcaption>
+                        </figure>
+                        <figure class="gallery-tile reveal">
+                            <img src="assets/img6.png" alt="NeoView thumbnails panel">
+                            <figcaption>Thumbnail navigation</figcaption>
+                        </figure>
+                        <figure class="gallery-tile reveal">
+                            <img src="assets/img7.png" alt="NeoView outline filtering">
+                            <figcaption>Outline and bookmarks</figcaption>
+                        </figure>
+                        <figure class="gallery-tile reveal">
+                            <img src="assets/img8.png" alt="NeoView freehand annotations">
+                            <figcaption>Freehand and notes</figcaption>
+                        </figure>
+                        <figure class="gallery-tile reveal">
+                            <img src="assets/img9.png" alt="NeoView long-document search">
+                            <figcaption>Search deeper pages</figcaption>
+                        </figure>
+                        <figure class="gallery-tile reveal tile-wide">
+                            <img src="assets/img10.png" alt="NeoView rotated page and performance mode">
+                            <figcaption>Rotation and performance controls</figcaption>
+                        </figure>
+                    </div>
+                </div>
+            </section>
+
+            <section class="workflow">
+                <div class="container">
+                    <div class="section-intro reveal">
+                        <p class="eyebrow">Why it feels better</p>
+                        <h2 class="section-title">Designed like a workflow, not a pile of utilities.</h2>
+                    </div>
+
+                    <div class="workflow-grid">
+                        <article class="workflow-card reveal">
+                            <span class="workflow-number">01</span>
+                            <h3>Open and orient fast</h3>
+                            <p>Tabs, thumbnails, bookmarks, and outline navigation reduce the friction of getting into a document.</p>
+                        </article>
+                        <article class="workflow-card reveal">
+                            <span class="workflow-number">02</span>
+                            <h3>Read and review with context</h3>
+                            <p>Search results, annotation panels, and document details stay nearby without burying the page.</p>
+                        </article>
+                        <article class="workflow-card reveal">
+                            <span class="workflow-number">03</span>
+                            <h3>Finish the pass cleanly</h3>
+                            <p>Measure, annotate, export, reload, and keep moving without jumping between separate apps.</p>
+                        </article>
+                    </div>
+                </div>
+            </section>
+
+            <section class="features" id="features">
+                <div class="container">
+                    <div class="section-intro reveal">
+                        <p class="eyebrow">Core capabilities</p>
+                        <h2 class="section-title">Everything important stays within reach.</h2>
+                        <p class="section-subtitle">NeoView focuses on the pieces that matter most in real PDF reading and review sessions.</p>
+                    </div>
+
+                    <div class="features-grid">
+                        <article class="feature-card reveal">
+                            <h3>Live search that stays usable</h3>
+                            <p>Find text, move between matches, and keep the interface responsive while working through larger files.</p>
+                        </article>
+                        <article class="feature-card reveal">
+                            <h3>Bookmarks, outline, and thumbnails</h3>
+                            <p>Move across long documents with structure-aware navigation instead of endless scrolling.</p>
+                        </article>
+                        <article class="feature-card reveal">
+                            <h3>Markup built for review</h3>
+                            <p>Add highlights, notes, shapes, arrows, text boxes, and freehand marks directly in the viewer.</p>
+                        </article>
+                        <article class="feature-card reveal">
+                            <h3>Measurement and export</h3>
+                            <p>Measure page regions precisely and export selected areas as PNG when you need artifacts for discussion or QA.</p>
+                        </article>
+                        <article class="feature-card reveal">
+                            <h3>Tabs and reload that respect your session</h3>
+                            <p>Keep multiple files open and refresh rebuilt PDFs without disrupting your current reading flow.</p>
+                        </article>
+                        <article class="feature-card reveal">
+                            <h3>Reading controls that feel immediate</h3>
+                            <p>Fit width, fit page, actual size, rotation, and performance controls stay available without clutter.</p>
+                        </article>
+                    </div>
+                </div>
+            </section>
+
+            <section class="installation" id="installation">
+                <div class="container install-shell reveal">
+                    <div class="section-intro section-intro-left">
+                        <p class="eyebrow">Get started</p>
+                        <h2 class="section-title">Install NeoView your way.</h2>
+                        <p class="section-subtitle">Use the standalone Windows executable or install from Python on Linux and development environments.</p>
+                    </div>
+
+                    <div class="tabs">
+                        <button class="tab-btn active" data-tab="windows">Windows</button>
+                        <button class="tab-btn" data-tab="linux">Linux</button>
+                    </div>
+
+                    <div class="tab-content">
+                        <div class="tab-pane active" id="windows">
+                            <div class="install-option">
+                                <h4>Download the executable</h4>
+                                <p>The quickest path to the full viewer experience, with no separate Python setup required.</p>
+                                <a href="https://github.com/Srikanth-Mohankumar/neoview/releases/latest/download/neoview.exe" class="btn btn-primary btn-small" rel="noopener">Download latest neoview.exe</a>
+                            </div>
+                            <div class="install-option">
+                                <h4>Install via pip</h4>
+                                <div class="code-block">
+                                    <code>py -m pip install neoview</code>
+                                    <button class="copy-btn" data-copy="py -m pip install neoview" aria-label="Copy install command">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <rect x="9" y="9" width="13" height="13" rx="2"/>
+                                            <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+                                        </svg>
+                                    </button>
+                                </div>
+                                <p class="code-note">Launch with <code>neoview</code>.</p>
+                            </div>
+                            <div class="install-option">
+                                <h4>Build your own executable</h4>
+                                <div class="code-block">
+                                    <code>py -m pip install .[dev]
+pyinstaller neoview.spec</code>
+                                    <button class="copy-btn" data-copy="py -m pip install .[dev]&#10;pyinstaller neoview.spec" aria-label="Copy build commands">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <rect x="9" y="9" width="13" height="13" rx="2"/>
+                                            <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+                                        </svg>
+                                    </button>
+                                </div>
+                                <p class="code-note">The built executable will be available in <code>dist\neoview.exe</code>.</p>
+                            </div>
+                        </div>
+
+                        <div class="tab-pane" id="linux">
+                            <div class="install-option">
+                                <h4>Install from PyPI</h4>
+                                <div class="code-block">
+                                    <code>pip install neoview</code>
+                                    <button class="copy-btn" data-copy="pip install neoview" aria-label="Copy pip command">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <rect x="9" y="9" width="13" height="13" rx="2"/>
+                                            <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+                                        </svg>
+                                    </button>
+                                </div>
+                                <p class="code-note">Open a file directly with <code>neoview /path/to/file.pdf</code>.</p>
+                            </div>
+                            <div class="install-option">
+                                <h4>Install from source</h4>
+                                <div class="code-block">
+                                    <code>git clone https://github.com/Srikanth-Mohankumar/neoview.git
+cd neoview
+python3 -m pip install -e .[dev]</code>
+                                    <button class="copy-btn" data-copy="git clone https://github.com/Srikanth-Mohankumar/neoview.git&#10;cd neoview&#10;python3 -m pip install -e .[dev]" aria-label="Copy source install commands">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <rect x="9" y="9" width="13" height="13" rx="2"/>
+                                            <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="install-option">
+                                <h4>Typical environment</h4>
+                                <ul class="requirements-list">
+                                    <li>Python 3.10+</li>
+                                    <li>PySide6</li>
+                                    <li>PyMuPDF</li>
+                                    <li>pytest / pytest-qt for development</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="shortcuts" id="shortcuts">
+                <div class="container">
+                    <div class="section-intro reveal">
+                        <p class="eyebrow">Useful shortcuts</p>
+                        <h2 class="section-title">A few keys cover most of the workflow.</h2>
+                    </div>
+
+                    <div class="shortcuts-grid">
+                        <div class="shortcut-group reveal">
+                            <h4>Navigation</h4>
+                            <div class="shortcut-item"><span><kbd>Ctrl</kbd> + <kbd>O</kbd></span><em>Open a PDF</em></div>
+                            <div class="shortcut-item"><span><kbd>PgUp</kbd> / <kbd>PgDn</kbd></span><em>Move page to page</em></div>
+                            <div class="shortcut-item"><span><kbd>Ctrl</kbd> + <kbd>D</kbd></span><em>Add bookmark</em></div>
+                        </div>
+                        <div class="shortcut-group reveal">
+                            <h4>View and search</h4>
+                            <div class="shortcut-item"><span><kbd>Ctrl</kbd> + <kbd>F</kbd></span><em>Find text</em></div>
+                            <div class="shortcut-item"><span><kbd>W</kbd></span><em>Fit width</em></div>
+                            <div class="shortcut-item"><span><kbd>F</kbd></span><em>Fit page</em></div>
+                        </div>
+                        <div class="shortcut-group reveal">
+                            <h4>Review tools</h4>
+                            <div class="shortcut-item"><span><kbd>Ctrl</kbd> + <kbd>S</kbd></span><em>Export PNG</em></div>
+                            <div class="shortcut-item"><span><kbd>Ctrl</kbd> + <kbd>C</kbd></span><em>Copy measurements</em></div>
+                            <div class="shortcut-item"><span><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>H</kbd></span><em>Add highlight</em></div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="cta-band">
+                <div class="container cta-shell reveal">
+                    <div>
+                        <p class="eyebrow">Ready to try it</p>
+                        <h2>Start using NeoView for your next PDF review pass.</h2>
+                    </div>
+                    <div class="cta-actions">
+                        <a href="https://github.com/Srikanth-Mohankumar/neoview/releases/latest/download/neoview.exe" class="btn btn-primary" rel="noopener">Download</a>
+                        <a href="https://github.com/Srikanth-Mohankumar/neoview" class="btn btn-secondary" rel="noopener">View on GitHub</a>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <footer class="footer">
+            <div class="container footer-inner">
+                <div class="footer-brand">
+                    <img src="assets/feather-logo.png" alt="NeoView logo">
+                    <div>
+                        <strong>NeoView</strong>
+                        <p>Premium PDF review workspace for Linux and Windows.</p>
+                    </div>
+                </div>
+
                 <div class="footer-links">
                     <a href="https://github.com/Srikanth-Mohankumar/neoview">GitHub</a>
                     <a href="https://github.com/Srikanth-Mohankumar/neoview/issues">Issues</a>
                     <a href="https://pypi.org/project/neoview/">PyPI</a>
                     <a href="https://github.com/Srikanth-Mohankumar/neoview/blob/main/LICENSE">MIT License</a>
                 </div>
-                
-                <div class="footer-developer">
-                    <p class="developer-name">Srikanth Mohankumar</p>
-                    <p class="developer-location">Tamil Nadu, India</p>
-                    <div class="developer-contact">
-                        <a href="mailto:srikanthmohankumar@gmail.com" title="Email">
-                            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/></svg>
-                        </a>
-                        <a href="tel:+918526629711" title="Phone">
-                            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/></svg>
-                        </a>
-                        <a href="https://linkedin.com/in/srikanth-mohankumar" target="_blank" title="LinkedIn">
-                            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg>
-                        </a>
-                        <a href="https://github.com/Srikanth-Mohankumar" target="_blank" title="GitHub">
-                            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.374 0 0 5.373 0 12c0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23A11.509 11.509 0 0112 5.803c1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576C20.566 21.797 24 17.3 24 12c0-6.627-5.373-12-12-12z"/></svg>
-                        </a>
-                    </div>
-                </div>
 
-                <p class="footer-copyright">
-                    Built for technical PDF workflows on Linux and Windows
-                </p>
+                <p class="footer-note">Built by Srikanth Mohankumar for practical document review workflows.</p>
             </div>
-        </div>
-    </footer>
+        </footer>
+    </div>
 
     <script src="script.js"></script>
 </body>

@@ -120,24 +120,10 @@ function initScrollAnimations() {
     }, observerOptions);
 
     // Observe elements with animation classes
-    const animatedElements = document.querySelectorAll(
-        '.feature-card, .install-option, .shortcut-group'
-    );
+    const animatedElements = document.querySelectorAll('.reveal');
     
     animatedElements.forEach((el, index) => {
-        el.style.opacity = '0';
-        el.style.transform = 'translateY(20px)';
-        el.style.transition = `opacity 0.5s ease ${index * 0.1}s, transform 0.5s ease ${index * 0.1}s`;
+        el.style.transitionDelay = `${Math.min(index * 0.04, 0.24)}s`;
         observer.observe(el);
     });
-
-    // Add CSS for animated state
-    const style = document.createElement('style');
-    style.textContent = `
-        .animate-in {
-            opacity: 1 !important;
-            transform: translateY(0) !important;
-        }
-    `;
-    document.head.appendChild(style);
 }
