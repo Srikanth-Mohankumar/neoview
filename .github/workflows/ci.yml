@@ -43,7 +43,9 @@ jobs:
         if: matrix.run-lint == true
         run: ruff check .
       - name: Tests
-        run: PYTHONPATH=src pytest -q
+        env:
+          PYTHONPATH: src
+        run: python -m pytest -q
       - name: Build
         run: python -m build
       - name: Verify artifacts
