@@ -12,11 +12,13 @@ from typing import Dict, List, Optional, Tuple
 from uuid import uuid4
 
 import fitz
-from PySide6.QtCore import QEvent, QFileSystemWatcher, QPoint, QPointF, QRect, QRectF, QSettings, QSize, Qt, QTimer
+from PySide6.QtCore import QEvent, QFileSystemWatcher, QPoint, QPointF, QRect, QRectF, QSettings, QSize, Qt, QTimer, QUrl
 from PySide6.QtGui import (
     QAction,
     QActionGroup,
     QColor,
+    QDragEnterEvent,
+    QDropEvent,
     QGuiApplication,
     QIcon,
     QImage,
@@ -133,6 +135,7 @@ class MainWindow(QMainWindow):
         if not icon.isNull():
             self.setWindowIcon(icon)
         self.resize(1280, 900)
+        self.setAcceptDrops(True)
 
         self._current_file: Optional[str] = None
         self._last_file_sig: Optional[Tuple[int, int, int]] = None
@@ -220,6 +223,8 @@ class MainWindow(QMainWindow):
         self._tabs.setTabsClosable(True)
         self._tabs.setMovable(True)
         self._tabs.setDocumentMode(True)
+        self._tabs.setAcceptDrops(True)
+        self._tabs.installEventFilter(self)
         self._tabs.currentChanged.connect(self._on_tab_changed)
         self._tabs.tabCloseRequested.connect(self._close_tab_index)
         self.setCentralWidget(self._tabs)
@@ -235,6 +240,10 @@ class MainWindow(QMainWindow):
 
     def _create_tab(self) -> PdfView:
         view = PdfView(self)
+        view.setAcceptDrops(True)
+        view.viewport().setAcceptDrops(True)
+        view.installEventFilter(self)
+        view.viewport().installEventFilter(self)
 
         view.selection_changed.connect(lambda v=view: self._on_view_selection_changed(v))
         view.zoom_changed.connect(lambda _z, v=view: self._on_view_zoom_changed(v))
@@ -1363,6 +1372,70 @@ class MainWindow(QMainWindow):
             self.setUpdatesEnabled(True)
             self.update()
             target.viewport().update()
+
+    def _extract_pdf_paths_from_urls(self, urls: List[QUrl]) -> List[str]:
+        paths: List[str] = []
+        seen: set[str] = set()
+        for url in urls:
+            if not url.isLocalFile():
+                continue
+            path = os.path.abspath(url.toLocalFile())
+            if not path or not os.path.isfile(path):
+                continue
+            if not path.lower().endswith(".pdf"):
+                continue
+            if path in seen:
+                continue
+            seen.add(path)
+            paths.append(path)
+        return paths
+
+    def _accept_drop_event(self, e) -> bool:
+        mime = e.mimeData()
+        paths = self._extract_pdf_paths_from_urls(mime.urls()) if mime and mime.hasUrls() else []
+        if paths:
+            e.acceptProposedAction()
+            return True
+        e.ignore()
+        return False
+
+    def _handle_drop_event(self, e) -> bool:
+        mime = e.mimeData()
+        paths = self._extract_pdf_paths_from_urls(mime.urls()) if mime and mime.hasUrls() else []
+        if not paths:
+            self._status.showMessage("Drop a local PDF file to open it", 2000)
+            e.ignore()
+            return False
+
+        for path in paths:
+            self._open_file(path)
+        e.acceptProposedAction()
+        return True
+
+    def dragEnterEvent(self, e: QDragEnterEvent):
+        self._accept_drop_event(e)
+
+    def dragMoveEvent(self, e):
+        self._accept_drop_event(e)
+
+    def dropEvent(self, e: QDropEvent):
+        self._handle_drop_event(e)
+
+    def eventFilter(self, obj, e):
+        is_drop_target = obj is self._tabs
+        if not is_drop_target and isinstance(obj, PdfView):
+            is_drop_target = True
+        if not is_drop_target and isinstance(getattr(obj, "parent", lambda: None)(), PdfView):
+            is_drop_target = True
+
+        if is_drop_target:
+            if e.type() == QEvent.Type.DragEnter or e.type() == QEvent.Type.DragMove:
+                if self._accept_drop_event(e):
+                    return True
+            elif e.type() == QEvent.Type.Drop:
+                if self._handle_drop_event(e):
+                    return True
+        return super().eventFilter(obj, e)
 
     def _refresh_document_info(self):
         view = self.current_view()

@@ -2,7 +2,8 @@ import os
 from pathlib import Path
 
 import fitz
-from PySide6.QtCore import QRectF
+from PySide6.QtCore import QPointF, QRectF, Qt, QMimeData, QUrl
+from PySide6.QtGui import QDropEvent
 from PySide6.QtWidgets import QApplication
 
 from neoview.persistence.sidecar_store import load_sidecar
@@ -41,6 +42,88 @@ def test_open_file_reuses_existing_tab(tmp_path: Path):
     QApplication.processEvents()
     assert win._tabs.count() == 1
     assert win.current_context().file_path == str(pdf)
+    win.close()
+
+
+def test_drop_pdf_opens_document(tmp_path: Path):
+    pdf = tmp_path / "dropped.pdf"
+    _create_pdf(pdf, pages=1)
+
+    win = MainWindow()
+    win.show()
+    QApplication.processEvents()
+
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile(str(pdf))])
+    event = QDropEvent(
+        QPointF(20.0, 20.0),
+        Qt.DropAction.CopyAction,
+        mime,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+
+    win.dropEvent(event)
+    QApplication.processEvents()
+
+    assert win.current_context().file_path == str(pdf)
+    assert win.current_view().document is not None
+    assert event.isAccepted()
+    win.close()
+
+
+def test_drop_non_pdf_is_rejected(tmp_path: Path):
+    txt = tmp_path / "note.txt"
+    txt.write_text("hello", encoding="utf-8")
+
+    win = MainWindow()
+    win.show()
+    QApplication.processEvents()
+
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile(str(txt))])
+    event = QDropEvent(
+        QPointF(20.0, 20.0),
+        Qt.DropAction.CopyAction,
+        mime,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+
+    win.dropEvent(event)
+    QApplication.processEvents()
+
+    assert win.current_context().file_path in (None, "")
+    assert win.current_view().document is None
+    assert not event.isAccepted()
+    win.close()
+
+
+def test_drop_pdf_on_viewport_opens_document(tmp_path: Path):
+    pdf = tmp_path / "viewport-drop.pdf"
+    _create_pdf(pdf, pages=1)
+
+    win = MainWindow()
+    win.show()
+    QApplication.processEvents()
+
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile(str(pdf))])
+    event = QDropEvent(
+        QPointF(20.0, 20.0),
+        Qt.DropAction.CopyAction,
+        mime,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+
+    handled = win.eventFilter(win.current_view().viewport(), event)
+    QApplication.processEvents()
+
+    assert handled
+    assert win.current_context().file_path == str(pdf)
+    assert win.current_view().document is not None
+    assert event.isAccepted()
     win.close()
 
 
