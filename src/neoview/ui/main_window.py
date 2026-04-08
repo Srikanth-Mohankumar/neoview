@@ -977,6 +977,17 @@ class MainWindow(QMainWindow):
         self._doc_name = self._info_row(d_root, "File", "No file")
         self._doc_page = self._info_row(d_root, "Page", "0 / 0")
         self._doc_zoom = self._info_row(d_root, "Zoom", "100%")
+        self._doc_format = self._info_row(d_root, "Format", "--")
+        self._doc_engine = self._info_row(d_root, "Produced By", "--")
+        self._doc_creator = self._info_row(d_root, "Created By", "--")
+        self._doc_title = self._info_row(d_root, "Title", "--")
+        self._doc_author = self._info_row(d_root, "Author", "--")
+        self._doc_subject = self._info_row(d_root, "Subject", "--")
+        self._doc_keywords = self._info_row(d_root, "Keywords", "--")
+        self._doc_created = self._info_row(d_root, "Created", "--")
+        self._doc_modified = self._info_row(d_root, "Modified", "--")
+        self._doc_encryption = self._info_row(d_root, "Encryption", "--")
+        self._doc_file_size = self._info_row(d_root, "File Size", "--")
 
         d_root.addWidget(self._divider())
 
@@ -1446,6 +1457,17 @@ class MainWindow(QMainWindow):
             self._doc_name.setText("No file")
             self._doc_page.setText("0 / 0")
             self._doc_zoom.setText("--")
+            self._doc_format.setText("--")
+            self._doc_engine.setText("--")
+            self._doc_creator.setText("--")
+            self._doc_title.setText("--")
+            self._doc_author.setText("--")
+            self._doc_subject.setText("--")
+            self._doc_keywords.setText("--")
+            self._doc_created.setText("--")
+            self._doc_modified.setText("--")
+            self._doc_encryption.setText("--")
+            self._doc_file_size.setText("--")
             self._page_count_lbl.setText("Pages: 0")
             self._page_total_lbl.setText(" / 0 ")
             self._page_nav_combo.blockSignals(True)
@@ -1461,9 +1483,21 @@ class MainWindow(QMainWindow):
 
         source_path = ctx.file_path or view.doc_path
         name = os.path.basename(source_path) if source_path else "Untitled"
+        metadata = doc.metadata or {}
         self._doc_name.setText(name)
         self._doc_page.setText(f"{view.current_page + 1} / {doc.page_count}")
         self._doc_zoom.setText(f"{view.zoom * 100:.0f}%")
+        self._doc_format.setText(self._metadata_text(metadata.get("format")))
+        self._doc_engine.setText(self._metadata_text(metadata.get("producer")))
+        self._doc_creator.setText(self._metadata_text(metadata.get("creator")))
+        self._doc_title.setText(self._metadata_text(metadata.get("title")))
+        self._doc_author.setText(self._metadata_text(metadata.get("author")))
+        self._doc_subject.setText(self._metadata_text(metadata.get("subject")))
+        self._doc_keywords.setText(self._metadata_text(metadata.get("keywords")))
+        self._doc_created.setText(self._format_pdf_date(metadata.get("creationDate")))
+        self._doc_modified.setText(self._format_pdf_date(metadata.get("modDate")))
+        self._doc_encryption.setText(self._metadata_text(metadata.get("encryption"), empty="None"))
+        self._doc_file_size.setText(self._format_file_size(source_path))
         self._page_count_lbl.setText(f"Pages: {doc.page_count}")
         self._page_total_lbl.setText(f" / {doc.page_count} ")
         self._page_nav_combo.blockSignals(True)
@@ -3071,6 +3105,54 @@ class MainWindow(QMainWindow):
         row.addWidget(val)
         parent_layout.addLayout(row)
         return val
+
+    def _metadata_text(self, value, empty: str = "--") -> str:
+        if value is None:
+            return empty
+        text = str(value).strip()
+        return text if text else empty
+
+    def _format_pdf_date(self, value) -> str:
+        raw = self._metadata_text(value, empty="")
+        if not raw:
+            return "--"
+        if raw.startswith("D:"):
+            raw = raw[2:]
+        digits = "".join(ch for ch in raw if ch.isdigit())
+        if len(digits) < 4:
+            return self._metadata_text(value)
+        year = digits[0:4]
+        month = digits[4:6] if len(digits) >= 6 else ""
+        day = digits[6:8] if len(digits) >= 8 else ""
+        hour = digits[8:10] if len(digits) >= 10 else ""
+        minute = digits[10:12] if len(digits) >= 12 else ""
+
+        parts = [year]
+        if month:
+            parts.append(month)
+        if day:
+            parts.append(day)
+
+        text = "-".join(parts)
+        if hour and minute:
+            text += f" {hour}:{minute}"
+        return text
+
+    def _format_file_size(self, path: Optional[str]) -> str:
+        if not path:
+            return "--"
+        try:
+            size = float(os.path.getsize(path))
+        except OSError:
+            return "--"
+        units = ["B", "KB", "MB", "GB"]
+        unit_idx = 0
+        while size >= 1024.0 and unit_idx < len(units) - 1:
+            size /= 1024.0
+            unit_idx += 1
+        if unit_idx == 0:
+            return f"{int(size)} {units[unit_idx]}"
+        return f"{size:.1f} {units[unit_idx]}"
 
     def closeEvent(self, e):
         self._search_timer.stop()

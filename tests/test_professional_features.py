@@ -127,6 +127,44 @@ def test_drop_pdf_on_viewport_opens_document(tmp_path: Path):
     win.close()
 
 
+def test_document_panel_shows_pdf_metadata(tmp_path: Path):
+    pdf = tmp_path / "meta.pdf"
+    doc = fitz.open()
+    page = doc.new_page(width=595, height=842)
+    page.insert_text((72, 120), "Metadata sample")
+    doc.set_metadata(
+        {
+            "title": "Spec Sheet",
+            "author": "NeoView QA",
+            "subject": "Metadata coverage",
+            "keywords": "pdf,metadata,test",
+            "creator": "Report Builder",
+            "producer": "Chromium PDF Engine",
+            "creationDate": "D:20260408153000",
+            "modDate": "D:20260409101500",
+        }
+    )
+    doc.save(str(pdf))
+    doc.close()
+
+    win = MainWindow()
+    win._open_file(str(pdf))
+    QApplication.processEvents()
+
+    assert win._doc_format.text().startswith("PDF")
+    assert win._doc_engine.text() == "Chromium PDF Engine"
+    assert win._doc_creator.text() == "Report Builder"
+    assert win._doc_title.text() == "Spec Sheet"
+    assert win._doc_author.text() == "NeoView QA"
+    assert win._doc_subject.text() == "Metadata coverage"
+    assert win._doc_keywords.text() == "pdf,metadata,test"
+    assert win._doc_created.text() == "2026-04-08 15:30"
+    assert win._doc_modified.text() == "2026-04-09 10:15"
+    assert win._doc_encryption.text() == "None"
+    assert win._doc_file_size.text().endswith(("B", "KB", "MB", "GB"))
+    win.close()
+
+
 def test_add_bookmark_saves_to_sidecar(tmp_path: Path, monkeypatch):
     pdf = tmp_path / "bookmarks.pdf"
     _create_pdf(pdf, pages=2)
