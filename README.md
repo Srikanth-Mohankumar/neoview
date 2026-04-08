@@ -39,26 +39,26 @@ Most free PDF viewers only cover part of the workflow. NeoView is built for the 
 
 ### Main code areas
 
-- [src/neoview/ui](/data/neopage/repos/neoview/src/neoview/ui)  
+- [src/neoview/ui](src/neoview/ui)  
   Qt main window, viewer widget, dialogs, annotation UI, toolbars, and page rendering.
-- [src/neoview/models](/data/neopage/repos/neoview/src/neoview/models)  
+- [src/neoview/models](src/neoview/models)  
   Typed state records for annotations, bookmarks, search results, and per-tab state.
-- [src/neoview/persistence](/data/neopage/repos/neoview/src/neoview/persistence)  
+- [src/neoview/persistence](src/neoview/persistence)  
   Sidecar storage for annotations and bookmarks.
-- [src/neoview/utils](/data/neopage/repos/neoview/src/neoview/utils)  
+- [src/neoview/utils](src/neoview/utils)  
   Small helpers such as unit formatting.
-- [src/neoview/assets](/data/neopage/repos/neoview/src/neoview/assets)  
+- [src/neoview/assets](src/neoview/assets)  
   Packaged icons and app assets.
-- [tests](/data/neopage/repos/neoview/tests)  
+- [tests](tests)  
   Fast pytest coverage, including `pytest-qt` interaction tests.
 
 ### Important entry points
 
-- App entry: [src/neoview/app.py](/data/neopage/repos/neoview/src/neoview/app.py)
-- Main window: [src/neoview/ui/main_window.py](/data/neopage/repos/neoview/src/neoview/ui/main_window.py)
-- Viewer widget: [src/neoview/ui/pdf_view.py](/data/neopage/repos/neoview/src/neoview/ui/pdf_view.py)
-- Legacy shim: [pdf_crop_measure.py](/data/neopage/repos/neoview/pdf_crop_measure.py)
-- Website page: [docs/index.html](/data/neopage/repos/neoview/docs/index.html)
+- App entry: [src/neoview/app.py](src/neoview/app.py)
+- Main window: [src/neoview/ui/main_window.py](src/neoview/ui/main_window.py)
+- Viewer widget: [src/neoview/ui/pdf_view.py](src/neoview/ui/pdf_view.py)
+- Legacy shim: [pdf_crop_measure.py](pdf_crop_measure.py)
+- Website page: [docs/index.html](docs/index.html)
 
 ## Feature Overview
 

@@ -1432,7 +1432,7 @@ class PdfView(QGraphicsView):
             return
 
         ann_id = self._annotation_hit_at_scene_pos(scene_pos)
-        if ann_id:
+        if ann_id and self._tool in (ToolMode.SELECT, ToolMode.ANNOTATE):
             self.annotation_clicked.emit(ann_id)
             self.select_annotation(ann_id)
             e.accept()

@@ -342,6 +342,46 @@ def test_measure_drag_and_keyboard_nudge_via_qtbot(tmp_path: Path, qtbot):
     assert view.selection_rect.width() > before_w
 
 
+def test_measure_drag_works_when_annotation_covers_page(tmp_path: Path, qtbot):
+    pdf = tmp_path / "measure-watermark-like.pdf"
+    _create_pdf(pdf, pages=1, text_prefix="MeasureWatermark")
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.show()
+    win._open_file(str(pdf))
+
+    view = win.current_view()
+    page_rect = view._pages[0].page_rect
+    view.set_annotations(
+        [
+            AnnotationRecord(
+                id="covering-ann",
+                type="rectangle",
+                page=0,
+                rect=(0.0, 0.0, float(page_rect.width()), float(page_rect.height())),
+                color="#cccccc",
+                opacity=0.1,
+            )
+        ]
+    )
+
+    win._set_tool(ToolMode.MEASURE)
+    qtbot.waitUntil(lambda: view.tool == ToolMode.MEASURE, timeout=1000)
+
+    start = _viewport_pos_for_pdf_point(view, 0, 80, 120)
+    end = _viewport_pos_for_pdf_point(view, 0, 180, 220)
+
+    qtbot.mousePress(view.viewport(), Qt.MouseButton.LeftButton, pos=start)
+    qtbot.mouseMove(view.viewport(), pos=end)
+    qtbot.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton, pos=end)
+
+    rect = view.selection_rect
+    assert rect is not None
+    assert rect.width() > 0
+    assert rect.height() > 0
+
+
 def test_canvas_annotation_drag_create_via_qtbot(tmp_path: Path, qtbot):
     pdf = tmp_path / "annotate-drag.pdf"
     _create_pdf(pdf, pages=1, text_prefix="Annotate")
