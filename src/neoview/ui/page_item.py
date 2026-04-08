@@ -125,6 +125,7 @@ class PageItem(QGraphicsPixmapItem):
                                     area,
                                     center_dist,
                                     {
+                                        "bbox": bbox,
                                         "font": font_name,
                                         "size": span.get("size", 0),
                                         "color": span.get("color", 0),

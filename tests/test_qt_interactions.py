@@ -69,6 +69,37 @@ def test_find_panel_live_search_via_qtbot(tmp_path: Path, qtbot):
     qtbot.waitUntil(lambda: win.current_context().search_index != before, timeout=2000)
 
 
+def test_select_tool_hover_shows_font_inspection_indicator(tmp_path: Path, qtbot):
+    pdf = tmp_path / "font-inspect.pdf"
+    _create_pdf(pdf, pages=1, text_prefix="Inspect")
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.show()
+    win._open_file(str(pdf))
+
+    view = win.current_view()
+    view.tool = ToolMode.SELECT
+
+    text_rect = view.document.load_page(0).search_for("Inspect 1 sample text search-target")[0]
+    hover_pos = _viewport_pos_for_pdf_point(view, 0, text_rect.x0 + 4.0, text_rect.y0 + 4.0)
+    qtbot.mouseMove(view.viewport(), hover_pos)
+
+    qtbot.waitUntil(
+        lambda: view._text_inspect_item is not None and win._font_name.text() != "--",
+        timeout=2000,
+    )
+    assert win._font_size.text().endswith("pt")
+
+    blank_pos = _viewport_pos_for_pdf_point(view, 0, 300.0, 300.0)
+    qtbot.mouseMove(view.viewport(), blank_pos)
+
+    qtbot.waitUntil(
+        lambda: view._text_inspect_item is None and win._font_name.text() == "--",
+        timeout=2000,
+    )
+
+
 def test_explicit_single_char_search_via_return_key(tmp_path: Path, qtbot):
     pdf = tmp_path / "single-char.pdf"
     _create_pdf(pdf, pages=2, text_prefix="Alpha")

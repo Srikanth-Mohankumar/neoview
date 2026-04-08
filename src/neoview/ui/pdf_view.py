@@ -105,6 +105,8 @@ class PdfView(QGraphicsView):
         self._text_select_page: int = -1
         self._text_select_item: Optional[QGraphicsRectItem] = None
         self._text_highlight_items: List[Tuple[int, QGraphicsRectItem]] = []
+        self._text_inspect_item: Optional[QGraphicsRectItem] = None
+        self._text_inspect_page: int = -1
 
         self._search_highlights: List[tuple] = []
         self._search_items: List[QGraphicsRectItem] = []
@@ -185,6 +187,7 @@ class PdfView(QGraphicsView):
         if t != ToolMode.SELECT:
             self.clear_text_selection()
             self.text_info_changed.emit("")
+            self._clear_text_inspection()
         if t != ToolMode.ANNOTATE:
             self._cancel_annotate_drawing()
         self._update_cursor()
@@ -342,6 +345,7 @@ class PdfView(QGraphicsView):
             self._pressed_pos = None
             self._selection = None
             self.clear_text_selection()
+            self._clear_text_inspection()
             self._clear_search_items()
             self._hide_link_badge()
 
@@ -398,6 +402,7 @@ class PdfView(QGraphicsView):
         self._pressed_pos = None
         self._selection = None
         self.clear_text_selection()
+        self._clear_text_inspection()
         self._clear_search_items()
         self._hide_measure_badge()
         self._hide_link_badge()
@@ -419,6 +424,7 @@ class PdfView(QGraphicsView):
         self._selection = None
         self._selection_page = -1
         self.clear_text_selection()
+        self._clear_text_inspection()
         self._clear_search_items()
         self._hide_measure_badge()
         self._hide_link_badge()
@@ -757,6 +763,39 @@ class PdfView(QGraphicsView):
             if shiboken6.isValid(item):
                 self._scene.removeItem(item)
         self._text_highlight_items.clear()
+
+    def _clear_text_inspection(self):
+        if self._text_inspect_item and shiboken6.isValid(self._text_inspect_item):
+            self._scene.removeItem(self._text_inspect_item)
+        self._text_inspect_item = None
+        self._text_inspect_page = -1
+
+    def _update_text_inspection(self, page_idx: int, info: Optional[dict]) -> bool:
+        bbox = info.get("bbox") if info else None
+        if not bbox or not (0 <= page_idx < len(self._pages)):
+            self._clear_text_inspection()
+            return False
+
+        rect = QRectF(bbox[0], bbox[1], bbox[2] - bbox[0], bbox[3] - bbox[1])
+        page = self._pages[page_idx]
+        if self._text_inspect_item and shiboken6.isValid(self._text_inspect_item):
+            item = self._text_inspect_item
+            item.setRect(rect)
+        else:
+            item = QGraphicsRectItem(rect)
+            pen = QPen(QColor(52, 125, 255, 230))
+            pen.setWidthF(1.0)
+            pen.setStyle(Qt.PenStyle.DashLine)
+            pen.setCosmetic(True)
+            item.setPen(pen)
+            item.setBrush(QBrush(QColor(52, 125, 255, 28)))
+            item.setZValue(942)
+            self._scene.addItem(item)
+            self._text_inspect_item = item
+        item.setPos(page.pos())
+        item.setScale(self._zoom)
+        self._text_inspect_page = page_idx
+        return True
 
     def set_search_highlights(self, highlights: List[tuple]):
         self._search_highlights = highlights
@@ -1459,6 +1498,7 @@ class PdfView(QGraphicsView):
             page_idx = self._get_page_at(scene_pos)
             if page_idx >= 0:
                 self.clear_text_selection()
+                self._clear_text_inspection()
                 self._text_selecting = True
                 self._text_select_page = page_idx
                 self._text_select_start = self._scene_to_page(scene_pos, page_idx)
@@ -1553,6 +1593,24 @@ class PdfView(QGraphicsView):
                     preview.setRect(scene_rect)
             e.accept()
             return
+
+        if self._tool == ToolMode.SELECT and not self._text_selecting:
+            page_idx = self._get_page_at(scene_pos)
+            if page_idx >= 0:
+                page_pos = self._scene_to_page(scene_pos, page_idx)
+                info = self._pages[page_idx].get_text_info_at(page_pos)
+                if info and self._update_text_inspection(page_idx, info):
+                    text_info = f"Font: {info['font']} | Size: {info['size']:.1f}pt"
+                    style = info.get("style")
+                    if style:
+                        text_info += f" | Style: {style}"
+                    self.text_info_changed.emit(text_info)
+                else:
+                    self._clear_text_inspection()
+                    self.text_info_changed.emit("")
+            else:
+                self._clear_text_inspection()
+                self.text_info_changed.emit("")
 
         if self._tool == ToolMode.HAND and self._panning and self._pan_start is not None:
             delta = e.position() - self._pan_start
@@ -1687,15 +1745,18 @@ class PdfView(QGraphicsView):
                             page_item = self._pages[page_idx]
                             info = page_item.get_text_info_at(self._text_select_start)
                             if info:
+                                self._update_text_inspection(page_idx, info)
                                 text_info = f"Font: {info['font']} | Size: {info['size']:.1f}pt"
                                 style = info.get("style")
                                 if style:
                                     text_info += f" | Style: {style}"
                                 self.text_info_changed.emit(text_info)
                             else:
+                                self._clear_text_inspection()
                                 self.text_info_changed.emit("")
                         self.clear_text_selection()
                     else:
+                        self._clear_text_inspection()
                         text = self.extract_text_in_rect(self._text_select_page, rect)
                         self.text_selected.emit(text)
                         self._highlight_text_in_rect(self._text_select_page, rect)
@@ -1895,4 +1956,7 @@ class PdfView(QGraphicsView):
 
     def leaveEvent(self, e):
         self._hide_link_badge()
+        if self._tool == ToolMode.SELECT and not self._text_selecting:
+            self._clear_text_inspection()
+            self.text_info_changed.emit("")
         super().leaveEvent(e)
