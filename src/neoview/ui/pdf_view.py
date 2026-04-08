@@ -48,6 +48,7 @@ class PdfView(QGraphicsView):
     ZOOM_MODE_FIT_WIDTH = "fit_width"
     ZOOM_MODE_FIT_PAGE = "fit_page"
     ZOOM_MODE_ACTUAL_SIZE = "actual_size"
+    RULER_SIZE = 24
 
     selection_changed = Signal()
     zoom_changed = Signal(float)
@@ -95,6 +96,7 @@ class PdfView(QGraphicsView):
         self._zoom: float = 1.0
         self._zoom_mode: str = self.ZOOM_MODE_CUSTOM
         self._tool: ToolMode = ToolMode.HAND
+        self._show_rulers: bool = False
 
         self._rerender_timer = QTimer(self)
         self._rerender_timer.setSingleShot(True)
@@ -163,6 +165,7 @@ class PdfView(QGraphicsView):
         self.verticalScrollBar().valueChanged.connect(self._on_scroll)
         self.horizontalScrollBar().valueChanged.connect(self._on_scroll)
 
+        self._apply_viewport_margins()
         self._update_cursor()
 
     @property
@@ -264,6 +267,20 @@ class PdfView(QGraphicsView):
     @property
     def rotation(self) -> int:
         return self._rotation
+
+    @property
+    def show_rulers(self) -> bool:
+        return self._show_rulers
+
+    def set_show_rulers(self, visible: bool):
+        visible = bool(visible)
+        if self._show_rulers == visible:
+            return
+        self._show_rulers = visible
+        self._apply_viewport_margins()
+        if self._pages and self._zoom_mode in (self.ZOOM_MODE_FIT_WIDTH, self.ZOOM_MODE_FIT_PAGE):
+            self._apply_fit_mode(force_if_close=True)
+        self.viewport().update()
 
     def _update_cursor(self):
         if self._tool != ToolMode.HAND:
@@ -606,6 +623,7 @@ class PdfView(QGraphicsView):
         self._emit_page_info()
         self._update_measure_badge()
         self._hide_link_badge()
+        self.viewport().update()
         if self._visible_page_needs_rerender():
             if not self._performance_mode:
                 self._rerender_timer.start(40)
@@ -1934,23 +1952,7 @@ class PdfView(QGraphicsView):
     def resizeEvent(self, e):
         super().resizeEvent(e)
         if self._pages and self._zoom_mode in (self.ZOOM_MODE_FIT_WIDTH, self.ZOOM_MODE_FIT_PAGE):
-            if self._zoom_mode == self.ZOOM_MODE_FIT_WIDTH:
-                page_width = self._pages[0].page_rect.width()
-                view_width = self.viewport().width() - 40
-                self.set_zoom(
-                    view_width / page_width,
-                    zoom_mode=self.ZOOM_MODE_FIT_WIDTH,
-                    force_if_close=True,
-                )
-            else:
-                page = self._pages[0].page_rect
-                view_w = self.viewport().width() - 40
-                view_h = self.viewport().height() - 40
-                self.set_zoom(
-                    min(view_w / page.width(), view_h / page.height()),
-                    zoom_mode=self.ZOOM_MODE_FIT_PAGE,
-                    force_if_close=True,
-                )
+            self._apply_fit_mode(force_if_close=True)
         self._update_measure_badge()
         self._hide_link_badge()
 
@@ -1960,3 +1962,142 @@ class PdfView(QGraphicsView):
             self._clear_text_inspection()
             self.text_info_changed.emit("")
         super().leaveEvent(e)
+
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        if self._show_rulers:
+            self._paint_rulers()
+
+    def _apply_viewport_margins(self):
+        margin = self.RULER_SIZE if self._show_rulers else 0
+        self.setViewportMargins(margin, margin, 0, 0)
+
+    def _apply_fit_mode(self, force_if_close: bool = False):
+        if not self._pages:
+            return
+        if self._zoom_mode == self.ZOOM_MODE_FIT_WIDTH:
+            page_width = self._pages[0].page_rect.width()
+            view_width = self.viewport().width() - 40
+            self.set_zoom(
+                view_width / page_width,
+                zoom_mode=self.ZOOM_MODE_FIT_WIDTH,
+                force_if_close=force_if_close,
+            )
+        elif self._zoom_mode == self.ZOOM_MODE_FIT_PAGE:
+            page = self._pages[0].page_rect
+            view_w = self.viewport().width() - 40
+            view_h = self.viewport().height() - 40
+            self.set_zoom(
+                min(view_w / page.width(), view_h / page.height()),
+                zoom_mode=self.ZOOM_MODE_FIT_PAGE,
+                force_if_close=force_if_close,
+            )
+
+    def _ruler_step(self) -> int:
+        for step in (5, 10, 20, 25, 50, 100, 200, 400, 800):
+            if step * self._zoom >= 48.0:
+                return step
+        return 1600
+
+    def _paint_rulers(self):
+        painter = QPainter(self.viewport())
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, False)
+        rect = self.viewport().rect()
+        ruler = self.RULER_SIZE
+
+        bg = QColor(244, 246, 250, 245)
+        border = QColor(184, 191, 201, 220)
+        tick = QColor(70, 78, 92, 220)
+        text = QColor(56, 63, 74)
+
+        painter.fillRect(0, 0, rect.width(), ruler, bg)
+        painter.fillRect(0, 0, ruler, rect.height(), bg)
+        painter.fillRect(0, 0, ruler, ruler, QColor(236, 240, 246, 250))
+        painter.setPen(border)
+        painter.drawLine(ruler - 1, 0, ruler - 1, rect.height())
+        painter.drawLine(0, ruler - 1, rect.width(), ruler - 1)
+
+        painter.setPen(text)
+        painter.drawText(4, 15, "pt")
+
+        if not self._pages:
+            return
+
+        page_idx = self.current_page
+        if not (0 <= page_idx < len(self._pages)):
+            return
+
+        page = self._pages[page_idx]
+        page_scene_rect = QRectF(page.pos(), page.page_rect.size() * self._zoom)
+        page_view_rect = self.mapFromScene(page_scene_rect).boundingRect()
+        step = self._ruler_step()
+        minor_step = max(1, step // 5)
+
+        self._paint_horizontal_ruler(painter, page_view_rect, page.page_rect.width(), rect.width(), ruler, minor_step, step, tick, text)
+        self._paint_vertical_ruler(painter, page_view_rect, page.page_rect.height(), rect.height(), ruler, minor_step, step, tick, text)
+
+    def _paint_horizontal_ruler(
+        self,
+        painter: QPainter,
+        page_view_rect,
+        page_width: float,
+        viewport_width: int,
+        ruler: int,
+        minor_step: int,
+        major_step: int,
+        tick_color: QColor,
+        text_color: QColor,
+    ):
+        start_x = max(0.0, (ruler - page_view_rect.left()) / self._zoom)
+        end_x = min(page_width, (viewport_width - page_view_rect.left()) / self._zoom)
+        if end_x <= start_x:
+            return
+
+        tick_value = max(0, int(start_x // minor_step) * minor_step)
+        painter.setPen(tick_color)
+        while tick_value <= end_x + minor_step:
+            vx = page_view_rect.left() + tick_value * self._zoom
+            if ruler <= vx <= viewport_width:
+                is_major = (tick_value % major_step) == 0
+                tick_len = 11 if is_major else 6
+                painter.drawLine(int(vx), ruler - 1, int(vx), ruler - tick_len)
+                if is_major:
+                    painter.setPen(text_color)
+                    painter.drawText(int(vx) + 3, 11, str(tick_value))
+                    painter.setPen(tick_color)
+            tick_value += minor_step
+
+    def _paint_vertical_ruler(
+        self,
+        painter: QPainter,
+        page_view_rect,
+        page_height: float,
+        viewport_height: int,
+        ruler: int,
+        minor_step: int,
+        major_step: int,
+        tick_color: QColor,
+        text_color: QColor,
+    ):
+        start_y = max(0.0, (ruler - page_view_rect.top()) / self._zoom)
+        end_y = min(page_height, (viewport_height - page_view_rect.top()) / self._zoom)
+        if end_y <= start_y:
+            return
+
+        tick_value = max(0, int(start_y // minor_step) * minor_step)
+        painter.setPen(tick_color)
+        while tick_value <= end_y + minor_step:
+            vy = page_view_rect.top() + tick_value * self._zoom
+            if ruler <= vy <= viewport_height:
+                is_major = (tick_value % major_step) == 0
+                tick_len = 11 if is_major else 6
+                painter.drawLine(ruler - 1, int(vy), ruler - tick_len, int(vy))
+                if is_major:
+                    painter.save()
+                    painter.setPen(text_color)
+                    painter.translate(12, int(vy) - 2)
+                    painter.rotate(-90)
+                    painter.drawText(0, 0, str(tick_value))
+                    painter.restore()
+                    painter.setPen(tick_color)
+            tick_value += minor_step

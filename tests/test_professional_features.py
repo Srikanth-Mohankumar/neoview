@@ -165,6 +165,37 @@ def test_document_panel_shows_pdf_metadata(tmp_path: Path):
     win.close()
 
 
+def test_ruler_toggle_updates_viewport_margins_for_all_tabs(tmp_path: Path):
+    pdf_a = tmp_path / "a.pdf"
+    pdf_b = tmp_path / "b.pdf"
+    _create_pdf(pdf_a, pages=1, text_prefix="A")
+    _create_pdf(pdf_b, pages=1, text_prefix="B")
+
+    win = MainWindow()
+    win._open_file(str(pdf_a))
+    QApplication.processEvents()
+
+    first_view = win.current_view()
+    first_margins = first_view.viewportMargins()
+    assert not first_view.show_rulers
+    assert first_margins.left() == 0
+    assert first_margins.top() == 0
+
+    win._open_file(str(pdf_b))
+    QApplication.processEvents()
+    second_view = win.current_view()
+    second_margins = second_view.viewportMargins()
+    assert not second_view.show_rulers
+    assert second_margins.left() == 0
+    assert second_margins.top() == 0
+
+    win._toggle_rulers(True)
+    QApplication.processEvents()
+    assert first_view.viewportMargins().left() == first_view.RULER_SIZE
+    assert second_view.viewportMargins().left() == second_view.RULER_SIZE
+    win.close()
+
+
 def test_add_bookmark_saves_to_sidecar(tmp_path: Path, monkeypatch):
     pdf = tmp_path / "bookmarks.pdf"
     _create_pdf(pdf, pages=2)

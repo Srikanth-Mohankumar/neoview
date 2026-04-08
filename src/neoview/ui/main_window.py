@@ -150,6 +150,7 @@ class MainWindow(QMainWindow):
         self._zoom_combo_updating = False
         self._search_input_updating = False
         self._auto_reload_enabled = self._settings.value("view/auto_reload", True, type=bool)
+        self._show_rulers = self._settings.value("view/show_rulers", False, type=bool)
 
         self._view: Optional[PdfView] = None
         self._tab_contexts: Dict[PdfView, TabContext] = {}
@@ -240,6 +241,7 @@ class MainWindow(QMainWindow):
 
     def _create_tab(self) -> PdfView:
         view = PdfView(self)
+        view.set_show_rulers(self._show_rulers)
         view.setAcceptDrops(True)
         view.viewport().setAcceptDrops(True)
         view.installEventFilter(self)
@@ -435,6 +437,11 @@ class MainWindow(QMainWindow):
         self._perf_action.setStatusTip("Pause rendering during zoom/scroll — reduces CPU on large PDFs")
         self._perf_action.triggered.connect(self._on_performance_mode_toggled)
         view_m.addAction(self._perf_action)
+        self._rulers_action = QAction("Show Rulers", self)
+        self._rulers_action.setCheckable(True)
+        self._rulers_action.setChecked(self._show_rulers)
+        self._rulers_action.triggered.connect(self._toggle_rulers)
+        view_m.addAction(self._rulers_action)
 
         go_m = self.menuBar().addMenu("&Go")
         go_m.addAction(self._action("&Previous Page", lambda: self.current_view().prev_page(), "PgUp"))
@@ -1093,6 +1100,10 @@ class MainWindow(QMainWindow):
         self._reload_toggle.blockSignals(True)
         self._reload_toggle.setChecked(self._auto_reload_enabled)
         self._reload_toggle.blockSignals(False)
+        if hasattr(self, "_rulers_action"):
+            self._rulers_action.blockSignals(True)
+            self._rulers_action.setChecked(self._show_rulers)
+            self._rulers_action.blockSignals(False)
 
         saved_tool = self._settings.value("view/tool", ToolMode.HAND.name, type=str)
         if saved_tool in ToolMode.__members__:
@@ -1112,7 +1123,16 @@ class MainWindow(QMainWindow):
         self._settings.setValue("window/show_thumbnails", self._thumbs_dock.isVisible())
         self._settings.setValue("window/show_inspector", self._info_dock.isVisible())
         self._settings.setValue("view/auto_reload", self._auto_reload_enabled)
+        self._settings.setValue("view/show_rulers", self._show_rulers)
         self._settings.setValue("view/tool", self.current_view().tool.name)
+
+    def _toggle_rulers(self, checked: bool):
+        self._show_rulers = bool(checked)
+        for idx in range(self._tabs.count()):
+            widget = self._tabs.widget(idx)
+            if isinstance(widget, PdfView):
+                widget.set_show_rulers(self._show_rulers)
+        self._settings.setValue("view/show_rulers", self._show_rulers)
 
     def _ensure_window_geometry(self):
         available = self._best_available_geometry()
