@@ -97,6 +97,15 @@ class PdfView(QGraphicsView):
         self._zoom_mode: str = self.ZOOM_MODE_CUSTOM
         self._tool: ToolMode = ToolMode.HAND
         self._show_rulers: bool = False
+        self._layout_grid_enabled: bool = False
+        self._layout_grid_corner_marks: bool = False
+        self._layout_grid_width: float = 72.0
+        self._layout_grid_height: float = 72.0
+        self._layout_grid_offset_x: float = 0.0
+        self._layout_grid_offset_y: float = 0.0
+        self._layout_grid_subdivisions: int = 0
+        self._layout_grid_corner_length: float = 12.0
+        self._layout_grid_color = QColor("#d92fd4")
 
         self._rerender_timer = QTimer(self)
         self._rerender_timer.setSingleShot(True)
@@ -280,6 +289,36 @@ class PdfView(QGraphicsView):
         self._apply_viewport_margins()
         if self._pages and self._zoom_mode in (self.ZOOM_MODE_FIT_WIDTH, self.ZOOM_MODE_FIT_PAGE):
             self._apply_fit_mode(force_if_close=True)
+        self.viewport().update()
+
+    @property
+    def layout_grid_enabled(self) -> bool:
+        return self._layout_grid_enabled
+
+    def layout_grid_config(self) -> dict:
+        return {
+            "enabled": self._layout_grid_enabled,
+            "corner_marks": self._layout_grid_corner_marks,
+            "width": self._layout_grid_width,
+            "height": self._layout_grid_height,
+            "offset_x": self._layout_grid_offset_x,
+            "offset_y": self._layout_grid_offset_y,
+            "subdivisions": self._layout_grid_subdivisions,
+            "corner_length": self._layout_grid_corner_length,
+            "color": self._layout_grid_color.name(),
+        }
+
+    def set_layout_grid_config(self, config: dict):
+        self._layout_grid_enabled = bool(config.get("enabled", False))
+        self._layout_grid_corner_marks = bool(config.get("corner_marks", False))
+        self._layout_grid_width = max(8.0, float(config.get("width", 72.0)))
+        self._layout_grid_height = max(8.0, float(config.get("height", 72.0)))
+        self._layout_grid_offset_x = max(0.0, float(config.get("offset_x", 0.0)))
+        self._layout_grid_offset_y = max(0.0, float(config.get("offset_y", 0.0)))
+        self._layout_grid_subdivisions = max(0, int(config.get("subdivisions", 0)))
+        self._layout_grid_corner_length = max(2.0, float(config.get("corner_length", 12.0)))
+        color = QColor(str(config.get("color", "#d92fd4")))
+        self._layout_grid_color = color if color.isValid() else QColor("#d92fd4")
         self.viewport().update()
 
     def _update_cursor(self):
@@ -1965,6 +2004,8 @@ class PdfView(QGraphicsView):
 
     def paintEvent(self, e):
         super().paintEvent(e)
+        if self._layout_grid_enabled or self._layout_grid_corner_marks:
+            self._paint_layout_grid()
         if self._show_rulers:
             self._paint_rulers()
 
@@ -2035,6 +2076,7 @@ class PdfView(QGraphicsView):
 
         self._paint_horizontal_ruler(painter, page_view_rect, page.page_rect.width(), rect.width(), ruler, minor_step, step, tick, text)
         self._paint_vertical_ruler(painter, page_view_rect, page.page_rect.height(), rect.height(), ruler, minor_step, step, tick, text)
+        painter.end()
 
     def _paint_horizontal_ruler(
         self,
@@ -2101,3 +2143,114 @@ class PdfView(QGraphicsView):
                     painter.restore()
                     painter.setPen(tick_color)
             tick_value += minor_step
+
+    def _paint_layout_grid(self):
+        if not self._pages:
+            return
+        painter = QPainter(self.viewport())
+        major_pen = QPen(QColor(self._layout_grid_color))
+        major_pen.setWidthF(0.7)
+        major_pen.setCosmetic(True)
+
+        minor_color = QColor(self._layout_grid_color)
+        minor_color.setAlpha(110)
+        minor_pen = QPen(minor_color)
+        minor_pen.setWidthF(0.5)
+        minor_pen.setCosmetic(True)
+
+        for page_idx in self._visible_page_indices():
+            page = self._pages[page_idx]
+            page_scene_rect = QRectF(page.pos(), page.page_rect.size() * self._zoom)
+            page_view_rect = self.mapFromScene(page_scene_rect).boundingRect()
+            if page_view_rect.isEmpty():
+                continue
+            painter.save()
+            painter.setClipRect(page_view_rect)
+            self._paint_grid_lines_for_page(
+                painter,
+                page_view_rect,
+                page.page_rect.width(),
+                page.page_rect.height(),
+                major_pen,
+                minor_pen,
+            )
+            painter.restore()
+        painter.end()
+
+    def _grid_positions(self, length: float, spacing: float, offset: float, subdivisions: int):
+        major_positions = []
+        all_positions = []
+        pos = offset
+        while pos <= length + 0.1:
+            if pos >= 0:
+                major_positions.append(pos)
+                all_positions.append((pos, True))
+            if subdivisions > 0:
+                step = spacing / (subdivisions + 1)
+                for idx in range(subdivisions):
+                    sub = pos + step * (idx + 1)
+                    if 0 <= sub <= length:
+                        all_positions.append((sub, False))
+            pos += spacing
+        return major_positions, all_positions
+
+    def _paint_grid_lines_for_page(
+        self,
+        painter: QPainter,
+        page_view_rect: QRectF,
+        page_width: float,
+        page_height: float,
+        major_pen: QPen,
+        minor_pen: QPen,
+    ):
+        major_x, x_positions = self._grid_positions(
+            page_width, self._layout_grid_width, self._layout_grid_offset_x, self._layout_grid_subdivisions
+        )
+        major_y, y_positions = self._grid_positions(
+            page_height, self._layout_grid_height, self._layout_grid_offset_y, self._layout_grid_subdivisions
+        )
+
+        if self._layout_grid_enabled:
+            for x_pt, is_major in x_positions:
+                painter.setPen(major_pen if is_major else minor_pen)
+                vx = page_view_rect.left() + x_pt * self._zoom
+                painter.drawLine(QPoint(int(vx), int(page_view_rect.top())), QPoint(int(vx), int(page_view_rect.bottom())))
+
+            for y_pt, is_major in y_positions:
+                painter.setPen(major_pen if is_major else minor_pen)
+                vy = page_view_rect.top() + y_pt * self._zoom
+                painter.drawLine(QPoint(int(page_view_rect.left()), int(vy)), QPoint(int(page_view_rect.right()), int(vy)))
+
+        if self._layout_grid_corner_marks:
+            painter.setPen(major_pen)
+            self._paint_corner_marks_for_page(painter, page_view_rect, major_x, major_y)
+
+    def _paint_corner_marks_for_page(self, painter: QPainter, page_view_rect: QRectF, major_x: List[float], major_y: List[float]):
+        if len(major_x) < 2 or len(major_y) < 2:
+            return
+        for left_pt, right_pt in zip(major_x, major_x[1:]):
+            for top_pt, bottom_pt in zip(major_y, major_y[1:]):
+                self._draw_corner_mark_box(painter, page_view_rect, left_pt, top_pt, right_pt, bottom_pt)
+
+    def _draw_corner_mark_box(self, painter: QPainter, page_view_rect: QRectF, left_pt: float, top_pt: float, right_pt: float, bottom_pt: float):
+        left = page_view_rect.left() + left_pt * self._zoom
+        top = page_view_rect.top() + top_pt * self._zoom
+        right = page_view_rect.left() + right_pt * self._zoom
+        bottom = page_view_rect.top() + bottom_pt * self._zoom
+        length = min(
+            self._layout_grid_corner_length * self._zoom,
+            max(2.0, (right - left) * 0.45),
+            max(2.0, (bottom - top) * 0.45),
+        )
+
+        painter.drawLine(QPoint(int(left), int(top)), QPoint(int(left + length), int(top)))
+        painter.drawLine(QPoint(int(left), int(top)), QPoint(int(left), int(top + length)))
+
+        painter.drawLine(QPoint(int(right), int(top)), QPoint(int(right - length), int(top)))
+        painter.drawLine(QPoint(int(right), int(top)), QPoint(int(right), int(top + length)))
+
+        painter.drawLine(QPoint(int(left), int(bottom)), QPoint(int(left + length), int(bottom)))
+        painter.drawLine(QPoint(int(left), int(bottom)), QPoint(int(left), int(bottom - length)))
+
+        painter.drawLine(QPoint(int(right), int(bottom)), QPoint(int(right - length), int(bottom)))
+        painter.drawLine(QPoint(int(right), int(bottom)), QPoint(int(right), int(bottom - length)))

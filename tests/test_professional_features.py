@@ -196,6 +196,52 @@ def test_ruler_toggle_updates_viewport_margins_for_all_tabs(tmp_path: Path):
     win.close()
 
 
+def test_layout_grid_toggle_and_settings_apply_to_all_tabs(tmp_path: Path):
+    pdf_a = tmp_path / "grid-a.pdf"
+    pdf_b = tmp_path / "grid-b.pdf"
+    _create_pdf(pdf_a, pages=1, text_prefix="GridA")
+    _create_pdf(pdf_b, pages=1, text_prefix="GridB")
+
+    win = MainWindow()
+    win._open_file(str(pdf_a))
+    QApplication.processEvents()
+    first_view = win.current_view()
+    assert not first_view.layout_grid_enabled
+
+    win._layout_grid = {
+        "enabled": True,
+        "corner_marks": True,
+        "width": 144.0,
+        "height": 96.0,
+        "offset_x": 12.0,
+        "offset_y": 18.0,
+        "subdivisions": 2,
+        "corner_length": 14.0,
+        "color": "#ff00aa",
+    }
+    win._toggle_layout_grid(True)
+    QApplication.processEvents()
+
+    first_config = first_view.layout_grid_config()
+    assert first_config["enabled"] is True
+    assert first_config["corner_marks"] is True
+    assert first_config["width"] == 144.0
+    assert first_config["subdivisions"] == 2
+    assert first_config["corner_length"] == 14.0
+    assert first_config["color"] == "#ff00aa"
+
+    win._open_file(str(pdf_b))
+    QApplication.processEvents()
+    second_view = win.current_view()
+    second_config = second_view.layout_grid_config()
+    assert second_config["enabled"] is True
+    assert second_config["corner_marks"] is True
+    assert second_config["height"] == 96.0
+    assert second_config["offset_x"] == 12.0
+
+    win.close()
+
+
 def test_add_bookmark_saves_to_sidecar(tmp_path: Path, monkeypatch):
     pdf = tmp_path / "bookmarks.pdf"
     _create_pdf(pdf, pages=2)

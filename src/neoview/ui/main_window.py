@@ -64,7 +64,7 @@ from neoview.models.view_state import AnnotationRecord, BookmarkRecord, SearchMa
 from neoview.persistence.sidecar_store import clamp_sidecar_for_page_count, load_sidecar, save_sidecar
 from neoview.resources import load_app_icon
 from neoview.ui.annotation_toolbar import AnnotationToolbar
-from neoview.ui.dialogs import ExportDialog
+from neoview.ui.dialogs import ExportDialog, LayoutGridDialog
 from neoview.ui.pdf_view import PdfView, ToolMode
 from neoview.utils.units import format_size
 
@@ -151,6 +151,17 @@ class MainWindow(QMainWindow):
         self._search_input_updating = False
         self._auto_reload_enabled = self._settings.value("view/auto_reload", True, type=bool)
         self._show_rulers = self._settings.value("view/show_rulers", False, type=bool)
+        self._layout_grid = {
+            "enabled": self._settings.value("view/layout_grid_enabled", False, type=bool),
+            "corner_marks": self._settings.value("view/layout_grid_corner_marks", False, type=bool),
+            "width": self._settings.value("view/layout_grid_width", 72.0, type=float),
+            "height": self._settings.value("view/layout_grid_height", 72.0, type=float),
+            "offset_x": self._settings.value("view/layout_grid_offset_x", 0.0, type=float),
+            "offset_y": self._settings.value("view/layout_grid_offset_y", 0.0, type=float),
+            "subdivisions": self._settings.value("view/layout_grid_subdivisions", 0, type=int),
+            "corner_length": self._settings.value("view/layout_grid_corner_length", 12.0, type=float),
+            "color": self._settings.value("view/layout_grid_color", "#d92fd4", type=str),
+        }
 
         self._view: Optional[PdfView] = None
         self._tab_contexts: Dict[PdfView, TabContext] = {}
@@ -242,6 +253,7 @@ class MainWindow(QMainWindow):
     def _create_tab(self) -> PdfView:
         view = PdfView(self)
         view.set_show_rulers(self._show_rulers)
+        view.set_layout_grid_config(self._layout_grid)
         view.setAcceptDrops(True)
         view.viewport().setAcceptDrops(True)
         view.installEventFilter(self)
@@ -442,6 +454,13 @@ class MainWindow(QMainWindow):
         self._rulers_action.setChecked(self._show_rulers)
         self._rulers_action.triggered.connect(self._toggle_rulers)
         view_m.addAction(self._rulers_action)
+        self._layout_grid_action = QAction("Show Layout Grid", self)
+        self._layout_grid_action.setCheckable(True)
+        self._layout_grid_action.setChecked(bool(self._layout_grid.get("enabled", False)))
+        self._layout_grid_action.triggered.connect(self._toggle_layout_grid)
+        view_m.addAction(self._layout_grid_action)
+        self._layout_grid_settings_action = self._action("Layout Grid Settings...", self._show_layout_grid_dialog)
+        view_m.addAction(self._layout_grid_settings_action)
 
         go_m = self.menuBar().addMenu("&Go")
         go_m.addAction(self._action("&Previous Page", lambda: self.current_view().prev_page(), "PgUp"))
@@ -1104,6 +1123,10 @@ class MainWindow(QMainWindow):
             self._rulers_action.blockSignals(True)
             self._rulers_action.setChecked(self._show_rulers)
             self._rulers_action.blockSignals(False)
+        if hasattr(self, "_layout_grid_action"):
+            self._layout_grid_action.blockSignals(True)
+            self._layout_grid_action.setChecked(bool(self._layout_grid.get("enabled", False)))
+            self._layout_grid_action.blockSignals(False)
 
         saved_tool = self._settings.value("view/tool", ToolMode.HAND.name, type=str)
         if saved_tool in ToolMode.__members__:
@@ -1124,6 +1147,7 @@ class MainWindow(QMainWindow):
         self._settings.setValue("window/show_inspector", self._info_dock.isVisible())
         self._settings.setValue("view/auto_reload", self._auto_reload_enabled)
         self._settings.setValue("view/show_rulers", self._show_rulers)
+        self._save_layout_grid_settings()
         self._settings.setValue("view/tool", self.current_view().tool.name)
 
     def _toggle_rulers(self, checked: bool):
@@ -1133,6 +1157,44 @@ class MainWindow(QMainWindow):
             if isinstance(widget, PdfView):
                 widget.set_show_rulers(self._show_rulers)
         self._settings.setValue("view/show_rulers", self._show_rulers)
+
+    def _toggle_layout_grid(self, checked: bool):
+        self._layout_grid["enabled"] = bool(checked)
+        if hasattr(self, "_layout_grid_action"):
+            self._layout_grid_action.blockSignals(True)
+            self._layout_grid_action.setChecked(bool(checked))
+            self._layout_grid_action.blockSignals(False)
+        self._apply_layout_grid_to_views()
+        self._save_layout_grid_settings()
+
+    def _show_layout_grid_dialog(self):
+        dialog = LayoutGridDialog(self._layout_grid, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        self._layout_grid = dialog.grid_config
+        if hasattr(self, "_layout_grid_action"):
+            self._layout_grid_action.blockSignals(True)
+            self._layout_grid_action.setChecked(bool(self._layout_grid.get("enabled", False)))
+            self._layout_grid_action.blockSignals(False)
+        self._apply_layout_grid_to_views()
+        self._save_layout_grid_settings()
+
+    def _apply_layout_grid_to_views(self):
+        for idx in range(self._tabs.count()):
+            widget = self._tabs.widget(idx)
+            if isinstance(widget, PdfView):
+                widget.set_layout_grid_config(self._layout_grid)
+
+    def _save_layout_grid_settings(self):
+        self._settings.setValue("view/layout_grid_enabled", bool(self._layout_grid.get("enabled", False)))
+        self._settings.setValue("view/layout_grid_corner_marks", bool(self._layout_grid.get("corner_marks", False)))
+        self._settings.setValue("view/layout_grid_width", float(self._layout_grid.get("width", 72.0)))
+        self._settings.setValue("view/layout_grid_height", float(self._layout_grid.get("height", 72.0)))
+        self._settings.setValue("view/layout_grid_offset_x", float(self._layout_grid.get("offset_x", 0.0)))
+        self._settings.setValue("view/layout_grid_offset_y", float(self._layout_grid.get("offset_y", 0.0)))
+        self._settings.setValue("view/layout_grid_subdivisions", int(self._layout_grid.get("subdivisions", 0)))
+        self._settings.setValue("view/layout_grid_corner_length", float(self._layout_grid.get("corner_length", 12.0)))
+        self._settings.setValue("view/layout_grid_color", str(self._layout_grid.get("color", "#d92fd4")))
 
     def _ensure_window_geometry(self):
         available = self._best_available_geometry()
