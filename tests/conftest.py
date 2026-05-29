@@ -1,3 +1,4 @@
+import gc
 import os
 import sys
 
@@ -29,3 +30,16 @@ def _isolated_qsettings(tmp_path, _qt_app):
     yield
     settings.clear()
     settings.sync()
+
+
+@pytest.fixture(autouse=True)
+def _release_page_pixmap_cache():
+    """Drop the shared PageItem pixmap LRU between tests so back-to-back
+    tests that each open a multi-page PDF don't pile up cached QPixmaps."""
+    yield
+    try:
+        from neoview.ui.page_item import PageItem
+        PageItem._PIXMAP_CACHE.clear()
+    except Exception:
+        pass
+    gc.collect()

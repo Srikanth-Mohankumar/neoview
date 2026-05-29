@@ -20,20 +20,51 @@ class PageItem(QGraphicsPixmapItem):
     CACHE_LIMIT = 96
     _PIXMAP_CACHE: "OrderedDict[tuple, QPixmap]" = OrderedDict()
 
-    def __init__(self, page: fitz.Page, scale: float, page_index: int):
+    def __init__(self, page: fitz.Page, scale: float, page_index: int, lazy: bool = True):
         super().__init__()
         self.page_index = page_index
         self.page_rect = QRectF(0, 0, page.rect.width, page.rect.height)
         self._fitz_page = page
-        self.render_zoom: float = scale
+        self.render_zoom: float = 0.0  # 0 means "not yet rendered"
         self.render_scale_factor: float = self.BASE_RENDER_SCALE
+        self.rotation_degrees: int = 0
         self.setTransformationMode(Qt.TransformationMode.SmoothTransformation)
-        self._shadow = QGraphicsDropShadowEffect()
-        self._shadow.setBlurRadius(24.0)
-        self._shadow.setOffset(0.0, 4.0)
-        self._shadow.setColor(QColor(0, 0, 0, 140))
-        self.setGraphicsEffect(self._shadow)
-        self._render(page, scale)
+        self._shadow: Optional[QGraphicsDropShadowEffect] = None
+        if lazy:
+            # Defer the drop-shadow until first real render — Qt would otherwise
+            # allocate an offscreen buffer per page even for placeholders.
+            self._set_placeholder(scale)
+        else:
+            self._ensure_shadow()
+            self._render(page, scale)
+
+    def _ensure_shadow(self) -> None:
+        if self._shadow is not None:
+            return
+        shadow = QGraphicsDropShadowEffect()
+        shadow.setBlurRadius(24.0)
+        shadow.setOffset(0.0, 4.0)
+        shadow.setColor(QColor(0, 0, 0, 140))
+        self.setGraphicsEffect(shadow)
+        self._shadow = shadow
+
+    def _set_placeholder(self, scale: float) -> None:
+        """Cheap aspect-correct placeholder so opening a long PDF doesn't render every page."""
+        pw_pt = max(1.0, float(self.page_rect.width()))
+        ph_pt = max(1.0, float(self.page_rect.height()))
+        long_side = max(pw_pt, ph_pt)
+        target = 64.0  # placeholder pixmap long edge in pixels
+        sf = target / long_side
+        pix_w = max(2, int(round(pw_pt * sf)))
+        pix_h = max(2, int(round(ph_pt * sf)))
+        pixmap = QPixmap(pix_w, pix_h)
+        pixmap.fill(QColor("#ffffff"))
+        self.setPixmap(pixmap)
+        # Pick render_zoom/render_scale_factor so _layout_pages math draws this
+        # at page_rect.width() * current_zoom pixels on screen.
+        self.render_zoom = sf
+        self.render_scale_factor = 1.0
+        self.setScale(scale / sf)
 
     @classmethod
     def _effective_render_scale(cls, page: fitz.Page, scale: float) -> float:
@@ -45,12 +76,12 @@ class PageItem(QGraphicsPixmapItem):
         return max(cls.BASE_RENDER_SCALE, min(cls.TARGET_RENDER_SCALE, max_scale))
 
     @classmethod
-    def _cache_key(cls, page: fitz.Page, scale: float, render_scale: float) -> tuple:
+    def _cache_key(cls, page: fitz.Page, scale: float, render_scale: float, rotation: int = 0) -> tuple:
         doc = getattr(page, "parent", None)
         doc_name = getattr(doc, "name", "") or f"doc-{id(doc)}"
         doc_identity = id(doc)
         page_num = getattr(page, "number", -1)
-        return (doc_name, doc_identity, page_num, round(scale, 2), round(render_scale, 2))
+        return (doc_name, doc_identity, page_num, round(scale, 2), round(render_scale, 2), int(rotation) % 360)
 
     @classmethod
     def _cache_get(cls, key: tuple) -> Optional[QPixmap]:
@@ -68,10 +99,11 @@ class PageItem(QGraphicsPixmapItem):
             cls._PIXMAP_CACHE.popitem(last=False)
 
     def _render(self, page: fitz.Page, scale: float):
+        self._ensure_shadow()
         self.render_zoom = scale
         render_factor = self._effective_render_scale(page, scale)
         self.render_scale_factor = render_factor
-        key = self._cache_key(page, scale, render_factor)
+        key = self._cache_key(page, scale, render_factor, self.rotation_degrees)
         cached = self._cache_get(key)
         if cached is not None:
             self.setPixmap(cached)
@@ -88,7 +120,10 @@ class PageItem(QGraphicsPixmapItem):
         self._cache_put(key, pixmap)
 
     def rerender(self, scale: float) -> bool:
-        if abs(scale - self.render_zoom) < 0.01:
+        # Placeholder pages have render_zoom set to the placeholder scale
+        # factor (much less than the real zoom) — the abs() check below
+        # naturally treats them as "needs render".
+        if self.render_zoom > 0 and abs(scale - self.render_zoom) < 0.01:
             return False
         self._render(self._fitz_page, scale)
         return True

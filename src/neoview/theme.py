@@ -147,6 +147,15 @@ QToolButton:checked {
     border-color: #4a90d9;
     color: #ffffff;
 }
+QToolButton:focus {
+    border-color: #4a90d9;
+    outline: none;
+}
+QToolButton:disabled {
+    color: #6a6a6a;
+    background: transparent;
+    border-color: transparent;
+}
 QToolButton::menu-indicator {
     image: none;
     width: 0;
@@ -664,6 +673,15 @@ QToolButton:checked {
     background: #dce7f5;
     border-color: #2680eb;
     color: #1a5fb4;
+}
+QToolButton:focus {
+    border-color: #2680eb;
+    outline: none;
+}
+QToolButton:disabled {
+    color: #b3b3b3;
+    background: transparent;
+    border-color: transparent;
 }
 QToolButton::menu-indicator {
     image: none;

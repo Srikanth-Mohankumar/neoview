@@ -334,6 +334,10 @@ class MainWindow(QMainWindow):
 
         if self._tabs.count() == 1:
             self._save_sidecar_for_view(widget)
+            timer = self._sidecar_timers.pop(widget, None)
+            if timer is not None:
+                timer.stop()
+                timer.deleteLater()
             widget.close_document()
             self._tab_contexts[widget] = TabContext()
             self._tabs.setTabText(0, "Untitled")
@@ -351,6 +355,8 @@ class MainWindow(QMainWindow):
             timer.deleteLater()
 
         self._tab_contexts.pop(widget, None)
+        # Avoid queued signals firing on a half-torn-down view.
+        widget.blockSignals(True)
         widget.close_document()
         self._tabs.removeTab(index)
         widget.deleteLater()
@@ -585,8 +591,16 @@ class MainWindow(QMainWindow):
         self._page_nav_combo.setEditable(True)
         self._page_nav_combo.setMinimumWidth(70)
         self._page_nav_combo.setMaximumWidth(90)
-        self._page_nav_combo.setToolTip("Go to page")
-        self._page_nav_combo.currentTextChanged.connect(self._on_page_nav_changed)
+        self._page_nav_combo.setToolTip("Go to page (press Enter)")
+        # Commit on Enter or focus-out — typing "23" should not first jump to page 2.
+        page_line = self._page_nav_combo.lineEdit()
+        if page_line is not None:
+            page_line.returnPressed.connect(
+                lambda: self._on_page_nav_changed(self._page_nav_combo.currentText())
+            )
+            page_line.editingFinished.connect(
+                lambda: self._on_page_nav_changed(self._page_nav_combo.currentText())
+            )
         tb.addWidget(self._page_nav_combo)
 
         self._page_total_lbl = QLabel(" / 0 ")
@@ -599,11 +613,22 @@ class MainWindow(QMainWindow):
 
         self._zoom_combo = QComboBox(self)
         self._zoom_combo.setEditable(True)
-        self._zoom_combo.setMinimumWidth(78)
-        self._zoom_combo.setMaximumWidth(90)
-        self._zoom_combo.addItems(["50%", "75%", "100%", "125%", "150%", "200%", "300%"])
+        self._zoom_combo.setMinimumWidth(90)
+        self._zoom_combo.setMaximumWidth(130)
+        self._zoom_combo.addItems(["50%", "75%", "100%", "125%", "150%", "200%", "300%", "400%", "600%", "800%", "1000%"])
         self._zoom_combo.setCurrentText("100%")
-        self._zoom_combo.currentTextChanged.connect(self._on_zoom_combo_changed)
+        # Apply only on commit (Enter / focus-out / preset pick) — not on every keystroke.
+        self._zoom_combo.activated.connect(
+            lambda _idx: self._on_zoom_combo_changed(self._zoom_combo.currentText())
+        )
+        zoom_line = self._zoom_combo.lineEdit()
+        if zoom_line is not None:
+            zoom_line.returnPressed.connect(
+                lambda: self._on_zoom_combo_changed(self._zoom_combo.currentText())
+            )
+            zoom_line.editingFinished.connect(
+                lambda: self._on_zoom_combo_changed(self._zoom_combo.currentText())
+            )
         tb.addWidget(self._zoom_combo)
 
         tb.addAction(self._zoom_in_action)
@@ -2655,13 +2680,23 @@ class MainWindow(QMainWindow):
         raw = text.strip()
         if not raw:
             return
+        # Guard: returnPressed and editingFinished both fire on Enter.
+        if getattr(self, "_page_nav_in_progress", False):
+            return
         try:
             page = int(raw)
         except ValueError:
             return
         view = self.current_view()
-        if view.document and 1 <= page <= view.page_count:
+        if not view.document or not (1 <= page <= view.page_count):
+            return
+        if view.current_page + 1 == page:
+            return  # already there — no-op the duplicate fire.
+        self._page_nav_in_progress = True
+        try:
             view.go_to_page(page - 1)
+        finally:
+            self._page_nav_in_progress = False
 
     def _on_view_page_changed(self, view: PdfView, current: int, total: int):
         if not self._is_current_view(view):
@@ -3015,7 +3050,13 @@ class MainWindow(QMainWindow):
             return
         if value <= 0:
             return
-        self.current_view().set_zoom(value / 100.0, immediate=True, zoom_mode=PdfView.ZOOM_MODE_CUSTOM)
+        target = value / 100.0
+        view = self.current_view()
+        # Suppress double-fire when both returnPressed and editingFinished hit
+        # on the same Enter keypress.
+        if abs(view.zoom - target) < 1e-4:
+            return
+        view.set_zoom(target, immediate=True, zoom_mode=PdfView.ZOOM_MODE_CUSTOM)
 
     def _sync_zoom_combo(self):
         view = self.current_view()

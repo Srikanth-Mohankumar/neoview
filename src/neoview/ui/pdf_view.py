@@ -34,6 +34,9 @@ from neoview.ui.selection import SelectionRect
 from neoview.ui.page_item import PageItem
 
 
+_ALLOWED_URI_SCHEMES = frozenset({"http", "https", "mailto"})
+
+
 class ToolMode(Enum):
     SELECT = auto()
     HAND = auto()
@@ -256,14 +259,14 @@ class PdfView(QGraphicsView):
     def current_page(self) -> int:
         if not self._page_positions:
             return 0
-        scroll_y = self.verticalScrollBar().value() + self.viewport().height() / 3
-        for i, y in enumerate(self._page_positions):
-            if i + 1 < len(self._page_positions):
-                if y <= scroll_y < self._page_positions[i + 1]:
-                    return i
-            else:
-                return i
-        return 0
+        # Pick the page whose midline is closest to (or above) the viewport center.
+        scroll_y = self.verticalScrollBar().value() + self.viewport().height() / 2
+        idx = bisect_right(self._page_positions, scroll_y) - 1
+        if idx < 0:
+            return 0
+        if idx >= len(self._page_positions):
+            return len(self._page_positions) - 1
+        return idx
 
     @property
     def selection_rect(self) -> Optional[QRectF]:
@@ -429,6 +432,7 @@ class PdfView(QGraphicsView):
             self._rebuild_search_highlights()
             self._update_measure_badge()
             self._emit_page_info()
+            QTimer.singleShot(0, self._rerender_pages)
             self.document_loaded.emit()
             return True
         except Exception:
@@ -518,20 +522,25 @@ class PdfView(QGraphicsView):
         self._rebuild_search_highlights()
         self._update_measure_badge()
         self._emit_page_info()
+        # Render visible (placeholder) pages now so the user sees real content immediately.
+        QTimer.singleShot(0, self._rerender_pages)
 
     def _layout_pages(self):
         if not self._pages:
+            self._page_positions = []
             self._scene.setSceneRect(0, 0, 600, 0)
             return
 
         gap = 20
         y = gap
 
+        positions: List[float] = []
         for p in self._pages:
             render_zoom = p.render_zoom if p.render_zoom > 0 else self._zoom
             render_factor = getattr(p, "render_scale_factor", PageItem.BASE_RENDER_SCALE)
             p.setScale((self._zoom / render_zoom) / render_factor)
             p.setPos(0, y)
+            positions.append(y)
             y += p.page_rect.height() * self._zoom + gap
 
         max_width = max(p.page_rect.width() for p in self._pages) * self._zoom
@@ -539,6 +548,7 @@ class PdfView(QGraphicsView):
             offset = (max_width - p.page_rect.width() * self._zoom) / 2
             p.setPos(offset, p.pos().y())
 
+        self._page_positions = positions
         self._scene.setSceneRect(0, 0, max_width, y)
 
         if self._selection and 0 <= self._selection_page < len(self._pages):
@@ -674,7 +684,7 @@ class PdfView(QGraphicsView):
         zoom_mode: str = ZOOM_MODE_CUSTOM,
         force_if_close: bool = False,
     ):
-        z = max(0.25, min(z, 5.0))
+        z = max(0.1, min(z, 10.0))
         if zoom_mode not in {
             self.ZOOM_MODE_CUSTOM,
             self.ZOOM_MODE_FIT_WIDTH,
@@ -705,6 +715,7 @@ class PdfView(QGraphicsView):
             else:
                 if not self._performance_mode:
                     self._rerender_timer.start(55)
+            self._emit_page_info()
         else:
             self._render_all_pages()
         self.zoom_changed.emit(z)
@@ -732,30 +743,42 @@ class PdfView(QGraphicsView):
         self.resetTransform()
         if self._rotation:
             self.rotate(self._rotation)
+        # Page pixmaps don't carry rotation themselves (the view's transform
+        # rotates everything together) — no need to invalidate the cache.
 
     def zoom_by(self, factor: float):
         self.set_zoom(self._zoom * factor, zoom_mode=self.ZOOM_MODE_CUSTOM)
 
-    def fit_width(self):
+    def _fit_reference_rect(self) -> Optional[QRectF]:
+        """Return the page rect used to compute fit zoom. Prefers current page so
+        mixed-page-size documents (covers, landscape inserts) fit correctly."""
         if not self._pages:
+            return None
+        idx = self.current_page
+        if not (0 <= idx < len(self._pages)):
+            idx = 0
+        return self._pages[idx].page_rect
+
+    def fit_width(self):
+        page_rect = self._fit_reference_rect()
+        if page_rect is None or page_rect.width() <= 0:
             return
-        page_width = self._pages[0].page_rect.width()
-        view_width = self.viewport().width() - 40
+        view_width = max(40, self.viewport().width() - 40)
         self.set_zoom(
-            view_width / page_width,
+            view_width / page_rect.width(),
             immediate=True,
             zoom_mode=self.ZOOM_MODE_FIT_WIDTH,
             force_if_close=True,
         )
 
     def fit_page(self):
-        if not self._pages:
+        page_rect = self._fit_reference_rect()
+        if page_rect is None or page_rect.width() <= 0 or page_rect.height() <= 0:
             return
-        page = self._pages[0].page_rect
-        view_w = self.viewport().width() - 40
-        view_h = self.viewport().height() - 40
-        scale_w = view_w / page.width()
-        scale_h = view_h / page.height()
+        view_w = max(40, self.viewport().width() - 40)
+        view_h = max(40, self.viewport().height() - 40)
+        scale_w = view_w / page_rect.width()
+        scale_h = view_h / page_rect.height()
         self.set_zoom(
             min(scale_w, scale_h),
             immediate=True,
@@ -1133,6 +1156,26 @@ class PdfView(QGraphicsView):
                 return i
         return -1
 
+    def _nearest_page_index(self, scene_pos: QPointF) -> int:
+        """Return the index of the page whose vertical extent is closest to
+        scene_pos.y(). Used as a soft anchor when the cursor is in the inter-
+        page gap during zoom."""
+        if not self._pages:
+            return -1
+        y = scene_pos.y()
+        best_idx = 0
+        best_dist = float("inf")
+        for i, page in enumerate(self._pages):
+            page_top = page.pos().y()
+            page_bottom = page_top + page.page_rect.height() * self._zoom
+            if page_top <= y <= page_bottom:
+                return i
+            dist = min(abs(y - page_top), abs(y - page_bottom))
+            if dist < best_dist:
+                best_dist = dist
+                best_idx = i
+        return best_idx
+
     def _scene_to_page(self, scene_pos: QPointF, page_idx: int) -> QPointF:
         if 0 <= page_idx < len(self._pages):
             page = self._pages[page_idx]
@@ -1409,7 +1452,6 @@ class PdfView(QGraphicsView):
         link = link_info["link"]
         self._hide_link_badge()
 
-        _ALLOWED_URI_SCHEMES = {"http", "https", "mailto"}
         kind = link.get("kind")
         uri = link.get("uri")
         if uri:
@@ -1417,6 +1459,7 @@ class PdfView(QGraphicsView):
                 parsed = QUrl(uri)
                 if parsed.scheme().lower() in _ALLOWED_URI_SCHEMES:
                     QDesktopServices.openUrl(parsed)
+                # Blocked scheme (file:, javascript:, custom) — drop on the floor.
                 return
             page_id, y = self._resolve_uri_destination(str(uri))
             if isinstance(page_id, int):
@@ -1455,7 +1498,10 @@ class PdfView(QGraphicsView):
             page_idx, target_y = self._resolve_named_destination(named_key)
             if isinstance(page_idx, int):
                 self._scroll_to_destination(page_idx, target_y, y_is_pdf_coords=True)
-                return
+            # Always return for LINK_NAMED — don't fall through to the
+            # link.get("page") branch, which can navigate to page 1 if fitz
+            # returns page=0 for an unresolved named destination.
+            return
 
         page_idx = link.get("page")
         if isinstance(page_idx, int) and 0 <= page_idx < self.page_count:
@@ -1844,17 +1890,51 @@ class PdfView(QGraphicsView):
             if delta == 0 and not e.pixelDelta().isNull():
                 delta = e.pixelDelta().y()
             if delta != 0:
-                anchor = e.position().toPoint()
-                before = self.mapToScene(anchor)
-                factor = 1.08 ** (delta / 120.0)
-                self.zoom_by(factor)
-                after = self.mapToScene(anchor)
-                shift = after - before
-                self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() + int(shift.x()))
-                self.verticalScrollBar().setValue(self.verticalScrollBar().value() + int(shift.y()))
+                self._zoom_at_viewport_point(
+                    e.position().toPoint(),
+                    1.08 ** (delta / 120.0),
+                )
             e.accept()
             return
         super().wheelEvent(e)
+
+    def _zoom_at_viewport_point(self, viewport_pos: QPoint, factor: float) -> None:
+        """Multiply zoom by ``factor`` while keeping the content under ``viewport_pos`` fixed."""
+        if not self._pages or factor <= 0:
+            return
+
+        scene_before = self.mapToScene(viewport_pos)
+        anchor_page = self._get_page_at(scene_before)
+        if anchor_page < 0:
+            # Cursor is between pages — anchor to whichever page edge is closer
+            # so the gap doesn't drift away from the cursor on repeated zooms.
+            anchor_page = self._nearest_page_index(scene_before)
+            if anchor_page < 0:
+                self.zoom_by(factor)
+                return
+
+        page_before = self._pages[anchor_page]
+        zoom_before = self._zoom
+        # Page-local coordinate of the point under the cursor.
+        local_x = (scene_before.x() - page_before.pos().x()) / zoom_before
+        local_y = (scene_before.y() - page_before.pos().y()) / zoom_before
+
+        self.zoom_by(factor)
+
+        if not (0 <= anchor_page < len(self._pages)):
+            return
+        page_after = self._pages[anchor_page]
+        target_scene = QPointF(
+            page_after.pos().x() + local_x * self._zoom,
+            page_after.pos().y() + local_y * self._zoom,
+        )
+        scene_after_cursor = self.mapToScene(viewport_pos)
+        dx = target_scene.x() - scene_after_cursor.x()
+        dy = target_scene.y() - scene_after_cursor.y()
+        if dx:
+            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() + int(round(dx)))
+        if dy:
+            self.verticalScrollBar().setValue(self.verticalScrollBar().value() + int(round(dy)))
 
     def keyPressEvent(self, e: QKeyEvent):
         key = e.key()
@@ -2014,22 +2094,21 @@ class PdfView(QGraphicsView):
         self.setViewportMargins(margin, margin, 0, 0)
 
     def _apply_fit_mode(self, force_if_close: bool = False):
-        if not self._pages:
+        page_rect = self._fit_reference_rect()
+        if page_rect is None or page_rect.width() <= 0 or page_rect.height() <= 0:
             return
         if self._zoom_mode == self.ZOOM_MODE_FIT_WIDTH:
-            page_width = self._pages[0].page_rect.width()
-            view_width = self.viewport().width() - 40
+            view_width = max(40, self.viewport().width() - 40)
             self.set_zoom(
-                view_width / page_width,
+                view_width / page_rect.width(),
                 zoom_mode=self.ZOOM_MODE_FIT_WIDTH,
                 force_if_close=force_if_close,
             )
         elif self._zoom_mode == self.ZOOM_MODE_FIT_PAGE:
-            page = self._pages[0].page_rect
-            view_w = self.viewport().width() - 40
-            view_h = self.viewport().height() - 40
+            view_w = max(40, self.viewport().width() - 40)
+            view_h = max(40, self.viewport().height() - 40)
             self.set_zoom(
-                min(view_w / page.width(), view_h / page.height()),
+                min(view_w / page_rect.width(), view_h / page_rect.height()),
                 zoom_mode=self.ZOOM_MODE_FIT_PAGE,
                 force_if_close=force_if_close,
             )

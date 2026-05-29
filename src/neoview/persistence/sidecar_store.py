@@ -146,13 +146,22 @@ def _annotation_from_dict(item: Dict[str, Any]) -> Optional[AnnotationRecord]:
     )
 
 
+_MAX_BOOKMARK_TITLE_LEN = 1024
+
+
 def _bookmark_from_dict(item: Dict[str, Any]) -> Optional[BookmarkRecord]:
     if not isinstance(item, dict):
         return None
     bid = str(item.get("id", "")).strip()
     title = str(item.get("title", "")).strip()
-    if not bid or not title:
+    # Mirror the annotation-id validation so a crafted sidecar can't smuggle
+    # arbitrary control chars or oversized strings into bookmark IDs.
+    if not bid or len(bid) > _MAX_ID_LEN or not _ID_RE.match(bid):
         return None
+    if not title:
+        return None
+    if len(title) > _MAX_BOOKMARK_TITLE_LEN:
+        title = title[:_MAX_BOOKMARK_TITLE_LEN]
     try:
         page = int(item.get("page", 0))
         y = float(item.get("y", 0.0))

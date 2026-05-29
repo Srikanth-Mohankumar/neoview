@@ -1,23 +1,42 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 import os
-from PyInstaller.utils.hooks import collect_data_files
+from PyInstaller.utils.hooks import (
+    collect_data_files,
+    collect_dynamic_libs,
+    collect_submodules,
+)
 
 project_root = os.getcwd()
 
 block_cipher = None
 
 datas = []
-# Include packaged assets (icon)
+binaries = []
+hiddenimports = []
+
+# Packaged neoview assets (icon, etc.)
 datas += collect_data_files("neoview")
+# PyMuPDF ships compiled libmupdf bindings that PyInstaller does not pick up
+# from a plain `import fitz` — collect them explicitly.
+binaries += collect_dynamic_libs("fitz")
+datas += collect_data_files("fitz")
+hiddenimports += collect_submodules("fitz")
+# PySide6 Qt plugins (platform, imageformats) need to ride along on Windows.
+hiddenimports += [
+    "PySide6.QtCore",
+    "PySide6.QtGui",
+    "PySide6.QtWidgets",
+    "PySide6.QtSvg",
+]
 
 
 a = Analysis(
     [os.path.join(project_root, "src", "neoview", "__main__.py")],
     pathex=[os.path.join(project_root, "src")],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
-    hiddenimports=[],
+    hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
