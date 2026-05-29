@@ -1,0 +1,3 @@
+- [Premium hardening composition](composition_premium_hardening.md) — 12-agent suite for post-fix quality pushes (10 parallel + implementer + packager).
+- [File ownership boundaries](file_ownership_boundaries.md) — which subagent owns which NeoView file, prevents overlapping patches.
+- [Wave 1 parallel dispatch rule](wave1_parallel_dispatch.md) — Wave 1 auditors must run in parallel from a single snapshot; consolidate findings before Wave 2.
