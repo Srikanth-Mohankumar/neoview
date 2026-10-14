@@ -20,7 +20,10 @@ signals only; `PdfView` never references `MainWindow`.
 
 None of these import `MainWindow` or `PdfView`.
 
-## PdfView additions (Phase B)
+## PdfView additions (Phase B, implemented)
+
+All of the methods and signals below exist on `PdfView` now. Note that `doc_path`, `current_page`,
+`page_count` and `zoom` are existing *properties* (no parentheses); the new API is methods.
 
 ### Page mode
 
@@ -31,16 +34,18 @@ PdfView.page_mode_changed = Signal(str)
 ```
 
 - Unknown modes raise `ValueError`. Setting the current mode is a no-op (no signal).
-- The current page stays visible across a mode change.
-- `"continuous"` keeps today's layout exactly (`layout_pages(..., viewport_width=0)` reproduces
-  `_layout_pages`).
-- `"single"` uses the continuous geometry, but the view shows one page: the scene rect is
-  clamped to `PageLayout.row_bounds(row_of(current_page))` and next/previous page, PageUp/
-  PageDown and scrolling past the page edge move one page.
+- The current page stays visible across a mode change; reload keeps the mode.
+- `"continuous"` is the previous layout bit-for-bit (tested against the old formula).
+- `"single"` uses the continuous geometry, but the view shows one page: the other pages are
+  hidden and the scene rect is clamped to the current row. `next_page()`/`prev_page()` (and so
+  the PgUp/PgDown actions) change page, and the mouse wheel turns the page when it scrolls
+  past the page's top or bottom edge (at most one page per 300 ms).
 - Two-page modes: pages side by side, rows centred; in `"two-page-cover"` page 1 is alone on
-  the right. `next_page()`/`prev_page()` move by a row (two pages).
-- Fit width / fit page fit the widest row, not a single page, in two-page modes.
-- Persisted per document with the other view state (QSettings), not in the sidecar.
+  the right. `next_page()`/`prev_page()` move by a spread, and `current_page` is the first
+  (left) page of the spread in view.
+- Fit width / fit page fit the current spread (a lone page keeps its half) in two-page modes.
+- Not persisted by the view: storing it per document with the other view state is
+  MainWindow's job (`page_mode()` on save, `set_page_mode()` on restore).
 
 ### Reading colour mode
 
@@ -50,14 +55,29 @@ PdfView.color_mode() -> str                # default "normal"
 PdfView.color_mode_changed = Signal(str)
 ```
 
-- Applied in the render path (`apply_color_mode` on the rendered page image before it becomes
-  a pixmap); the colour mode is part of the pixmap cache key. Changing it re-renders visible
-  pages.
+- Applied in the render path (`apply_color_mode` on each page image as it arrives from the
+  render scheduler); the colour mode is part of the pixmap cache key, under the same byte
+  budget. Changing it re-renders visible pages; until a re-render arrives the page keeps its
+  old colours, and switching back to a mode still in the cache is instant.
 - Only page content changes; selections, search highlights, annotations and the measure
-  rectangle keep their colours. The scene background stays theme-controlled;
-  `page_background(mode)` gives the matching paper colour for placeholders.
-- Thumbnails follow the view's colour mode. Printing and presentation always use normal
-  colours.
+  rectangle keep their colours. Placeholders use `page_background(mode)`. Night mode also
+  switches the canvas to the dark theme's `canvas` token (even in the light theme).
+- Not persisted by the view (MainWindow's choice: global or per document). The thumbnail
+  panel belongs to MainWindow and does not follow the colour mode yet. Printing and
+  presentation always use normal colours.
+
+### Theme
+
+```python
+PdfView.apply_theme_colors() -> None   # re-read canvas colour and badge font from the theme
+PdfView.canvas_color() -> QColor
+```
+
+- The canvas uses `theme.tokens()["canvas"]` and updates by itself when `apply_theme()`
+  changes the application palette (PaletteChange/StyleChange); calling `apply_theme_colors()`
+  after switching themes is harmless but not required.
+- The measurement badge uses the application font (Inter) with tabular figures (`tnum`); a
+  widget-level rule overrides the stylesheet's monospace `font-family` for it.
 
 ### Back / forward history
 
@@ -69,9 +89,12 @@ PdfView.can_go_forward() -> bool
 PdfView.history_changed = Signal(bool, bool)   # (can_go_back, can_go_forward)
 ```
 
-- Jumps record history: link clicks, outline/bookmark clicks, search results, go-to-page
-  (dialog or page box), first/last page and thumbnail clicks. Plain scrolling, zooming and
-  next/previous page do not.
+- Jumps record history: every `go_to_page()` (outline, page box, thumbnails, go-to dialog),
+  `first_page()`, `last_page()`, `scroll_to_rect()` (search results), `scroll_to_page_y()`
+  (bookmarks, annotations) and internal link clicks. Plain scrolling, zooming and
+  `next_page()`/`prev_page()` do not. A jump that does not move the view records nothing.
+- MainWindow's session restore calls `go_to_page()` after opening, so a restored document
+  starts with one Back entry (to the top of the document).
 - Each jump does `push(location_before)` then `push(location_after)`; consecutive duplicates
   collapse, so repeated jumps to the same spot add nothing.
 - `go_back()`/`go_forward()` pass the current location (`back(current=...)`) so returning
@@ -120,7 +143,7 @@ prompt when the tab is first shown.
 
 ```python
 from neoview.ui.printing import print_document
-ok = print_document(self, view.doc_path(), view.current_page(), view.document_password())
+ok = print_document(self, view.doc_path, view.current_page, view.document_password())
 ```
 
 Disabled when the tab has no document. `print_document` shows the dialog and returns False
@@ -133,7 +156,7 @@ message box. No message on cancel.
 
 ```python
 from neoview.ui.presentation import PresentationWindow
-win = PresentationWindow(view.doc_path(), view.current_page(), view.document_password())
+win = PresentationWindow(view.doc_path, view.current_page, view.document_password())
 win.closed.connect(lambda page: (view.go_to_page(page), win.deleteLater()))
 self._presentation = win   # keep a reference while open
 win.present()
@@ -141,8 +164,8 @@ win.present()
 
 The constructor also re-opens the file from disk and can raise for the same reasons as
 printing (`PermissionError`, fitz errors, `ValueError` for a PDF with no pages); wrap it the
-same way. Disabled when the tab has no document. Only one presentation at a time; F5 while one is open
-focuses it. Esc inside the window closes it and the viewer follows to the last shown page.
+same way. Disabled when the tab has no document. Only one presentation at a time; F5 while
+one is open focuses it. Esc inside the window closes it and the viewer follows to the last shown page.
 
 ### Suggested menu/toolbar wiring
 
