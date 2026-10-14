@@ -11,6 +11,8 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPixmap
 from PySide6.QtWidgets import QGraphicsPixmapItem
 
+from neoview.ui.page_modes import apply_color_mode, page_background
+
 _doc_tokens = itertools.count(1)
 
 
@@ -79,9 +81,14 @@ class PageItem(QGraphicsPixmapItem):
         page_index: int,
         lazy: bool = True,
         doc_token: int = 0,
+        color_mode: str = "normal",
     ):
         super().__init__()
         self.page_index = page_index
+        # Reading colour mode renders are made for (page_modes.COLOR_MODES); part of the
+        # cache key. rendered_color_mode is the mode of the pixmap currently shown.
+        self.color_mode = color_mode
+        self.rendered_color_mode = color_mode
         self.page_rect = QRectF(0, 0, page.rect.width, page.rect.height)
         self._fitz_page = page
         self.doc_token = doc_token
@@ -160,8 +167,9 @@ class PageItem(QGraphicsPixmapItem):
         pix_w = max(2, int(round(pw_pt * sf)))
         pix_h = max(2, int(round(ph_pt * sf)))
         pixmap = QPixmap(pix_w, pix_h)
-        pixmap.fill(QColor("#ffffff"))
+        pixmap.fill(page_background(self.color_mode))
         self.setPixmap(pixmap)
+        self.rendered_color_mode = self.color_mode
         # Pick render_zoom/render_scale_factor so _layout_pages math draws this
         # at page_rect.width() * current_zoom pixels on screen.
         self.render_zoom = sf
@@ -187,12 +195,14 @@ class PageItem(QGraphicsPixmapItem):
         """Show the largest cached render of this page, if any, as a scaled preview."""
         best = None
         for key, pixmap in self._PIXMAP_CACHE.items():
-            if key[0] == self.doc_token and key[1] == self.page_index:
+            if (key[0] == self.doc_token and key[1] == self.page_index
+                    and key[4] == self.color_mode):
                 if best is None or pixmap.width() > best[2].width():
                     best = (key[2], key[3], pixmap)
         if best is None:
             return False
         self.show_preview(best[2], best[0], best[1], scale)
+        self.rendered_color_mode = self.color_mode
         return True
 
     # -- real renders ---------------------------------------------------------------------
@@ -208,23 +218,33 @@ class PageItem(QGraphicsPixmapItem):
     def needs_render(self, zoom: float, factor: float) -> bool:
         return (
             self.is_preview
+            or self.rendered_color_mode != self.color_mode
             or abs(zoom - self.render_zoom) >= 0.01
             or abs(factor - self.render_scale_factor) >= 0.01
         )
 
     def apply_render(self, pixmap: QPixmap, zoom: float, factor: float, scale: float) -> None:
-        """Install a finished render made at *zoom* x *factor*; *scale* is the current zoom."""
+        """Install a finished render made at *zoom* x *factor*; *scale* is the current zoom.
+
+        *pixmap* must already be in this item's ``color_mode``.
+        """
         self.setPixmap(pixmap)
         self.render_zoom = zoom
         self.render_scale_factor = factor
+        self.rendered_color_mode = self.color_mode
         self.is_preview = False
         self.is_blank = False
         self.setScale((scale / zoom) / factor)
-        self._cache_put(self._cache_key(self.doc_token, self.page_index, zoom, factor), pixmap)
+        self._cache_put(
+            self._cache_key(self.doc_token, self.page_index, zoom, factor, self.color_mode),
+            pixmap,
+        )
 
     def apply_cached(self, zoom: float, factor: float) -> bool:
         """Install the cached render for *zoom* x *factor* if there is one."""
-        pixmap = self._cache_get(self._cache_key(self.doc_token, self.page_index, zoom, factor))
+        pixmap = self._cache_get(
+            self._cache_key(self.doc_token, self.page_index, zoom, factor, self.color_mode)
+        )
         if pixmap is None:
             return False
         self.apply_render(pixmap, zoom, factor, zoom)
@@ -233,8 +253,10 @@ class PageItem(QGraphicsPixmapItem):
     # -- cache ----------------------------------------------------------------------------
 
     @staticmethod
-    def _cache_key(doc_token: int, page_index: int, zoom: float, factor: float) -> tuple:
-        return (doc_token, page_index, round(zoom, 4), round(factor, 3))
+    def _cache_key(
+        doc_token: int, page_index: int, zoom: float, factor: float, color_mode: str = "normal"
+    ) -> tuple:
+        return (doc_token, page_index, round(zoom, 4), round(factor, 3), color_mode)
 
     @staticmethod
     def _pixmap_bytes(pixmap: QPixmap) -> int:
@@ -277,7 +299,8 @@ class PageItem(QGraphicsPixmapItem):
         mat = fitz.Matrix(scale * factor, scale * factor)
         pix = page.get_pixmap(matrix=mat, alpha=False)
         img = QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format.Format_RGB888)
-        self.apply_render(QPixmap.fromImage(img.copy()), scale, factor, scale)
+        img = img.copy() if self.color_mode == "normal" else apply_color_mode(img, self.color_mode)
+        self.apply_render(QPixmap.fromImage(img), scale, factor, scale)
 
     def rerender(self, scale: float) -> bool:
         """Render synchronously at *scale* unless that render is already shown."""
