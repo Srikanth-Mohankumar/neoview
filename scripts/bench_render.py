@@ -1,0 +1,318 @@
+"""Rendering benchmark for PdfView on large documents.
+
+Not collected by pytest. Run from the repo root:
+
+    .venv/bin/python scripts/bench_render.py --runs 5 [--json out.json]
+
+Each trial runs in a fresh subprocess (offscreen Qt) so caches, RSS and import cost do not
+leak between trials. Two generated 100-page documents are measured:
+
+- ``vector``: text paragraphs and many vector shapes on every page;
+- ``images``: the same, plus a large photo-like image on every 10th page.
+
+Metrics per trial (wall clock, seconds unless noted):
+
+- ``open_first_paint``: ``open_document`` call -> page 1 shown sharp and painted;
+- ``zoom_call``: time the ``set_zoom(2.0)`` call itself blocks the GUI thread;
+- ``zoom_sharp``: fit-width -> 200% zoom until every visible page is sharp;
+- ``zoom_max_stall``: longest GUI event-loop stall (ms) between the zoom and sharp pages;
+- ``scroll_total``: scroll top -> end at 200% in viewport-height steps, pumping events for
+  one 60 Hz frame per step (an idealised fast scroll);
+- ``scroll_max_stall``: longest GUI event-loop stall (ms) during that scroll;
+- ``end_sharp``: after the scroll stops, time until the visible pages are sharp;
+- ``read_max_stall``: page-by-page reading from the middle of the document: 12 steps of one
+  viewport height with a 150 ms dwell each; longest GUI stall (ms) over all steps;
+- ``read_sharp``: median time per reading step until the visible pages are sharp;
+- ``peak_rss_mb``: ``ru_maxrss`` of the trial process (Linux reports KiB).
+
+"Sharp" means every visible PageItem shows an image rendered at the current zoom and the
+view reports no pending renders (``PdfView.pending_render_count`` when it exists).
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import platform
+import statistics
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+N_PAGES = 100
+VARIANTS = ("vector", "images")
+METRICS = (
+    "open_first_paint",
+    "zoom_call",
+    "zoom_sharp",
+    "zoom_max_stall",
+    "scroll_total",
+    "scroll_max_stall",
+    "end_sharp",
+    "read_max_stall",
+    "read_sharp",
+    "peak_rss_mb",
+)
+
+
+def make_pdf(path: Path, variant: str) -> None:
+    import fitz
+
+    doc = fitz.open()
+    image_bytes = None
+    if variant == "images":
+        # Deterministic photo-like 2400x1800 RGB image (smooth gradients + stripes).
+        w, h = 2400, 1800
+        row = bytearray()
+        rows = []
+        for y in range(h):
+            row = bytearray(w * 3)
+            for x in range(0, w * 3, 3):
+                px = x // 3
+                row[x] = (px * 255 // w) & 0xFF
+                row[x + 1] = (y * 255 // h) & 0xFF
+                row[x + 2] = ((px ^ y) >> 2) & 0xFF
+            rows.append(bytes(row))
+        pix = fitz.Pixmap(fitz.csRGB, w, h, b"".join(rows), False)
+        image_bytes = pix.tobytes("jpeg", jpg_quality=90)
+    text = (
+        "The quick brown fox jumps over the lazy dog. Pack my box with five dozen "
+        "liquor jugs. Sphinx of black quartz, judge my vow. "
+    ) * 3
+    for i in range(N_PAGES):
+        page = doc.new_page(width=595, height=842)
+        page.insert_text((72, 60), f"Benchmark page {i + 1}", fontsize=18)
+        y = 90
+        for k in range(28):
+            page.insert_text((72, y), text[(k * 7) % 60:][:95], fontsize=9)
+            y += 12
+        shape = page.new_shape()
+        for k in range(300):
+            cx = 72 + (k * 37) % 450
+            cy = 450 + (k * 53) % 330
+            shape.draw_circle((cx, cy), 4 + k % 9)
+            shape.finish(color=(0, 0, (k % 5) / 5), fill=((k % 7) / 7, 0.3, 0.6), width=0.6)
+        for k in range(120):
+            shape.draw_line((72, 440 + k * 3), (523, 780 - k * 2.5))
+        shape.finish(color=(0.2, 0.2, 0.2), width=0.3)
+        shape.commit()
+        if image_bytes is not None and i % 10 == 0:
+            page.insert_image(fitz.Rect(72, 300, 523, 640), stream=image_bytes)
+    doc.save(str(path), deflate=True)
+    doc.close()
+
+
+def _peak_rss_mb() -> float:
+    try:
+        import resource
+    except ImportError:  # Windows
+        return float("nan")
+    kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return kb / 1024.0 if sys.platform != "darwin" else kb / (1024.0 * 1024.0)
+
+
+def run_trial(pdf: Path) -> dict:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtCore import QElapsedTimer, QEvent, QObject, QTimer
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication(sys.argv)
+    from neoview.ui.pdf_view import PdfView
+
+    view = PdfView()
+    view.resize(1280, 800)
+    view.show()
+    app.processEvents()
+
+    paints: list[float] = []
+
+    class PaintSpy(QObject):
+        def eventFilter(self, obj, event):  # noqa: N802 - Qt API
+            if event.type() == QEvent.Type.Paint:
+                paints.append(time.perf_counter())
+            return False
+
+    spy = PaintSpy()
+    view.viewport().installEventFilter(spy)
+
+    # Stall meter: a 1 ms timer; the largest gap between ticks is the longest time the GUI
+    # thread could not service its event loop.
+    ticks: list[float] = []
+    clock = QElapsedTimer()
+    clock.start()
+    meter = QTimer()
+    meter.setInterval(1)
+    meter.timeout.connect(lambda: ticks.append(time.perf_counter()))
+
+    def pending() -> int:
+        fn = getattr(view, "pending_render_count", None)
+        return int(fn()) if callable(fn) else 0
+
+    def sharp() -> bool:
+        idxs = view._visible_page_indices()
+        if not idxs:
+            return False
+        for idx in idxs:
+            p = view._pages[idx]
+            if p.render_zoom <= 0 or abs(p.render_zoom - view.zoom) >= 0.01:
+                return False
+        return pending() == 0
+
+    def pump_until(pred, timeout: float = 60.0) -> float:
+        t0 = time.perf_counter()
+        while not pred():
+            app.processEvents()
+            if time.perf_counter() - t0 > timeout:
+                raise TimeoutError("condition not reached")
+            time.sleep(0.0005)
+        return time.perf_counter()
+
+    def pump_for(seconds: float) -> None:
+        end = time.perf_counter() + seconds
+        while time.perf_counter() < end:
+            app.processEvents()
+            time.sleep(0.0005)
+
+    def max_stall_ms(t0: float, t1: float) -> float:
+        pts = [t0] + [t for t in ticks if t0 <= t <= t1] + [t1]
+        return max((b - a) for a, b in zip(pts, pts[1:])) * 1000.0
+
+    res: dict = {}
+
+    # 1. open -> first page painted sharp.
+    t0 = time.perf_counter()
+    view.open_document(str(pdf))
+    view.fit_width()
+    pump_until(lambda: sharp() and paints and paints[-1] > t0)
+    t_sharp = pump_until(lambda: paints[-1] > t0)
+    res["open_first_paint"] = t_sharp - t0
+
+    pump_for(0.3)
+    meter.start()
+
+    # 2. zoom fit-width -> 200%.
+    ticks.clear()
+    t0 = time.perf_counter()
+    view.set_zoom(2.0)
+    res["zoom_call"] = time.perf_counter() - t0
+    t1 = pump_until(sharp)
+    res["zoom_sharp"] = t1 - t0
+    res["zoom_max_stall"] = max_stall_ms(t0, t1)
+
+    pump_for(0.3)
+
+    # 3. scroll top -> end, one viewport height per 60 Hz frame.
+    bar = view.verticalScrollBar()
+    bar.setValue(0)
+    pump_for(0.2)
+    ticks.clear()
+    step = max(1, view.viewport().height())
+    t0 = time.perf_counter()
+    while bar.value() < bar.maximum():
+        bar.setValue(min(bar.maximum(), bar.value() + step))
+        pump_for(1 / 60)
+    t1 = time.perf_counter()
+    res["scroll_total"] = t1 - t0
+    res["scroll_max_stall"] = max_stall_ms(t0, t1)
+    t2 = pump_until(sharp)
+    res["end_sharp"] = t2 - t1
+
+    # 4. page-by-page reading: the debounced re-render fires between steps.
+    bar.setValue(bar.maximum() // 2)
+    pump_until(sharp)
+    pump_for(0.2)
+    stalls = []
+    sharp_times = []
+    for _ in range(12):
+        ticks.clear()
+        t0 = time.perf_counter()
+        bar.setValue(min(bar.maximum(), bar.value() + step))
+        t1 = pump_until(sharp)
+        sharp_times.append(t1 - t0)
+        pump_for(max(0.0, 0.15 - (t1 - t0)))
+        stalls.append(max_stall_ms(t0, time.perf_counter()))
+    res["read_max_stall"] = max(stalls)
+    res["read_sharp"] = statistics.median(sharp_times)
+
+    meter.stop()
+    view.close_document()
+    view.close()
+    app.processEvents()
+    res["peak_rss_mb"] = _peak_rss_mb()
+    return res
+
+
+def environment() -> dict:
+    import fitz
+    import PySide6
+
+    cpu = platform.processor() or ""
+    try:
+        with open("/proc/cpuinfo", encoding="utf-8") as fh:
+            for line in fh:
+                if line.startswith("model name"):
+                    cpu = line.split(":", 1)[1].strip()
+                    break
+    except OSError:
+        pass
+    return {
+        "cpu": cpu,
+        "nproc": os.cpu_count(),
+        "python": platform.python_version(),
+        "pymupdf": fitz.VersionBind,
+        "pyside6": PySide6.__version__,
+        "platform": platform.platform(),
+        "qpa": os.environ.get("QT_QPA_PLATFORM", "offscreen"),
+    }
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--runs", type=int, default=5)
+    ap.add_argument("--variants", default=",".join(VARIANTS))
+    ap.add_argument("--json", help="write raw trials + medians here")
+    ap.add_argument("--child", help=argparse.SUPPRESS)
+    args = ap.parse_args()
+
+    if args.child:
+        print(json.dumps(run_trial(Path(args.child))))
+        return 0
+
+    work = Path(tempfile.mkdtemp(prefix="neoview-bench-"))
+    env = dict(os.environ, QT_QPA_PLATFORM=os.environ.get("QT_QPA_PLATFORM", "offscreen"))
+    out: dict = {"env": environment(), "runs": args.runs, "variants": {}}
+    for variant in args.variants.split(","):
+        pdf = work / f"bench-{variant}.pdf"
+        make_pdf(pdf, variant)
+        trials = []
+        for n in range(args.runs):
+            proc = subprocess.run(
+                [sys.executable, __file__, "--child", str(pdf)],
+                capture_output=True, text=True, env=env, timeout=600,
+            )
+            if proc.returncode != 0:
+                sys.stderr.write(proc.stdout + proc.stderr)
+                return 1
+            trial = json.loads(proc.stdout.strip().splitlines()[-1])
+            trials.append(trial)
+            print(f"{variant} run {n + 1}: " + ", ".join(f"{k}={v:.3f}" for k, v in trial.items()),
+                  flush=True)
+        med = {k: statistics.median(t[k] for t in trials) for k in METRICS}
+        out["variants"][variant] = {"trials": trials, "median": med,
+                                    "pdf_bytes": pdf.stat().st_size}
+    print(json.dumps(out["env"]))
+    print(f"\nmedians over {args.runs} runs")
+    print("metric".ljust(18) + "".join(v.rjust(12) for v in out["variants"]))
+    for k in METRICS:
+        print(k.ljust(18) + "".join(f"{out['variants'][v]['median'][k]:12.3f}"
+                                    for v in out["variants"]))
+    if args.json:
+        Path(args.json).write_text(json.dumps(out, indent=2), encoding="utf-8")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
