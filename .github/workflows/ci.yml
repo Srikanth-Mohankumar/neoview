@@ -51,6 +51,20 @@ jobs:
         run: ruff check .
       - name: Tests
         run: python -m pytest -q
+      - name: UI smoke screenshots
+        # Real platform plugin on Windows (what users see); offscreen on headless Linux.
+        env:
+          QT_QPA_PLATFORM: ${{ runner.os == 'Windows' && 'windows' || 'offscreen' }}
+        run: |
+          python .claude/skills/smoke-test-ui/scripts/smoke.py --visible --theme light --out smoke-shots/light
+          python .claude/skills/smoke-test-ui/scripts/smoke.py --visible --theme dark --out smoke-shots/dark
+      - name: Upload smoke screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: smoke-shots/
+          if-no-files-found: warn
       - name: Build
         run: python -m build
       - name: Verify artifacts
