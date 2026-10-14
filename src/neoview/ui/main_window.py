@@ -885,6 +885,9 @@ class MainWindow(QMainWindow):
         self._thumbs_list.setResizeMode(QListWidget.ResizeMode.Adjust)
         self._thumbs_list.setViewMode(QListWidget.ViewMode.IconMode)
         self._thumbs_list.setMovement(QListWidget.Movement.Static)
+        # Every cell is the same fixed icon box, so let the view skip per-item size
+        # queries; without this, laying out a 5000-page list took ~0.6 s.
+        self._thumbs_list.setUniformItemSizes(True)
         self._thumbs_dock.setWidget(self._thumbs_list)
         self._thumbs_dock.setMinimumWidth(180)
         self._thumbs_dock.setMaximumWidth(520)
@@ -893,7 +896,7 @@ class MainWindow(QMainWindow):
         self._thumbs_dock.hide()
         self._thumbs_list.itemActivated.connect(self._jump_to_thumb)
         self._thumbs_list.verticalScrollBar().valueChanged.connect(self._schedule_thumbnail_render)
-        self._thumbs_dock.visibilityChanged.connect(lambda _visible: self._schedule_thumbnail_render())
+        self._thumbs_dock.visibilityChanged.connect(self._on_thumbs_visibility_changed)
 
         self._info_dock = QDockWidget("Inspector", self)
         self._info_dock.setObjectName("InspectorDock")
@@ -2592,6 +2595,13 @@ class MainWindow(QMainWindow):
         self._thumb_source_key = os.path.abspath(source_path) if source_path else f"doc-{id(doc)}"
         self._thumb_icon_cache = {k: v for k, v in self._thumb_icon_cache.items() if k[0] == self._thumb_source_key}
 
+        # The panel is hidden by default. Building one list item per page (and
+        # rendering thumbnails for the current page on every scroll tick) for a
+        # panel nobody sees is wasted O(pages) work on open; build it when the
+        # panel is shown instead (_on_thumbs_visibility_changed).
+        if not self._thumbs_dock.isVisible():
+            return
+
         for i in range(doc.page_count):
             item = QListWidgetItem(f"{i + 1}")
             cached = self._thumb_icon_cache.get((self._thumb_source_key, i))
@@ -2603,6 +2613,13 @@ class MainWindow(QMainWindow):
             self._thumbs_list.addItem(item)
 
         self._schedule_thumbnail_render()
+
+    def _on_thumbs_visibility_changed(self, visible: bool):
+        doc = self.current_view().document
+        if visible and doc is not None and self._thumbs_list.count() != doc.page_count:
+            self._populate_thumbnails()
+        else:
+            self._schedule_thumbnail_render()
 
     def _clear_thumbnail_queue(self):
         self._thumb_timer.stop()
