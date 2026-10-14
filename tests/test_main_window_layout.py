@@ -652,3 +652,162 @@ def test_chrome_rules_join_the_app_stylesheet_once(qtbot):
 
     # No per-window sheet: one style-sheet style for the whole app keeps repolish cheap.
     assert _window(qtbot).styleSheet() == ""
+
+
+# --------------------------------------------------------------------------- Phase B, real PdfView
+
+
+def test_page_layout_actions_drive_real_view(two_pdfs, qtbot):
+    _a, b = two_pdfs
+    win = _window(qtbot)
+    win._open_file(str(b))
+    view = win.current_view()
+    assert win._page_mode_actions["continuous"].isEnabled()
+    assert win._page_mode_actions["continuous"].isChecked()
+
+    win._page_mode_actions["two-page"].trigger()
+    assert view.page_mode() == "two-page"
+    assert win._page_mode_actions["two-page"].isChecked()
+
+    # A change made on the view (not through the menu) updates the checked action.
+    view.set_page_mode("single")
+    QApplication.processEvents()
+    assert win._page_mode_actions["single"].isChecked()
+    assert not win._page_mode_actions["two-page"].isChecked()
+
+
+def test_reading_mode_actions_drive_real_view_and_thumbnails(two_pdfs, qtbot):
+    a, _b = two_pdfs
+    win = _window(qtbot)
+    win._open_file(str(a))
+    view = win.current_view()
+    win._show_sidebar_page("thumbnails")
+    win._render_thumbnail_batch()
+
+    def thumb_center_lightness() -> int:
+        icon = win._thumbs_list.item(0).icon()
+        image = icon.pixmap(win.THUMB_BOX).toImage()
+        return image.pixelColor(image.width() // 2, image.height() * 3 // 4).lightness()
+
+    assert thumb_center_lightness() > 200  # white paper
+
+    win._color_mode_actions["night"].trigger()
+    assert view.color_mode() == "night"
+    assert win._color_mode_actions["night"].isChecked()
+    win._render_thumbnail_batch()
+    assert thumb_center_lightness() < 60  # thumbnails follow the reading colours
+
+    view.set_color_mode("sepia")
+    QApplication.processEvents()
+    assert win._color_mode_actions["sepia"].isChecked()
+
+
+def test_back_forward_actions_drive_real_view_history(tmp_path: Path, qtbot):
+    pdf = tmp_path / "long.pdf"
+    _create_pdf(pdf, pages=6)
+    win = _window(qtbot)
+    win._open_file(str(pdf))
+    view = win.current_view()
+    QApplication.processEvents()
+    assert not win._back_action.isEnabled()
+
+    view.go_to_page(4)  # a jump records history
+    QApplication.processEvents()
+    assert view.current_page == 4
+    assert win._back_action.isEnabled() and not win._forward_action.isEnabled()
+
+    win._back_action.trigger()
+    QApplication.processEvents()
+    assert view.current_page == 0
+    assert win._forward_action.isEnabled()
+
+    win._forward_action.trigger()
+    QApplication.processEvents()
+    assert view.current_page == 4
+    assert [s.toString() for s in win._back_action.shortcuts()] == ["Alt+Left"]
+    assert [s.toString() for s in win._forward_action.shortcuts()] == ["Alt+Right"]
+
+
+def test_page_and_color_mode_persist_per_document(two_pdfs, qtbot):
+    _a, b = two_pdfs
+    win = _window(qtbot)
+    win._open_file(str(b))
+    win._page_mode_actions["two-page"].trigger()
+    win._color_mode_actions["sepia"].trigger()
+    win.close()
+
+    again = _window(qtbot)  # same isolated settings store
+    if again.current_view().document is None:
+        again._open_file(str(b))
+    view = again.current_view()
+    assert view.page_mode() == "two-page"
+    assert view.color_mode() == "sepia"
+    assert again._page_mode_actions["two-page"].isChecked()
+
+
+def _encrypted_pdf(path: Path) -> None:
+    doc = fitz.open()
+    for i in range(2):
+        doc.new_page(width=595, height=842).insert_text((72, 120), f"Secret page {i + 1}")
+    doc.save(str(path), encryption=fitz.PDF_ENCRYPT_AES_256, user_pw="secret", owner_pw="owner")
+    doc.close()
+
+
+def _fake_password_dialog(monkeypatch, answers: list[str | None]):
+    from neoview.ui import password
+
+    replies = iter(answers)
+    shown = []
+
+    class FakeDialog:
+        def __init__(self, parent, file_name):
+            shown.append(file_name)
+            self._answer = None
+
+        def exec(self):
+            self._answer = next(replies)
+            return 0 if self._answer is None else 1
+
+        def password(self):
+            return self._answer
+
+        def set_error(self, message):
+            pass
+
+    monkeypatch.setattr(password, "PasswordDialog", FakeDialog)
+    return shown
+
+
+def test_encrypted_pdf_prompts_and_opens_in_real_view(tmp_path: Path, qtbot, monkeypatch):
+    from neoview.ui import printing
+
+    pdf = tmp_path / "locked.pdf"
+    _encrypted_pdf(pdf)
+    shown = _fake_password_dialog(monkeypatch, ["wrong", "secret"])
+    win = _window(qtbot)
+    win._open_file(str(pdf))
+
+    view = win.current_view()
+    assert shown == ["locked.pdf"]
+    assert view.document is not None and view.page_count == 2
+    assert view.document_password() == "secret"
+    assert not win._welcome.isVisible()
+
+    calls = []
+    monkeypatch.setattr(printing, "print_document", lambda *args: calls.append(args) or True)
+    win._print_action.trigger()
+    assert calls[0][3] == "secret"  # the password reaches the print job
+
+
+def test_encrypted_pdf_cancel_leaves_window_empty(tmp_path: Path, two_pdfs, qtbot, monkeypatch):
+    a, _b = two_pdfs
+    pdf = tmp_path / "locked.pdf"
+    _encrypted_pdf(pdf)
+    _fake_password_dialog(monkeypatch, [None])
+    win = _window(qtbot)
+    win._open_file(str(a))
+    win._open_file(str(pdf))
+    # The tab created for the locked file is closed again; the open document stays.
+    assert win._tabs.count() == 1
+    assert win.current_context().file_path == str(a.resolve())
+

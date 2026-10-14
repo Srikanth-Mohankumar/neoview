@@ -189,12 +189,12 @@ How `MainWindow` (v0.5 layout) is wired against this contract. Every action has 
 | --- | --- | --- | --- | --- |
 | Print | `action_print` | File > Print..., toolbar `printer` | Ctrl+P | Live: `printing.print_document(self, view.doc_path, view.current_page, password)`; errors go to the status bar |
 | Presentation | `action_presentation` | View > Presentation, overflow menu | F5 | Live: `PresentationWindow(...).present()`; one at a time, F5 again raises it; on close the viewer goes to the last shown page |
-| Page layout | `action_page_mode_single`, `_continuous`, `_two_page`, `_two_page_cover` | View > Page Layout, overflow menu | - | Waiting for Phase B: disabled until the view has `set_page_mode` and `page_mode` |
-| Reading mode | `action_color_mode_normal`, `_night`, `_sepia` | View > Reading Mode, overflow menu | - | Waiting for Phase B: disabled until the view has `set_color_mode` and `color_mode` |
-| Back / forward | `action_go_back`, `action_go_forward` | Go > Back / Forward, overflow menu | Alt+Left / Alt+Right | Waiting for Phase B: disabled until the view has `go_back`, `go_forward`, `can_go_back`, `can_go_forward`; enabled per `can_go_*()` |
-| Password | - | prompt on open | - | Waiting for Phase B: used when the view has `password_required` |
+| Page layout | `action_page_mode_single`, `_continuous`, `_two_page`, `_two_page_cover` | View > Page Layout, overflow menu | - | Live: checked state follows `page_mode_changed`; persisted per document |
+| Reading mode | `action_color_mode_normal`, `_night`, `_sepia` | View > Reading Mode, overflow menu | - | Live: checked state follows `color_mode_changed`; persisted per document; thumbnails re-render in the reading colours |
+| Back / forward | `action_go_back`, `action_go_forward` | Go > Back / Forward, overflow menu | Alt+Left / Alt+Right | Live: enabled from `history_changed` / `can_go_*()` |
+| Password | - | prompt on open | - | Live: `PasswordDialog`, up to `MAX_ATTEMPTS`; the password reaches print and presentation via `document_password()` |
 
-How the Phase B hooks work, so the methods only need to appear on `PdfView`:
+How the wiring works (it still degrades to disabled actions for a view without the API):
 
 - `MainWindow._update_capability_actions()` runs on every status update (tab switch, open,
   zoom, page change). Each group is enabled only when the current view has the methods

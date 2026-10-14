@@ -80,6 +80,7 @@ from neoview.ui.annotation_toolbar import AnnotationToolbar
 from neoview.ui.chrome import HIT_TARGET, TOOLBAR_ICON, IconBinder, install_chrome_stylesheet
 from neoview.ui.dialogs import AnnotationPropertiesDialog, ExportDialog, LayoutGridDialog
 from neoview.ui.inspector import InspectorPanel, PanelTitleBar
+from neoview.ui.page_modes import apply_color_mode
 from neoview.ui.pdf_view import PdfView, ToolMode
 from neoview.ui.sidebar import Sidebar
 from neoview.ui.statusbar import ViewerStatusBar
@@ -289,6 +290,9 @@ class MainWindow(QMainWindow):
             signal = getattr(view, name, None)
             if signal is not None:
                 signal.connect(lambda *_args, v=view: self._on_view_capability_changed(v))
+        color_signal = getattr(view, "color_mode_changed", None)
+        if color_signal is not None:
+            color_signal.connect(lambda _mode, v=view: self._on_view_color_mode_changed(v))
         password_signal = getattr(view, "password_required", None)
         if password_signal is not None:
             password_signal.connect(lambda path, v=view: self._on_view_password_required(v, path))
@@ -2577,7 +2581,9 @@ class MainWindow(QMainWindow):
             return
 
         source_path = ctx.file_path or view.doc_path
-        self._thumb_source_key = os.path.abspath(source_path) if source_path else f"doc-{id(doc)}"
+        source_key = os.path.abspath(source_path) if source_path else f"doc-{id(doc)}"
+        # Thumbnails follow the view's reading colours, so the mode is part of the cache key.
+        self._thumb_source_key = f"{source_key}|{self._view_color_mode(view)}"
         self._thumb_icon_cache = {k: v for k, v in self._thumb_icon_cache.items() if k[0] == self._thumb_source_key}
 
         # The panel is hidden by default. Building one list item per page (and
@@ -2707,6 +2713,9 @@ class MainWindow(QMainWindow):
                         pix.stride,
                         QImage.Format.Format_RGB888,
                     ).copy()
+                    color_mode = self._view_color_mode(view)
+                    if color_mode != "normal":
+                        image = apply_color_mode(image, color_mode)
                     painter = QPainter(image)
                     painter.setPen(QColor(theme.tokens()["border_strong"]))
                     painter.drawRect(0, 0, image.width() - 1, image.height() - 1)
@@ -3168,6 +3177,15 @@ class MainWindow(QMainWindow):
         can_history = has_doc and self._view_supports(view, "go_back", "go_forward", "can_go_back", "can_go_forward")
         self._back_action.setEnabled(bool(can_history and view.can_go_back()))
         self._forward_action.setEnabled(bool(can_history and view.can_go_forward()))
+
+    def _view_color_mode(self, view: PdfView) -> str:
+        getter = getattr(view, "color_mode", None)
+        return str(getter()) if callable(getter) else "normal"
+
+    def _on_view_color_mode_changed(self, view: PdfView):
+        # Re-render the thumbnails in the new reading colours (cached per mode).
+        if self._is_current_view(view):
+            self._populate_thumbnails()
 
     def _on_view_capability_changed(self, view: PdfView):
         if self._is_current_view(view):
