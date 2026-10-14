@@ -58,14 +58,11 @@ Rebuild from the tagged commit so the artifacts match the version, then upload. 
 `~/.pypirc`; never print or copy its contents.
 
 ```bash
-rm -rf dist build src/*.egg-info
-.venv/bin/python -m build
-.venv/bin/python -m twine check dist/*
-.venv/bin/python -m twine upload dist/neoview-<version>.tar.gz dist/neoview-<version>-py3-none-any.whl
+./publish.sh
 ```
 
-Not `./publish.sh`: it pip-installs into the system `python3`, which PEP 668 blocks on current
-Ubuntu, so it exits before uploading.
+It cleans `dist/`, builds with the repo `.venv`, runs `twine check`, and uploads everything in
+`dist/`. Check the build output names `neoview-<version>` before confirming.
 
 ## 5. Verify
 
