@@ -46,13 +46,7 @@ from neoview.ui import icons
 from neoview.ui.annotation_item import AnnotationItem
 from neoview.ui.navigation_history import HistoryEntry, NavigationHistory
 from neoview.ui.page_item import PageItem, new_doc_token, release_freed_memory
-from neoview.ui.page_modes import (
-    COLOR_MODES,
-    PAGE_MODES,
-    PageLayout,
-    apply_color_mode,
-    layout_pages,
-)
+from neoview.ui.page_modes import COLOR_MODES, PAGE_MODES, PageLayout, layout_pages
 from neoview.ui.password import unlock
 from neoview.ui.render_scheduler import RenderRequest, RenderScheduler
 from neoview.ui.selection import SelectionRect
@@ -702,6 +696,10 @@ class PdfView(QGraphicsView):
         if mode == self._color_mode:
             return
         self._color_mode = mode
+        # Renders queued or in flight are for the old colours: a new generation drops them
+        # (the document, its doc token and the pixmap cache stay).
+        self._render_scheduler.cancel_all()
+        self._render_generation += 1
         for page in self._pages:
             page.color_mode = mode
             if page.is_blank:
@@ -810,8 +808,8 @@ class PdfView(QGraphicsView):
         stale_zoom = abs(zoom - self._zoom) >= 0.01
         if stale_zoom and not item.is_preview:
             return  # the page already shows a real render; a newer one is queued
-        if item.color_mode != "normal":
-            image = apply_color_mode(image, item.color_mode)
+        # The scheduler already recoloured the image for the reading mode; set_color_mode
+        # starts a new generation, so an image of the old mode never gets here.
         item.apply_render(QPixmap.fromImage(image), zoom, factor, self._zoom)
         self._rendered_pages.add(page_index)
         if stale_zoom:
@@ -965,7 +963,8 @@ class PdfView(QGraphicsView):
                 continue
             if page.is_blank and page.show_best_cached_preview(self._zoom):
                 self._rendered_pages.add(idx)
-            requests.append(RenderRequest(idx, page._fitz_page, self._zoom, factor))
+            requests.append(RenderRequest(idx, page._fitz_page, self._zoom, factor,
+                                          page.color_mode))
         self._render_scheduler.schedule(requests, self._render_generation)
 
         lo = max(0, visible[0] - self.KEEP_RENDERED_PAGES)

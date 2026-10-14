@@ -24,7 +24,9 @@ from dataclasses import dataclass, field
 
 import fitz
 from PySide6.QtCore import QObject, QTimer, Signal
-from PySide6.QtGui import QImage
+from PySide6.QtGui import QImage, QPainter
+
+from neoview.ui.page_modes import apply_color_mode
 
 # Pixels per band. Vector pages are cheap to rasterise per band; pages with images pay a
 # (partial) image decode per band, so they get fewer, larger bands.
@@ -32,6 +34,8 @@ BAND_TARGET_PIXELS = 400_000
 IMAGE_BAND_TARGET_PIXELS = 1_500_000
 MAX_BANDS = 16
 BAND_OVERLAP_PX = 3
+# Pixels per step when recolouring a finished page for a reading mode (night/sepia).
+COLOR_STRIP_PIXELS = 400_000
 # Work done per event-loop turn before yielding back to input and painting.
 TICK_BUDGET_S = 0.008
 
@@ -62,12 +66,14 @@ class RenderRequest:
     page: fitz.Page
     zoom: float
     factor: float
+    color_mode: str = "normal"  # page_modes.COLOR_MODES; applied before delivery
 
     def same_target(self, other: RenderRequest) -> bool:
         return (
             self.page_index == other.page_index
             and abs(self.zoom - other.zoom) < 1e-6
             and abs(self.factor - other.factor) < 1e-6
+            and self.color_mode == other.color_mode
         )
 
 
@@ -80,9 +86,15 @@ class _Job:
     target: fitz.Pixmap | None = None
     clips: list[fitz.Rect] = field(default_factory=list)
     next_band: int = 0
+    # Reading-mode recolouring runs after the bands, in strips of rows, on this image.
+    colored: QImage | None = None
+    strips: list[tuple[int, int]] = field(default_factory=list)
+    next_strip: int = 0
 
     def step(self) -> bool:
         """Do one slice of work. Return True when the page image is complete."""
+        if self.colored is not None:
+            return self._color_step()
         if self.displaylist is None:
             req = self.request
             page = req.page
@@ -116,9 +128,41 @@ class _Job:
             own_rows.y1 = full.y1
         self.target.copy(band, own_rows)
         self.next_band += 1
-        return self.next_band >= len(self.clips)
+        if self.next_band < len(self.clips):
+            return False
+        if self.request.color_mode == "normal":
+            return True
+        # Recolour in strips, so a night/sepia page does not stall the GUI in one go (a
+        # whole A4 page at 200% on a 2x screen takes ~100 ms).
+        self.colored = self._raw_image()
+        width = max(1, self.colored.width())
+        rows = max(1, COLOR_STRIP_PIXELS // width)
+        height = self.colored.height()
+        self.strips = [(y, min(rows, height - y)) for y in range(0, height, rows)]
+        self.next_strip = 0
+        self.displaylist = None
+        self.target = None
+        return not self.strips
+
+    def _color_step(self) -> bool:
+        y, h = self.strips[self.next_strip]
+        image = self.colored
+        strip = apply_color_mode(image.copy(0, y, image.width(), h), self.request.color_mode)
+        painter = QPainter(image)
+        try:
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
+            painter.drawImage(0, y, strip)
+        finally:
+            painter.end()
+        self.next_strip += 1
+        return self.next_strip >= len(self.strips)
 
     def image(self) -> QImage:
+        if self.colored is not None:
+            return self.colored
+        return self._raw_image()
+
+    def _raw_image(self) -> QImage:
         pix = self.target
         img = QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format.Format_RGB888)
         # convertToFormat returns an image that owns its pixels, so the fitz buffer can go.
@@ -128,6 +172,7 @@ class _Job:
         self.displaylist = None
         self.target = None
         self.matrix = None
+        self.colored = None
 
 
 class RenderScheduler(QObject):
