@@ -1,5 +1,6 @@
 /*
- * NeoView site: theme toggle, theme-aware screenshots, copy buttons.
+ * NeoView site: theme toggle, theme-aware screenshots, copy buttons, feature clips,
+ * demo chapters.
  * Plain JS, no dependencies. Screenshot data lives in screens.js.
  */
 (function () {
@@ -164,6 +165,101 @@
       });
     });
   });
+
+  /* ---------- Feature clips ---------- */
+
+  var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var loops = Array.prototype.slice.call(document.querySelectorAll('video.loop'));
+
+  function setPoster(video) {
+    var poster = video.getAttribute('data-poster');
+    if (poster && !video.getAttribute('poster')) video.setAttribute('poster', poster);
+  }
+
+  function addPauseButton(video) {
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'clip-toggle';
+    function sync() {
+      var paused = video.paused;
+      btn.setAttribute('aria-label', paused ? 'Play clip' : 'Pause clip');
+      btn.setAttribute('title', paused ? 'Play' : 'Pause');
+      btn.classList.toggle('is-paused', paused);
+    }
+    btn.innerHTML = '<svg class="i-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14"/></svg>' +
+      '<svg class="i-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4l13 8-13 8z"/></svg>';
+    btn.addEventListener('click', function () {
+      if (video.paused) {
+        video.setAttribute('data-user', 'play');
+        video.play().catch(function () {});
+      } else {
+        video.setAttribute('data-user', 'pause');
+        video.pause();
+      }
+    });
+    video.addEventListener('play', sync);
+    video.addEventListener('pause', sync);
+    video.parentElement.appendChild(btn);
+    sync();
+  }
+
+  if (loops.length) {
+    loops.forEach(function (video) {
+      video.removeAttribute('controls'); /* JS supplies a play/pause button instead */
+      addPauseButton(video);
+    });
+    if ('IntersectionObserver' in window) {
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (entry) {
+          var video = entry.target;
+          if (entry.isIntersecting) {
+            setPoster(video);
+            if (!reduceMotion && video.getAttribute('data-user') !== 'pause') {
+              video.play().catch(function () {});
+            }
+          } else if (!video.paused) {
+            video.pause();
+          }
+        });
+      }, { rootMargin: '200px 0px', threshold: 0.25 });
+      loops.forEach(function (v) { io.observe(v); });
+    } else {
+      loops.forEach(setPoster);
+    }
+  }
+
+  /* ---------- Demo chapters ---------- */
+
+  var demo = document.getElementById('demo-video');
+  if (demo) {
+    var chapterButtons = Array.prototype.slice.call(document.querySelectorAll('.chapters [data-t]'));
+    chapterButtons.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var t = parseFloat(btn.getAttribute('data-t')) || 0;
+        demo.preload = 'auto';
+        var seek = function () {
+          demo.currentTime = t + 0.05;
+          demo.play().catch(function () {});
+        };
+        if (demo.readyState >= 1) seek();
+        else {
+          demo.addEventListener('loadedmetadata', seek, { once: true });
+          demo.load();
+        }
+      });
+    });
+    demo.addEventListener('timeupdate', function () {
+      var now = demo.currentTime;
+      var current = null;
+      chapterButtons.forEach(function (btn) {
+        if (parseFloat(btn.getAttribute('data-t')) <= now + 0.1) current = btn;
+      });
+      chapterButtons.forEach(function (btn) {
+        if (btn === current) btn.setAttribute('aria-current', 'true');
+        else btn.removeAttribute('aria-current');
+      });
+    });
+  }
 
   /* ---------- Init ---------- */
 
