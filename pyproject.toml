@@ -59,6 +59,7 @@ neoview = [
     "assets/*.png",
     "assets/*.ico",
     "assets/icons/*",
+    "assets/fonts/*",
 ]
 
 [tool.pytest.ini_options]
