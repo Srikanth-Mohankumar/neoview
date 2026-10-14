@@ -14,18 +14,20 @@ copy for the disabled state. Results are cached per (name, colour, size).
 
 from __future__ import annotations
 
-import os
 from importlib import resources
 
 from PySide6.QtCore import QByteArray, QRectF, Qt
 from PySide6.QtGui import QGuiApplication, QIcon, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 
+from neoview import theme
+
 ICON_PACKAGE = "neoview.assets"
 ICON_SUBDIR = "icons"
 
 # Default glyph colours per theme mode (the app sets QApplication property "theme_mode").
-DEFAULT_COLORS = {"light": "#3c3f44", "dark": "#d6d8dc"}
+# One source of truth: the theme's text token (neoview.theme.icon_color).
+DEFAULT_COLORS = {"light": theme.icon_color("light"), "dark": theme.icon_color("dark")}
 
 # Opacity of the disabled-state glyph relative to the normal one.
 DISABLED_OPACITY = 0.38
@@ -101,11 +103,7 @@ def default_color() -> str:
     Reads the QApplication property "theme_mode" (set by app.main); when that is unset,
     falls back to the NEOVIEW_THEME environment variable app.main derives it from, then light.
     """
-    app = QGuiApplication.instance()
-    mode = str(app.property("theme_mode") or "").lower() if app is not None else ""
-    if not mode:
-        mode = os.environ.get("NEOVIEW_THEME", "").strip().lower()
-    return DEFAULT_COLORS.get(mode, DEFAULT_COLORS["light"])
+    return theme.icon_color(theme.current_mode())
 
 
 def _renderer(name: str, tint: str) -> QSvgRenderer:

@@ -57,7 +57,7 @@ def main() -> int:
     app = QApplication.instance() or QApplication(sys.argv)
 
     import neoview.ui.main_window as main_window_mod
-    from neoview.theme import DARK_STYLE, LIGHT_STYLE
+    from neoview.theme import apply_theme
     from neoview.ui.main_window import MainWindow
     from neoview.ui.pdf_view import ToolMode
 
@@ -67,7 +67,7 @@ def main() -> int:
     ini_path = str(work / "neoview-settings.ini")
     main_window_mod.QSettings = lambda *_a, **_k: QSettings(ini_path, QSettings.Format.IniFormat)
 
-    app.setStyleSheet(DARK_STYLE if args.theme == "dark" else LIGHT_STYLE)
+    apply_theme(app, args.theme)  # same setup as app.main: Fusion, palette, Inter, stylesheet
 
     pdf = Path(args.pdf).resolve() if args.pdf else work / "smoke.pdf"
     if not args.pdf:
