@@ -150,7 +150,7 @@ class PdfView(QGraphicsView):
         self._annotate_freehand_points: list[list[float]] = []
         self._annotate_freehand_path_item: QGraphicsPathItem | None = None
 
-        self._page_links: list[list[tuple[QRectF, dict]]] = []
+        self._page_links: list[list[tuple[QRectF, dict]] | None] = []
         self._hover_link: dict | None = None
         self._pressed_link: dict | None = None
         self._pressed_pos: QPointF | None = None
@@ -587,24 +587,31 @@ class PdfView(QGraphicsView):
         self._update_measure_badge()
 
     def _cache_page_links(self):
-        self._page_links = []
-        for page_item in self._pages:
-            links: list[tuple[QRectF, dict]] = []
-            try:
-                for link in page_item._fitz_page.get_links():
-                    src = link.get("from")
-                    if not src:
-                        continue
-                    rect = QRectF(src.x0, src.y0, src.width, src.height)
-                    if rect.width() <= 0 or rect.height() <= 0:
-                        continue
-                    kind = link.get("kind")
-                    has_internal_target = isinstance(link.get("page"), int) or bool(link.get("to"))
-                    if kind in (fitz.LINK_URI, fitz.LINK_GOTO, fitz.LINK_NAMED) or has_internal_target:
-                        links.append((rect, link))
-            except Exception:
-                pass
-            self._page_links.append(links)
+        # Links are read per page on first hover (_links_for_page): reading every page's
+        # links up front costs time proportional to the page count when opening a book.
+        self._page_links = [None] * len(self._pages)
+
+    def _links_for_page(self, page_idx: int) -> list[tuple[QRectF, dict]]:
+        cached = self._page_links[page_idx]
+        if cached is not None:
+            return cached
+        links: list[tuple[QRectF, dict]] = []
+        try:
+            for link in self._pages[page_idx]._fitz_page.get_links():
+                src = link.get("from")
+                if not src:
+                    continue
+                rect = QRectF(src.x0, src.y0, src.width, src.height)
+                if rect.width() <= 0 or rect.height() <= 0:
+                    continue
+                kind = link.get("kind")
+                has_internal_target = isinstance(link.get("page"), int) or bool(link.get("to"))
+                if kind in (fitz.LINK_URI, fitz.LINK_GOTO, fitz.LINK_NAMED) or has_internal_target:
+                    links.append((rect, link))
+        except Exception:
+            pass
+        self._page_links[page_idx] = links
+        return links
 
     def _visible_page_indices(self, overscan: int = 0) -> list[int]:
         if not self._pages:
@@ -1367,7 +1374,7 @@ class PdfView(QGraphicsView):
         if page_idx < 0 or page_idx >= len(self._page_links):
             return None
         page_pos = self._scene_to_page(scene_pos, page_idx)
-        for rect, link in self._page_links[page_idx]:
+        for rect, link in self._links_for_page(page_idx):
             if rect.contains(page_pos):
                 return {"page_idx": page_idx, "rect": rect, "link": link}
         return None
