@@ -2,7 +2,7 @@
 
 Usage (from the repo root):
     .venv/bin/python .claude/skills/smoke-test-ui/scripts/smoke.py --out <dir> [--pdf file.pdf]
-        [--theme light|dark] [--visible]
+        [--theme light|dark] [--size 1280x800] [--visible]
 
 Runs offscreen unless --visible. MainWindow's QSettings is replaced with a temp INI
 file so the user's real recent files, session and window state are never touched.
@@ -32,6 +32,7 @@ def make_pdf(path: Path) -> None:
         page.insert_text((72, 100), f"NeoView smoke test - page {i + 1}", fontsize=18)
         page.insert_text((72, 140), f"The {NEEDLE} is on every page.", fontsize=12)
         page.draw_rect(fitz.Rect(72, 200, 272, 300), color=(0, 0, 1))
+    doc.set_toc([[1, "Introduction", 1], [2, "Background", 1], [1, "Method", 2], [1, "Results", 3]])
     doc.save(str(path))
     doc.close()
 
@@ -41,8 +42,10 @@ def main() -> int:
     ap.add_argument("--out", required=True, help="directory for screenshots")
     ap.add_argument("--pdf", help="PDF to open (default: a generated 3-page PDF)")
     ap.add_argument("--theme", choices=["light", "dark"], default="light")
+    ap.add_argument("--size", default="1280x800", help="window size, WIDTHxHEIGHT")
     ap.add_argument("--visible", action="store_true", help="show a real window")
     args = ap.parse_args()
+    width, height = (int(v) for v in args.size.lower().split("x"))
 
     if not args.visible:
         os.environ["QT_QPA_PLATFORM"] = "offscreen"
@@ -51,7 +54,7 @@ def main() -> int:
     out.mkdir(parents=True, exist_ok=True)
     work = Path(tempfile.mkdtemp(prefix="neoview-smoke-"))
 
-    from PySide6.QtCore import QRectF, QSettings
+    from PySide6.QtCore import QPoint, QRectF, QSettings
     from PySide6.QtWidgets import QApplication
 
     app = QApplication.instance() or QApplication(sys.argv)
@@ -80,7 +83,7 @@ def main() -> int:
             time.sleep(0.01)
 
     win = MainWindow()
-    win.resize(1280, 800)
+    win.resize(width, height)
     win.show()
     pump()
 
@@ -93,15 +96,23 @@ def main() -> int:
         win.grab().save(str(path))
         return str(path)
 
-    def step(name, fn):
+    def step(name, fn, grab=None):
         try:
             detail = fn() or ""
-            results.append({"step": name, "ok": True, "detail": detail, "shot": shot(name)})
+            results.append({"step": name, "ok": True, "detail": detail, "shot": (grab or shot)(name)})
         except Exception as exc:  # report every failure, keep going
             results.append({
                 "step": name, "ok": False, "detail": f"{type(exc).__name__}: {exc}",
                 "trace": traceback.format_exc(limit=3), "shot": shot(name),
             })
+
+    def empty_state():
+        view = win.current_view()
+        assert view.document is None, "a document is open before the first step"
+        welcome = getattr(win, "_welcome", None)
+        if welcome is not None:
+            assert welcome.isVisible(), "welcome panel not shown without a document"
+        return "no document"
 
     def open_doc():
         win._open_file(str(pdf))
@@ -132,7 +143,7 @@ def main() -> int:
         return f"last={last}"
 
     def search():
-        win._search_dock.show()
+        win._set_search_panel_visible(True)
         win._search_input.setText(NEEDLE)
         win._execute_search_current()
         pump(300)
@@ -152,15 +163,60 @@ def main() -> int:
         r = view.selection_rect
         return f"{r.width():.1f} x {r.height():.1f} pt"
 
+    def inspector():
+        win._set_search_panel_visible(False)
+        win._set_inspector_visible(True)
+        pump(300)
+        assert win._info_dock.isVisible(), "inspector not visible"
+        return f"W {win._measure_w.text()}, H {win._measure_h.text()}"
+
+    def sidebar(key):
+        def run():
+            win._set_inspector_visible(False)
+            win._show_sidebar_page(key)
+            pump(400)
+            assert win._sidebar_dock.isVisible(), "sidebar not visible"
+            assert win._sidebar.current_key() == key, f"sidebar shows {win._sidebar.current_key()}"
+            return key
+        return run
+
+    def menus():
+        names = []
+        for action in win.menuBar().actions():
+            menu = action.menu()
+            if menu is None:
+                continue
+            geo = win.menuBar().actionGeometry(action)
+            menu.popup(win.menuBar().mapToGlobal(QPoint(geo.left(), geo.bottom())))
+            pump(150)
+            name = action.text().replace("&", "").lower()
+            menu.grab().save(str(out / f"menu-{name}.png"))
+            menu.hide()
+            names.append(name)
+        overflow = getattr(win, "_overflow_menu", None)
+        if overflow is not None:
+            overflow.popup(win.mapToGlobal(QPoint(width - 260, 60)))
+            pump(150)
+            overflow.grab().save(str(out / "menu-overflow.png"))
+            overflow.hide()
+            names.append("overflow")
+        assert names, "no menus"
+        return ", ".join(names)
+
     def reload_doc():
         view = win.current_view()
         assert view.reload_document(), "reload_document returned False"
         pump(300)
         return f"{view.page_count} pages after reload"
 
+    step("empty", empty_state)
     for name, fn in [("open", open_doc), ("zoom", zoom), ("navigate", navigate),
-                     ("search", search), ("measure", measure), ("reload", reload_doc)]:
+                     ("search", search), ("measure", measure), ("inspector", inspector),
+                     ("sidebar-thumbnails", sidebar("thumbnails")), ("sidebar-outline", sidebar("outline")),
+                     ("sidebar-bookmarks", sidebar("bookmarks")),
+                     ("sidebar-annotations", sidebar("annotations")), ("reload", reload_doc)]:
         step(name, fn)
+    step("menus", menus)
 
     win.close()
     pump()

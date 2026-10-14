@@ -124,7 +124,8 @@ def test_open_refreshes_outline_once(book_pdf, qtbot, monkeypatch):
 
 def test_hidden_thumbnail_panel_builds_nothing_until_shown(book_pdf, qtbot):
     win = _window(qtbot)
-    assert not win._thumbs_dock.isVisible()
+    # Thumbnails live in the sidebar, which is closed by default.
+    assert not win._thumbs_list.isVisible()
     win._open_file(str(book_pdf))
     _pump()
     win.current_view().go_to_page(300)
@@ -133,7 +134,7 @@ def test_hidden_thumbnail_panel_builds_nothing_until_shown(book_pdf, qtbot):
     assert win._thumbs_list.count() == 0
     assert not win._thumb_icon_cache
 
-    win._thumbs_dock.show()
+    win._show_sidebar_page("thumbnails")
     _pump()
     assert win._thumbs_list.count() == PAGES
     qtbot.waitUntil(lambda: len(win._thumb_icon_cache) > 0, timeout=5000)
@@ -191,7 +192,7 @@ def test_search_finds_term_on_late_page(book_pdf, qtbot):
 
 def test_close_while_background_work_pending(book_pdf, qtbot):
     win = _window(qtbot)
-    win._thumbs_dock.show()
+    win._show_sidebar_page("thumbnails")
     win._open_file(str(book_pdf))
     win._search_input.setText(NEEDLE)
     win._execute_search_current()

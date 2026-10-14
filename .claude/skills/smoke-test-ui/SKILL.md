@@ -17,8 +17,12 @@ still draw a blank page, a broken dock or an unreadable dark theme. This skill r
 ```
 
 Options: `--pdf <file>` to use a real document instead of the generated 3-page one (the
-search step then only reports the hit count); `--visible` to show a real window when the user
-wants to watch.
+search step then only reports the hit count); `--size 1024x700` to check the smaller layout
+(default 1280x800); `--visible` to show a real window when the user wants to watch.
+
+Steps: empty state, open, zoom, navigate, search (results panel), measure, inspector, each
+sidebar panel (thumbnails, outline, bookmarks, annotations), reload, then every menu bar
+menu and the toolbar overflow menu, each grabbed to `menu-<name>.png`.
 
 Write screenshots to the session scratchpad, never into the repo.
 
@@ -34,11 +38,13 @@ The script prints one JSON line per step (`ok`, `detail`, `shot`) and a final su
 exit code 1 means a step failed. A pass is necessary, not sufficient - open the screenshots
 with the Read tool and check what the change was supposed to affect:
 
-- page content rendered (not blank or grey), one tab per opened file
+- page content rendered (not blank or grey); the tab bar only appears with 2+ documents
 - zoom percentage in the toolbar and status bar agree
-- search hits highlighted on the page and listed in the Search dock
-- the measure rectangle and its W/H/X/Y badge drawn on the page
-- in the dark theme: text readable in docks, toolbar and dialogs
+- search hits highlighted on the page, counted in the toolbar field and listed in the
+  Search Results panel
+- the measure rectangle and its W/H/X/Y badge drawn on the page, and W x H in the status bar
+- the toolbar fits in one row at 1024 px; nothing clipped in the inspector or sidebar
+- in the dark theme: text and icons readable in panels, toolbar, menus and dialogs
 
 ## Extend
 

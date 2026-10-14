@@ -219,14 +219,12 @@ class TestPageNavCombo:
         QApplication.processEvents()
         assert win.current_view().current_page == 0
 
-        # Programmatically set the combo text to "2" WITHOUT pressing Enter
+        # Programmatically set the page field text to "2" WITHOUT pressing Enter
         # This simulates typing a single character mid-word.
-        line = win._page_nav_combo.lineEdit()
-        win._page_nav_combo.blockSignals(True)  # block combo's own activated signal
+        line = win._page_input
         line.blockSignals(True)
         line.setText("2")
         line.blockSignals(False)
-        win._page_nav_combo.blockSignals(False)
         QApplication.processEvents()
 
         assert win.current_view().current_page == 0, (
@@ -258,7 +256,7 @@ class TestPageNavCombo:
         win.current_view().go_to_page(0)
         QApplication.processEvents()
 
-        line = win._page_nav_combo.lineEdit()
+        line = win._page_input
         line.setText("abc")
         line.returnPressed.emit()
         QApplication.processEvents()

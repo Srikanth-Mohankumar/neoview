@@ -8,7 +8,17 @@ from PySide6.QtWidgets import QApplication
 
 from neoview.ui import icons
 
-MAIN_WINDOW = Path(icons.__file__).with_name("main_window.py")
+UI_DIR = Path(icons.__file__).parent
+
+# Every way UI code names a bundled icon: icons.icon("x"), self._icon("x"),
+# binder.bind(widget, "x"), _action(..., icon="x") and Sidebar.add_page(key, "x", ...).
+_ICON_CALLS = (
+    r'icons\.icon\(\s*"([^"]+)"',
+    r'self\._icon\(\s*"([^"]+)"',
+    r'\.bind\(\s*[^,()]+,\s*"([^"]+)"',
+    r'\bicon="([^"]+)"',
+    r'add_page\(\s*"[^"]+",\s*"([^"]+)"',
+)
 
 
 def _opaque_pixels(image: QImage) -> int:
@@ -49,9 +59,13 @@ def test_every_mapped_name_has_a_bundled_svg():
 
 
 def test_main_window_icon_names_are_all_mapped():
-    source = MAIN_WINDOW.read_text(encoding="utf-8")
-    requested = set(re.findall(r'self\._icon\(\s*"([^"]+)"', source))
-    assert requested, "expected MainWindow to request icons via self._icon(...)"
+    # The main window is split over several ui/ modules; scan them all.
+    requested: set[str] = set()
+    for path in sorted(UI_DIR.glob("*.py")):
+        source = path.read_text(encoding="utf-8")
+        for pattern in _ICON_CALLS:
+            requested.update(re.findall(pattern, source))
+    assert len(requested) >= 20, f"expected the UI to request bundled icons, found {sorted(requested)}"
     bundled = set(icons.available_icons())
     unresolved = {n for n in requested if icons.resolve_name(n) not in bundled}
     assert not unresolved
