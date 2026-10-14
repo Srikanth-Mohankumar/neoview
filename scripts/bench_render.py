@@ -5,19 +5,24 @@ Not collected by pytest. Run from the repo root:
     .venv/bin/python scripts/bench_render.py --runs 5 [--json out.json]
 
 Each trial runs in a fresh subprocess (offscreen Qt) so caches, RSS and import cost do not
-leak between trials. Two generated 100-page documents are measured:
+leak between trials. Generated documents:
 
-- ``vector``: text paragraphs and many vector shapes on every page;
-- ``images``: the same, plus a large photo-like image on every 10th page.
+- ``vector``: 100 pages, text paragraphs and many vector shapes on every page;
+- ``images``: the same, plus a large (2400x1800) photo-like image on every 10th page;
+- ``book``: 650 pages of dense text (a long book);
+- ``book-images``: the same, plus a distinct 1500x1000 image on every page.
 
 Metrics per trial (wall clock, seconds unless noted):
 
+- ``open_responsive``: ``open_document`` call -> a ``QTimer.singleShot(0)`` posted right
+  after it fires, i.e. how long the GUI is unresponsive when a document opens;
 - ``open_first_paint``: ``open_document`` call -> page 1 shown sharp and painted;
 - ``zoom_call``: time the ``set_zoom(2.0)`` call itself blocks the GUI thread;
 - ``zoom_sharp``: fit-width -> 200% zoom until every visible page is sharp;
 - ``zoom_max_stall``: longest GUI event-loop stall (ms) between the zoom and sharp pages;
 - ``scroll_total``: scroll top -> end at 200% in viewport-height steps, pumping events for
-  one 60 Hz frame per step (an idealised fast scroll);
+  one 60 Hz frame per step (an idealised fast scroll); for the 650-page books only the
+  first 100 pages are scrolled, to keep a trial short;
 - ``scroll_max_stall``: longest GUI event-loop stall (ms) during that scroll;
 - ``end_sharp``: after the scroll stops, time until the visible pages are sharp;
 - ``read_max_stall``: page-by-page reading from the middle of the document: 12 steps of one
@@ -42,9 +47,10 @@ import tempfile
 import time
 from pathlib import Path
 
-N_PAGES = 100
-VARIANTS = ("vector", "images")
+VARIANTS = ("vector", "images", "book", "book-images")
+SCROLL_PAGES = 100
 METRICS = (
+    "open_responsive",
     "open_first_paint",
     "zoom_call",
     "zoom_sharp",
@@ -55,34 +61,67 @@ METRICS = (
     "read_max_stall",
     "read_sharp",
     "peak_rss_mb",
+    "loadavg_1m",
 )
+
+
+def _photo(w: int, h: int):
+    """Deterministic photo-like RGB pixmap (smooth gradients and a xor texture)."""
+    import fitz
+
+    rows = []
+    for y in range(h):
+        row = bytearray(w * 3)
+        for x in range(0, w * 3, 3):
+            px = x // 3
+            row[x] = (px * 255 // w) & 0xFF
+            row[x + 1] = (y * 255 // h) & 0xFF
+            row[x + 2] = ((px ^ y) >> 2) & 0xFF
+        rows.append(bytes(row))
+    return fitz.Pixmap(fitz.csRGB, w, h, b"".join(rows), False)
+
+
+def make_book(path: Path, with_images: bool, n_pages: int = 650) -> None:
+    import fitz
+
+    doc = fitz.open()
+    base = _photo(1500, 1000) if with_images else None
+    words = ("lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor "
+             "incididunt ut labore et dolore magna aliqua ut enim ad minim veniam").split()
+    for i in range(n_pages):
+        page = doc.new_page(width=595, height=842)
+        page.insert_text((72, 56), f"Chapter {i // 20 + 1} - page {i + 1}", fontsize=11)
+        y = 80.0
+        n_lines = 30 if with_images else 62
+        if with_images:
+            pix = fitz.Pixmap(base, 0)  # copy without alpha
+            # Make every page's image distinct so MuPDF cannot share one decode.
+            pix.invert_irect(fitz.IRect(0, (i * 7) % 900, 1500, (i * 7) % 900 + 100))
+            page.insert_image(fitz.Rect(72, 470, 523, 770), stream=pix.tobytes("jpeg",
+                                                                              jpg_quality=85))
+        for k in range(n_lines):
+            line = " ".join(words[(i + k + j) % len(words)] for j in range(15))
+            page.insert_text((72, y), line, fontsize=9.5)
+            y += 12
+    doc.save(str(path), deflate=True, garbage=1)
+    doc.close()
 
 
 def make_pdf(path: Path, variant: str) -> None:
     import fitz
 
+    if variant.startswith("book"):
+        make_book(path, with_images=variant == "book-images")
+        return
     doc = fitz.open()
     image_bytes = None
     if variant == "images":
-        # Deterministic photo-like 2400x1800 RGB image (smooth gradients + stripes).
-        w, h = 2400, 1800
-        row = bytearray()
-        rows = []
-        for y in range(h):
-            row = bytearray(w * 3)
-            for x in range(0, w * 3, 3):
-                px = x // 3
-                row[x] = (px * 255 // w) & 0xFF
-                row[x + 1] = (y * 255 // h) & 0xFF
-                row[x + 2] = ((px ^ y) >> 2) & 0xFF
-            rows.append(bytes(row))
-        pix = fitz.Pixmap(fitz.csRGB, w, h, b"".join(rows), False)
-        image_bytes = pix.tobytes("jpeg", jpg_quality=90)
+        image_bytes = _photo(2400, 1800).tobytes("jpeg", jpg_quality=90)
     text = (
         "The quick brown fox jumps over the lazy dog. Pack my box with five dozen "
         "liquor jugs. Sphinx of black quartz, judge my vow. "
     ) * 3
-    for i in range(N_PAGES):
+    for i in range(100):
         page = doc.new_page(width=595, height=842)
         page.insert_text((72, 60), f"Benchmark page {i + 1}", fontsize=18)
         y = 90
@@ -159,14 +198,21 @@ def run_trial(pdf: Path) -> dict:
             p = view._pages[idx]
             if p.render_zoom <= 0 or abs(p.render_zoom - view.zoom) >= 0.01:
                 return False
+            if getattr(p, "is_preview", False):
+                return False
         return pending() == 0
 
-    def pump_until(pred, timeout: float = 60.0) -> float:
+    def pump_until(pred, timeout: float = 300.0) -> float:
         t0 = time.perf_counter()
         while not pred():
             app.processEvents()
             if time.perf_counter() - t0 > timeout:
-                raise TimeoutError("condition not reached")
+                state = [(i, round(view._pages[i].render_zoom, 3),
+                          getattr(view._pages[i], "is_preview", None))
+                         for i in view._visible_page_indices()]
+                raise TimeoutError(f"condition not reached: zoom={view.zoom} visible={state} "
+                                   f"pending={pending()} "
+                                   f"timer={view._rerender_timer.isActive()}")
             time.sleep(0.0005)
         return time.perf_counter()
 
@@ -181,11 +227,17 @@ def run_trial(pdf: Path) -> dict:
         return max((b - a) for a, b in zip(pts, pts[1:])) * 1000.0
 
     res: dict = {}
+    if hasattr(os, "getloadavg"):
+        res["loadavg_1m"] = os.getloadavg()[0]  # conditions, not a result
 
-    # 1. open -> first page painted sharp.
+    # 1. open -> event loop responsive again; open -> first page painted sharp.
+    responsive: list[float] = []
     t0 = time.perf_counter()
     view.open_document(str(pdf))
     view.fit_width()
+    QTimer.singleShot(0, lambda: responsive.append(time.perf_counter()))
+    pump_until(lambda: bool(responsive))
+    res["open_responsive"] = responsive[0] - t0
     pump_until(lambda: sharp() and paints and paints[-1] > t0)
     t_sharp = pump_until(lambda: paints[-1] > t0)
     res["open_first_paint"] = t_sharp - t0
@@ -210,8 +262,11 @@ def run_trial(pdf: Path) -> dict:
     pump_for(0.2)
     ticks.clear()
     step = max(1, view.viewport().height())
+    scroll_end = bar.maximum()
+    if view.page_count > SCROLL_PAGES:
+        scroll_end = min(scroll_end, int(view._page_positions[SCROLL_PAGES]))
     t0 = time.perf_counter()
-    while bar.value() < bar.maximum():
+    while bar.value() < scroll_end:
         bar.setValue(min(bar.maximum(), bar.value() + step))
         pump_for(1 / 60)
     t1 = time.perf_counter()
@@ -249,6 +304,8 @@ def environment() -> dict:
     import fitz
     import PySide6
 
+    import neoview
+
     cpu = platform.processor() or ""
     try:
         with open("/proc/cpuinfo", encoding="utf-8") as fh:
@@ -266,6 +323,7 @@ def environment() -> dict:
         "pyside6": PySide6.__version__,
         "platform": platform.platform(),
         "qpa": os.environ.get("QT_QPA_PLATFORM", "offscreen"),
+        "neoview": neoview.__file__,
     }
 
 
