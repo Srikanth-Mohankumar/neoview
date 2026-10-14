@@ -32,6 +32,10 @@ Metrics per trial (wall clock, seconds unless noted):
 - ``read_sharp``: median time per reading step until the visible pages are sharp;
 - ``peak_rss_mb``: ``ru_maxrss`` of the trial process (Linux reports KiB).
 
+``--memory-scroll`` instead reads every page of the two books at fit width (go to page,
+wait until it is sharp), reporting peak RSS while reading, RSS after ``close_document``,
+pages reached and whether the trial stopped at the 3000 MB safety limit (Linux only).
+
 "Sharp" means every visible PageItem shows an image rendered at the current zoom and the
 view reports no pending renders (``PdfView.pending_render_count`` when it exists).
 """
@@ -328,6 +332,77 @@ def run_trial(pdf: Path) -> dict:
     return res
 
 
+MEMORY_ABORT_MB = 3000
+MEMORY_METRICS = ("pages_visited", "aborted", "peak_rss_scroll_mb", "rss_after_close_mb",
+                  "seconds", "loadavg_1m")
+
+
+def _current_rss_mb() -> float:
+    try:
+        with open("/proc/self/statm", encoding="ascii") as fh:
+            return int(fh.read().split()[1]) * os.sysconf("SC_PAGE_SIZE") / 2**20
+    except (OSError, ValueError, AttributeError):  # not Linux
+        return float("nan")
+
+
+def run_memory_trial(pdf: Path) -> dict:
+    """Read the whole book page by page at fit width, waiting for each page to be sharp.
+
+    Stops early (``aborted`` = 1) once RSS passes MEMORY_ABORT_MB so a leaking build cannot
+    take the machine down.
+    """
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    import gc
+
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication(sys.argv)
+    from neoview.ui.pdf_view import PdfView
+
+    res: dict = {"loadavg_1m": os.getloadavg()[0] if hasattr(os, "getloadavg") else 0.0}
+    view = PdfView()
+    view.resize(1280, 800)
+    view.show()
+    app.processEvents()
+    view.open_document(str(pdf))
+    view.fit_width()
+
+    def sharp(idx: int) -> bool:
+        p = view._pages[idx]
+        if abs(p.render_zoom - view.zoom) >= 0.01 or getattr(p, "is_preview", False):
+            return False
+        fn = getattr(view, "pending_render_count", None)
+        return not callable(fn) or fn() == 0
+
+    t0 = time.perf_counter()
+    peak = 0.0
+    visited = 0
+    aborted = 0
+    for target in range(view.page_count):
+        view.go_to_page(target)
+        end = time.perf_counter() + 30
+        while not sharp(target) and time.perf_counter() < end:
+            app.processEvents()
+            time.sleep(0.0005)
+        visited = target + 1
+        rss = _current_rss_mb()
+        peak = max(peak, rss)
+        if rss > MEMORY_ABORT_MB:
+            aborted = 1
+            break
+    res["seconds"] = time.perf_counter() - t0
+    view.close_document()
+    for _ in range(5):
+        app.processEvents()
+    gc.collect()
+    res["rss_after_close_mb"] = _current_rss_mb()
+    res["peak_rss_scroll_mb"] = peak
+    res["pages_visited"] = float(visited)
+    res["aborted"] = float(aborted)
+    view.close()
+    return res
+
+
 def environment() -> dict:
     import fitz
     import PySide6
@@ -360,12 +435,26 @@ def main() -> int:
     ap.add_argument("--runs", type=int, default=5)
     ap.add_argument("--variants", default=",".join(VARIANTS))
     ap.add_argument("--json", help="write raw trials + medians here")
+    ap.add_argument("--memory-scroll", action="store_true",
+                    help="instead: read every page of the books and measure memory")
     ap.add_argument("--child", help=argparse.SUPPRESS)
+    ap.add_argument("--child-memory", help=argparse.SUPPRESS)
     args = ap.parse_args()
 
     if args.child:
         print(json.dumps(run_trial(Path(args.child))))
         return 0
+    if args.child_memory:
+        print(json.dumps(run_memory_trial(Path(args.child_memory))))
+        return 0
+
+    metrics = METRICS
+    child_flag = "--child"
+    if args.memory_scroll:
+        metrics = MEMORY_METRICS
+        child_flag = "--child-memory"
+        if args.variants == ",".join(VARIANTS):
+            args.variants = "book,book-images"
 
     work = Path(tempfile.mkdtemp(prefix="neoview-bench-"))
     env = dict(os.environ, QT_QPA_PLATFORM=os.environ.get("QT_QPA_PLATFORM", "offscreen"))
@@ -376,8 +465,8 @@ def main() -> int:
         trials = []
         for n in range(args.runs):
             proc = subprocess.run(
-                [sys.executable, __file__, "--child", str(pdf)],
-                capture_output=True, text=True, env=env, timeout=600,
+                [sys.executable, __file__, child_flag, str(pdf)],
+                capture_output=True, text=True, env=env, timeout=1800,
             )
             if proc.returncode != 0:
                 sys.stderr.write(proc.stdout + proc.stderr)
@@ -386,13 +475,13 @@ def main() -> int:
             trials.append(trial)
             print(f"{variant} run {n + 1}: " + ", ".join(f"{k}={v:.3f}" for k, v in trial.items()),
                   flush=True)
-        med = {k: statistics.median(t[k] for t in trials) for k in METRICS}
+        med = {k: statistics.median(t[k] for t in trials) for k in metrics}
         out["variants"][variant] = {"trials": trials, "median": med,
                                     "pdf_bytes": pdf.stat().st_size}
     print(json.dumps(out["env"]))
     print(f"\nmedians over {args.runs} runs")
     print("metric".ljust(18) + "".join(v.rjust(12) for v in out["variants"]))
-    for k in METRICS:
+    for k in metrics:
         print(k.ljust(18) + "".join(f"{out['variants'][v]['median'][k]:12.3f}"
                                     for v in out["variants"]))
     if args.json:
