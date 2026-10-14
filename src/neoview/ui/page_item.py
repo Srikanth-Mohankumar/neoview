@@ -6,8 +6,8 @@ from collections import OrderedDict
 
 import fitz
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QImage, QPixmap
-from PySide6.QtWidgets import QGraphicsDropShadowEffect, QGraphicsPixmapItem
+from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPixmap
+from PySide6.QtWidgets import QGraphicsPixmapItem
 
 
 class PageItem(QGraphicsPixmapItem):
@@ -19,6 +19,13 @@ class PageItem(QGraphicsPixmapItem):
     CACHE_LIMIT = 96
     _PIXMAP_CACHE: "OrderedDict[tuple, QPixmap]" = OrderedDict()
 
+    # Painted drop shadow: (spread, alpha) per layer, in screen pixels. A few translucent
+    # strips cost far less than QGraphicsDropShadowEffect, which re-renders the whole page
+    # into an offscreen buffer on every paint.
+    SHADOW_OFFSET_Y = 3.0
+    SHADOW_LAYERS = ((1.0, 34), (3.0, 20), (6.0, 11), (10.0, 5))
+    SHADOW_MARGIN = 14.0
+
     def __init__(self, page: fitz.Page, scale: float, page_index: int, lazy: bool = True):
         super().__init__()
         self.page_index = page_index
@@ -28,24 +35,60 @@ class PageItem(QGraphicsPixmapItem):
         self.render_scale_factor: float = self.BASE_RENDER_SCALE
         self.rotation_degrees: int = 0
         self.setTransformationMode(Qt.TransformationMode.SmoothTransformation)
-        self._shadow: QGraphicsDropShadowEffect | None = None
         if lazy:
-            # Defer the drop-shadow until first real render — Qt would otherwise
-            # allocate an offscreen buffer per page even for placeholders.
             self._set_placeholder(scale)
         else:
-            self._ensure_shadow()
             self._render(page, scale)
 
-    def _ensure_shadow(self) -> None:
-        if self._shadow is not None:
-            return
-        shadow = QGraphicsDropShadowEffect()
-        shadow.setBlurRadius(24.0)
-        shadow.setOffset(0.0, 4.0)
-        shadow.setColor(QColor(0, 0, 0, 140))
-        self.setGraphicsEffect(shadow)
-        self._shadow = shadow
+    # -- geometry and painting -----------------------------------------------------------
+
+    def setScale(self, scale: float) -> None:  # noqa: N802 - Qt API
+        # boundingRect includes a shadow margin measured in screen pixels, so it changes
+        # with the item scale.
+        self.prepareGeometryChange()
+        super().setScale(scale)
+
+    def _pixel_unit(self) -> float:
+        s = self.scale()
+        return 1.0 / s if s > 0 else 1.0
+
+    def boundingRect(self) -> QRectF:  # noqa: N802 - Qt API
+        unit = self._pixel_unit()
+        m = self.SHADOW_MARGIN * unit
+        return QRectF(self.pixmap().rect()).adjusted(-m, -m, m, m + self.SHADOW_OFFSET_Y * unit)
+
+    def shape(self) -> QPainterPath:
+        path = QPainterPath()
+        path.addRect(QRectF(self.pixmap().rect()))
+        return path
+
+    def contains(self, point: QPointF) -> bool:
+        return QRectF(self.pixmap().rect()).contains(point)
+
+    def paint(self, painter: QPainter, option, widget=None) -> None:
+        pm = self.pixmap()
+        if not pm.isNull():
+            unit = self._pixel_unit()
+            r = QRectF(pm.rect())
+            dy = self.SHADOW_OFFSET_Y * unit
+            painter.save()
+            painter.setPen(Qt.PenStyle.NoPen)
+            for spread, alpha in self.SHADOW_LAYERS:
+                d = spread * unit
+                outer = r.adjusted(-d, -d + dy, d, d + dy)
+                painter.setBrush(QColor(0, 0, 0, alpha))
+                # Four strips around the page; the page itself covers the middle.
+                top = max(outer.top(), r.top())
+                bottom = min(outer.bottom(), r.bottom())
+                if r.top() > outer.top():
+                    painter.drawRect(QRectF(outer.left(), outer.top(), outer.width(),
+                                            r.top() - outer.top()))
+                painter.drawRect(QRectF(outer.left(), r.bottom(), outer.width(),
+                                        outer.bottom() - r.bottom()))
+                painter.drawRect(QRectF(outer.left(), top, r.left() - outer.left(), bottom - top))
+                painter.drawRect(QRectF(r.right(), top, outer.right() - r.right(), bottom - top))
+            painter.restore()
+        super().paint(painter, option, widget)
 
     def _set_placeholder(self, scale: float) -> None:
         """Cheap aspect-correct placeholder so opening a long PDF doesn't render every page."""
@@ -98,7 +141,6 @@ class PageItem(QGraphicsPixmapItem):
             cls._PIXMAP_CACHE.popitem(last=False)
 
     def _render(self, page: fitz.Page, scale: float):
-        self._ensure_shadow()
         self.render_zoom = scale
         render_factor = self._effective_render_scale(page, scale)
         self.render_scale_factor = render_factor
