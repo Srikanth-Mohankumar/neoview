@@ -14,3 +14,7 @@ __pycache__/
 coverage.xml
 .idea/
 .vscode/
+
+# Personal Claude Code config
+.claude/settings.local.json
+CLAUDE.local.md
