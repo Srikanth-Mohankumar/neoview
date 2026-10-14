@@ -1034,11 +1034,11 @@ class PdfView(QGraphicsView):
             self.ZOOM_MODE_ACTUAL_SIZE,
         }:
             zoom_mode = self.ZOOM_MODE_CUSTOM
+        vbar = self.verticalScrollBar()
+        # At the very top (a document just opened, or fitted), stay at the top.
+        pin_top = anchor_vp is None and vbar.value() <= vbar.minimum()
         if anchor_vp is None:
             anchor_vp = self.viewport().rect().center()
-            if self.verticalScrollBar().value() <= self.verticalScrollBar().minimum():
-                # At the very top (a document just opened, or fitted): stay at the top.
-                anchor_vp.setY(0)
 
         if z == self._zoom or abs(z - self._zoom) < min_change:
             self._zoom_mode = zoom_mode
@@ -1046,7 +1046,7 @@ class PdfView(QGraphicsView):
                 anchor = anchor or self._zoom_anchor_at(anchor_vp)
                 self._zoom = z
                 self._layout_pages()
-                self._scroll_anchor_to(anchor, anchor_vp)
+                self._scroll_anchor_to(anchor, anchor_vp, keep_top=pin_top)
                 if immediate:
                     self._rerender_timer.stop()
                     self._rerender_pages()
@@ -1063,7 +1063,7 @@ class PdfView(QGraphicsView):
             self._layout_pages()
             # Relayout moves every page but leaves the scroll position as it was, which
             # would show an earlier page after zooming in. Scroll the anchor back.
-            self._scroll_anchor_to(anchor, anchor_vp)
+            self._scroll_anchor_to(anchor, anchor_vp, keep_top=pin_top)
             if immediate:
                 self._rerender_timer.stop()
                 self._rerender_pages()
@@ -1098,8 +1098,11 @@ class PdfView(QGraphicsView):
                 (scene_pt.y() - page.pos().y()) / self._zoom)
 
     def _scroll_anchor_to(self, anchor: tuple[int, float, float] | None,
-                          viewport_pos: QPoint) -> None:
-        """Scroll so the page point *anchor* is under *viewport_pos* again."""
+                          viewport_pos: QPoint, keep_top: bool = False) -> None:
+        """Scroll so the page point *anchor* is under *viewport_pos* again; with
+        *keep_top*, only horizontally, and scroll vertically to the top."""
+        if keep_top:
+            self.verticalScrollBar().setValue(self.verticalScrollBar().minimum())
         if anchor is None or not (0 <= anchor[0] < len(self._pages)):
             return
         idx, local_x, local_y = anchor
@@ -1112,7 +1115,7 @@ class PdfView(QGraphicsView):
         dy = round(now.y() - viewport_pos.y())
         if dx:
             self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() + dx)
-        if dy:
+        if dy and not keep_top:
             self.verticalScrollBar().setValue(self.verticalScrollBar().value() + dy)
 
     def set_performance_mode(self, enabled: bool) -> None:

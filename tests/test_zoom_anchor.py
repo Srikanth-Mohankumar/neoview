@@ -588,11 +588,12 @@ def test_zoom_at_document_top_keeps_the_top(pdf_book: Path):
     view = _load_view(pdf_book)
     try:
         assert view.verticalScrollBar().value() == view.verticalScrollBar().minimum()
-        view.zoom_by(1.25)
-        view.fit_width()
-        QApplication.processEvents()
-        assert view.verticalScrollBar().value() == view.verticalScrollBar().minimum()
-        assert view.current_page == 0
+        for step in (lambda: view.zoom_by(1.25), view.fit_width,
+                     lambda: view.zoom_by(0.8), lambda: view.zoom_by(0.8)):
+            step()
+            QApplication.processEvents()
+            assert view.verticalScrollBar().value() == view.verticalScrollBar().minimum()
+            assert view.current_page == 0
     finally:
         view.close_document()
         view.close()
