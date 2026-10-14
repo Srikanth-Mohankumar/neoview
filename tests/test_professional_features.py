@@ -448,3 +448,27 @@ def test_tab_switch_wraparound_actions(tmp_path: Path):
     QApplication.processEvents()
     assert os.path.abspath(win.current_context().file_path or "") == os.path.abspath(str(pdf_b))
     win.close()
+
+
+def test_opening_second_file_saves_session_of_the_document_being_left(tmp_path: Path, qtbot):
+    # The reading position of the document you leave must be saved, not the new empty tab's.
+    a = tmp_path / "a.pdf"
+    b = tmp_path / "b.pdf"
+    _create_pdf(a, pages=5)
+    _create_pdf(b, pages=2)
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.resize(900, 700)
+    win.show()
+    win._open_file(str(a))
+    QApplication.processEvents()
+    win.current_view().go_to_page(3)
+    QApplication.processEvents()
+    assert win.current_view().current_page == 3
+
+    win._open_file(str(b))
+    QApplication.processEvents()
+
+    saved = win._document_sessions.get(os.path.abspath(str(a)))
+    assert saved is not None and saved.get("page") == 3

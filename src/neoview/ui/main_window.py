@@ -1570,10 +1570,12 @@ class MainWindow(QMainWindow):
         ctx = self._context_for_view(current)
         create_new_tab = bool(current.document or ctx.file_path)
 
+        # Save the document being left before _create_tab() makes the new, empty tab current.
+        self._save_current_document_session()
+
         target = self._create_tab() if create_new_tab else current
         target_ctx = self._context_for_view(target)
 
-        self._save_current_document_session()
         self._stop_watch()
         self.setUpdatesEnabled(False)
         self._open_in_progress = True
