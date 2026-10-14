@@ -153,7 +153,9 @@ class AnnotationToolbar(QToolBar):
         self._width_spin.setSingleStep(0.5)
         self._width_spin.setValue(2.0)
         self._width_spin.setDecimals(1)
-        self._width_spin.setFixedWidth(62)
+        # Width from the style's size hint (padding + arrows + widest value), not a guess:
+        # a fixed 62px left the themed field 14px for text and showed "2." for "2.0".
+        self._width_spin.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self._width_spin.setToolTip("Stroke / border width (pt)")
         self._width_spin.valueChanged.connect(self._on_width_changed)
         self.addWidget(self._width_spin)

@@ -911,3 +911,21 @@ def test_welcome_hides_recent_heading_when_there_are_no_recent_files(qtbot, tmp_
     assert not panel._recent_header.isHidden()
     panel.set_recent_files([])
     assert panel._recent_header.isHidden()
+
+
+def test_annotation_stroke_width_value_is_not_clipped(qtbot):
+    from neoview import theme
+
+    theme.apply_theme(QApplication.instance(), "light")  # the field's padding comes from the theme
+    win = _window(qtbot)
+    win.resize(1280, 800)
+    win.show()
+    tb = win._ann_toolbar
+    tb.show()
+    QApplication.processEvents()
+    spin = tb._width_spin
+    spin.setValue(12.5)
+    QApplication.processEvents()
+    edit = spin.lineEdit()
+    needed = edit.fontMetrics().horizontalAdvance(spin.text())
+    assert edit.width() >= needed, (edit.width(), needed, spin.text())
