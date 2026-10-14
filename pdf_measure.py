@@ -1,11 +1,9 @@
 import sys
-import fitz  # PyMuPDF
 
-from PySide6.QtCore import Qt, QRectF, QPointF
-from PySide6.QtGui import QPixmap, QImage, QPainter, QPen
-from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QScrollArea, QWidget
-)
+import fitz  # PyMuPDF
+from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtGui import QImage, QPainter, QPen, QPixmap
+from PySide6.QtWidgets import QApplication, QMainWindow, QScrollArea, QWidget
 
 
 def pt_to_mm(pt: float) -> float:

@@ -1,4 +1,4 @@
-from PySide6.QtCore import QRectF, QPointF
+from PySide6.QtCore import QPointF, QRectF
 
 from neoview.ui.selection import SelectionRect
 
@@ -24,6 +24,7 @@ def test_selection_drag_move():
 
 def test_clear_text_selection_after_scene_clear():
     from PySide6.QtWidgets import QGraphicsScene
+
     from neoview.ui.pdf_view import PdfView
 
     view = PdfView()

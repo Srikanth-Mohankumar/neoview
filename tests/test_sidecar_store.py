@@ -3,7 +3,12 @@ import os
 import tempfile
 from pathlib import Path
 
-from neoview.models.view_state import ANNOTATION_TYPES, AnnotationRecord, BookmarkRecord, DocumentSidecarState
+from neoview.models.view_state import (
+    ANNOTATION_TYPES,
+    AnnotationRecord,
+    BookmarkRecord,
+    DocumentSidecarState,
+)
 from neoview.persistence.sidecar_store import (
     SCHEMA_VERSION,
     clamp_sidecar_for_page_count,

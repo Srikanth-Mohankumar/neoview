@@ -11,7 +11,7 @@ from PySide6.QtWidgets import QApplication
 
 from neoview.resources import load_app_icon
 from neoview.theme import DARK_STYLE, LIGHT_STYLE
-from neoview.ui.main_window import MainWindow, APP_NAME
+from neoview.ui.main_window import APP_NAME, MainWindow
 
 
 def main() -> None:

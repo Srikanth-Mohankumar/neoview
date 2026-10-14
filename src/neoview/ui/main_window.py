@@ -2,17 +2,29 @@
 
 from __future__ import annotations
 
-from collections import deque
 import html
 import json
 import os
 import sys
 import time
+from collections import deque
 from typing import Dict, List, Optional, Tuple
 from uuid import uuid4
 
 import fitz
-from PySide6.QtCore import QEvent, QFileSystemWatcher, QPoint, QPointF, QRect, QRectF, QSettings, QSize, Qt, QTimer, QUrl
+from PySide6.QtCore import (
+    QEvent,
+    QFileSystemWatcher,
+    QPoint,
+    QPointF,
+    QRect,
+    QRectF,
+    QSettings,
+    QSize,
+    Qt,
+    QTimer,
+    QUrl,
+)
 from PySide6.QtGui import (
     QAction,
     QActionGroup,
@@ -61,13 +73,16 @@ from PySide6.QtWidgets import (
 )
 
 from neoview.models.view_state import AnnotationRecord, BookmarkRecord, SearchMatch, TabContext
-from neoview.persistence.sidecar_store import clamp_sidecar_for_page_count, load_sidecar, save_sidecar
+from neoview.persistence.sidecar_store import (
+    clamp_sidecar_for_page_count,
+    load_sidecar,
+    save_sidecar,
+)
 from neoview.resources import load_app_icon
 from neoview.ui.annotation_toolbar import AnnotationToolbar
 from neoview.ui.dialogs import ExportDialog, LayoutGridDialog
 from neoview.ui.pdf_view import PdfView, ToolMode
 from neoview.utils.units import format_size
-
 
 APP_NAME = "NeoView"
 

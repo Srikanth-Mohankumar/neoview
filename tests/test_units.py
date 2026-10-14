@@ -1,4 +1,4 @@
-from neoview.utils.units import pt_to_mm, pt_to_pica, format_size
+from neoview.utils.units import format_size, pt_to_mm, pt_to_pica
 
 
 def test_pt_to_mm():

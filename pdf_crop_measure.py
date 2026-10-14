@@ -14,6 +14,5 @@ if src_path not in sys.path:
 
 from neoview.app import main  # noqa: E402
 
-
 if __name__ == "__main__":
     main()

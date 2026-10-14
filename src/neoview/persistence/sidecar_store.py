@@ -17,7 +17,6 @@ from neoview.models.view_state import (
     DocumentSidecarState,
 )
 
-
 SCHEMA_VERSION = 1
 
 # Hard caps to prevent DoS via crafted sidecar files.

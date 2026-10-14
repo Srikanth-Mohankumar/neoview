@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 
 import fitz
-from PySide6.QtCore import QPointF, QRectF, Qt, QMimeData, QUrl
+from PySide6.QtCore import QMimeData, QPointF, QRectF, Qt, QUrl
 from PySide6.QtGui import QDropEvent
 from PySide6.QtWidgets import QApplication
 

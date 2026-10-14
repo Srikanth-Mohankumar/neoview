@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-
 RectTuple = Tuple[float, float, float, float]
 
 # All supported annotation types.

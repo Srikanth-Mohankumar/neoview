@@ -6,7 +6,7 @@ from collections import OrderedDict
 from typing import Optional
 
 import fitz
-from PySide6.QtCore import QRectF, QPointF, Qt
+from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QImage, QPixmap
 from PySide6.QtWidgets import QGraphicsDropShadowEffect, QGraphicsPixmapItem
 

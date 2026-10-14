@@ -1,7 +1,8 @@
-import fitz
 import tempfile
 import time
 from pathlib import Path
+
+import fitz
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QWindowStateChangeEvent
 from PySide6.QtWidgets import QApplication

@@ -2,17 +2,28 @@
 
 from __future__ import annotations
 
-from bisect import bisect_right
 import html
 import os
 import re
-from urllib.parse import unquote
+from bisect import bisect_right
 from enum import Enum, auto
 from typing import Dict, List, Optional, Tuple
+from urllib.parse import unquote
 
 import fitz
-from PySide6.QtCore import QPoint, QPointF, QRectF, QTimer, QUrl, Signal, Qt
-from PySide6.QtGui import QBrush, QColor, QDesktopServices, QKeyEvent, QMouseEvent, QPainter, QPainterPath, QPen, QWheelEvent
+import shiboken6
+from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QDesktopServices,
+    QKeyEvent,
+    QMouseEvent,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QWheelEvent,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QGraphicsPathItem,
@@ -26,13 +37,11 @@ from PySide6.QtWidgets import (
     QStyle,
     QToolTip,
 )
-import shiboken6
 
 from neoview.models.view_state import AnnotationRecord
 from neoview.ui.annotation_item import AnnotationItem
-from neoview.ui.selection import SelectionRect
 from neoview.ui.page_item import PageItem
-
+from neoview.ui.selection import SelectionRect
 
 _ALLOWED_URI_SCHEMES = frozenset({"http", "https", "mailto"})
 
@@ -975,6 +984,7 @@ class PdfView(QGraphicsView):
     def _commit_annotate_rect(self, rect: QRectF):
         """Create an AnnotationRecord from a drawn rect and emit annotation_created."""
         from uuid import uuid4
+
         from neoview.models.view_state import AnnotationRecord
         t = self._annotate_type
         contents = ""
@@ -1002,6 +1012,7 @@ class PdfView(QGraphicsView):
     def _commit_annotate_freehand(self):
         """Commit accumulated freehand points as an annotation."""
         from uuid import uuid4
+
         from neoview.models.view_state import AnnotationRecord
         pts = self._annotate_freehand_points
         if len(pts) < 2:

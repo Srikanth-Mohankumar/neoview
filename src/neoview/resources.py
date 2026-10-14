@@ -6,7 +6,6 @@ from importlib import resources
 
 from PySide6.QtGui import QIcon, QPixmap
 
-
 APP_ICON_NAME = "feather-logo.png"
 
 

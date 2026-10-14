@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-
 # (type_key, label, tooltip)
 _ANNOTATION_TOOLS = [
     ("highlight",      "H",  "Highlight (drag to mark text)"),

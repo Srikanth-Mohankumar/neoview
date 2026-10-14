@@ -1,6 +1,6 @@
 import os
-from pathlib import Path
 import time
+from pathlib import Path
 
 import fitz
 from PySide6.QtCore import QPoint, QPointF, Qt, QTimer

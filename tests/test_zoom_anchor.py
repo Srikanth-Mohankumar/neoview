@@ -17,7 +17,6 @@ from PySide6.QtWidgets import QApplication
 
 from neoview.ui.pdf_view import PdfView
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
