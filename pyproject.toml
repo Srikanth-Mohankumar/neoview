@@ -66,3 +66,8 @@ line-length = 100
 [tool.ruff.lint]
 # Pin the rule set explicitly; newer ruff releases widen the defaults.
 select = ["E4", "E7", "E9", "F"]
+
+[tool.pyright]
+# Resolve imports from the project venv (used by the pyright-lsp Claude Code plugin).
+venvPath = "."
+venv = ".venv"
