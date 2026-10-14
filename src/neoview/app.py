@@ -6,11 +6,12 @@ import os
 import sys
 
 import fitz
-from PySide6.QtGui import QFont
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QApplication
 
 from neoview.resources import load_app_icon
-from neoview.theme import DARK_STYLE, LIGHT_STYLE
+from neoview.theme import apply_theme
 from neoview.ui.main_window import APP_NAME, MainWindow
 
 
@@ -19,19 +20,16 @@ def main() -> None:
     fitz.TOOLS.mupdf_display_errors(False)
     fitz.TOOLS.mupdf_display_warnings(False)
 
+    # Must precede QApplication: render at the real fractional scale (125%, 150%)
+    # instead of rounding, so Windows and Linux HiDPI screens size the UI the same.
+    QGuiApplication.setHighDpiScaleFactorRoundingPolicy(
+        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+    )
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
-    theme_mode = os.getenv("NEOVIEW_THEME", "light").strip().lower()
-    if theme_mode == "dark":
-        app.setStyleSheet(DARK_STYLE)
-    else:
-        app.setStyleSheet(LIGHT_STYLE)
-        theme_mode = "light"
-    # Segoe UI is a Windows-native font; let the stylesheet font-family stack
-    # drive selection on Linux so the system default is not overridden.
-    if sys.platform == "win32":
-        app.setFont(QFont("Segoe UI", 10))
-    app.setProperty("theme_mode", theme_mode)
+    # Fusion style, explicit palette, bundled Inter font and the generated stylesheet,
+    # so the app looks the same on every OS. NEOVIEW_THEME=light|dark picks the theme.
+    apply_theme(app, os.getenv("NEOVIEW_THEME", "light"))
 
     icon = load_app_icon()
     if not icon.isNull():
