@@ -26,7 +26,6 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import (
     QColor,
     QFont,
-    QFontDatabase,
     QGuiApplication,
     QImage,
     QPainter,
@@ -93,7 +92,9 @@ FONT_SIZE: dict[str, int] = {"xs": 11, "sm": 12, "md": 13, "lg": 15}  # pixels
 
 UI_FONT_FAMILY = "Inter"
 UI_FONT_STACK = '"Inter", sans-serif'
-MONO_FONT_STACK = "monospace"
+# Numeric read-outs use the bundled UI font too: a system fixed-pitch font differs per OS
+# (DejaVu Sans Mono vs Courier New), which is exactly what the redesign removes.
+MONO_FONT_STACK = UI_FONT_STACK
 
 
 def normalize_mode(mode: str | None) -> str:
@@ -928,8 +929,8 @@ QTabWidget#InspectorTabs > QTabBar::tab:hover:!selected {
 def build_stylesheet(mode: str | None = None, mono_family: str | None = None) -> str:
     """Render the application stylesheet for ``mode``.
 
-    ``mono_family`` names the fixed-pitch family for numeric read-outs; ``apply_theme``
-    passes the platform's fixed font so no per-OS family names live in this module.
+    ``mono_family`` names the family for numeric read-outs; ``apply_theme`` passes the
+    registered UI font so read-outs match on every OS.
     """
     t = tokens(mode)
     mono_stack = MONO_FONT_STACK
@@ -970,9 +971,8 @@ def apply_theme(app: QGuiApplication, mode: str | None = None) -> str:
     font = QFont(family)
     font.setPixelSize(FONT_SIZE["md"])
     app.setFont(font)
-    mono = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont).family()
     if hasattr(app, "setStyleSheet"):
-        app.setStyleSheet(build_stylesheet(resolved, mono_family=mono))
+        app.setStyleSheet(build_stylesheet(resolved, mono_family=family))
     return resolved
 
 

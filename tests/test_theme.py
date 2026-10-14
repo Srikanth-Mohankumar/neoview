@@ -166,3 +166,17 @@ def test_register_fonts_registers_inter_weights(_qt_app):
     assert register_fonts() == families  # idempotent
     styles = set(QFontDatabase.styles("Inter"))
     assert {"Regular", "Medium", "SemiBold"} <= styles
+
+
+def test_numeric_readouts_use_bundled_ui_font_not_system_monospace(_qt_app):
+    # Read-outs (inspector measurements, measure badge) must look identical on every OS,
+    # so they use the bundled UI font instead of whatever fixed-pitch font the OS has.
+    from neoview.resources import app_font_family
+
+    theme.apply_theme(_qt_app, "light")
+    sheet = _qt_app.styleSheet()
+    block = sheet[sheet.index("QLabel#MonoValue"):]
+    block = block[: block.index("}")]
+    family = app_font_family() or theme.UI_FONT_FAMILY
+    assert f'"{family}"' in block
+    assert "monospace" not in block
