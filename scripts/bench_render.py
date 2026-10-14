@@ -25,6 +25,8 @@ Metrics per trial (wall clock, seconds unless noted):
   first 100 pages are scrolled, to keep a trial short;
 - ``scroll_max_stall``: longest GUI event-loop stall (ms) during that scroll;
 - ``end_sharp``: after the scroll stops, time until the visible pages are sharp;
+- ``wheel_total`` / ``wheel_max_stall``: 90 mouse-wheel-like steps of 120 px, one per frame;
+  ``wheel_blank_pages_at_end``: visible pages still blank when the last step lands;
 - ``read_max_stall``: page-by-page reading from the middle of the document: 12 steps of one
   viewport height with a 150 ms dwell each; longest GUI stall (ms) over all steps;
 - ``read_sharp``: median time per reading step until the visible pages are sharp;
@@ -58,6 +60,9 @@ METRICS = (
     "scroll_total",
     "scroll_max_stall",
     "end_sharp",
+    "wheel_total",
+    "wheel_max_stall",
+    "wheel_blank_pages_at_end",
     "read_max_stall",
     "read_sharp",
     "peak_rss_mb",
@@ -275,7 +280,22 @@ def run_trial(pdf: Path) -> dict:
     t2 = pump_until(sharp)
     res["end_sharp"] = t2 - t1
 
-    # 4. page-by-page reading: the debounced re-render fires between steps.
+    # 4. wheel scroll: 90 frames of 120 px (about 6 pages at 200%), one step per 60 Hz frame.
+    bar.setValue(bar.maximum() // 3)
+    pump_until(sharp)
+    pump_for(0.2)
+    ticks.clear()
+    t0 = time.perf_counter()
+    for _ in range(90):
+        bar.setValue(min(bar.maximum(), bar.value() + 120))
+        pump_for(1 / 60)
+    t1 = time.perf_counter()
+    res["wheel_total"] = t1 - t0
+    res["wheel_max_stall"] = max_stall_ms(t0, t1)
+    blank = [i for i in view._visible_page_indices() if view._pages[i].render_zoom < 0.5]
+    res["wheel_blank_pages_at_end"] = float(len(blank))
+
+    # 5. page-by-page reading: the debounced re-render fires between steps.
     bar.setValue(bar.maximum() // 2)
     pump_until(sharp)
     pump_for(0.2)
