@@ -45,6 +45,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDockWidget,
     QFileDialog,
+    QGridLayout,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -76,7 +77,7 @@ from neoview.resources import load_app_icon
 from neoview.ui import icons, password, presentation, printing
 from neoview.ui.annotation_io import export_annotated_pdf, load_native_annotations
 from neoview.ui.annotation_toolbar import AnnotationToolbar
-from neoview.ui.chrome import TOOLBAR_ICON, IconBinder, build_chrome_stylesheet
+from neoview.ui.chrome import HIT_TARGET, TOOLBAR_ICON, IconBinder, build_chrome_stylesheet
 from neoview.ui.dialogs import AnnotationPropertiesDialog, ExportDialog, LayoutGridDialog
 from neoview.ui.inspector import InspectorPanel, PanelTitleBar
 from neoview.ui.pdf_view import PdfView, ToolMode
@@ -90,6 +91,7 @@ from neoview.ui.toolbar import (
     ToolSegment,
     ZoomBox,
 )
+from neoview.ui.welcome import WelcomePanel
 from neoview.utils.units import UNIT_LABELS, UNITS, format_length, format_size, normalize_unit
 
 APP_NAME = "NeoView"
@@ -234,7 +236,24 @@ class MainWindow(QMainWindow):
         self._tabs.installEventFilter(self)
         self._tabs.currentChanged.connect(self._on_tab_changed)
         self._tabs.tabCloseRequested.connect(self._close_tab_index)
-        self.setCentralWidget(self._tabs)
+        # Document tabs appear only once a second document is open: one document needs no
+        # tab strip (the title bar names it), and the canvas keeps those 30 px.
+        self._tabs.setTabBarAutoHide(True)
+        self._tabs.tabBar().installEventFilter(self)  # middle-click closes a tab
+
+        # The welcome panel shares the tab widget's grid cell and covers it while no
+        # document is open. The tab widget stays laid out underneath, so the first
+        # document opens into a view that already has its real size (fit width needs it).
+        self._welcome = WelcomePanel(self._icons, self)
+        self._welcome.open_requested.connect(self._open_dialog)
+        self._welcome.recent_requested.connect(self._open_file)
+        central = QWidget(self)
+        central.setObjectName("CentralArea")
+        grid = QGridLayout(central)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.addWidget(self._tabs, 0, 0)
+        grid.addWidget(self._welcome, 0, 0)
+        self.setCentralWidget(central)
 
         self._create_tab()
 
@@ -639,7 +658,8 @@ class MainWindow(QMainWindow):
             self._reset_rotation_action, self._prev_page_action, self._next_page_action,
             self._first_page_action, self._last_page_action, self._goto_page_action,
             self._add_bookmark_action, self._annot_highlight_action, self._annot_underline_action,
-            self._annot_note_action,
+            self._annot_note_action, self._select_action, self._hand_action, self._measure_action,
+            self._annotate_action,
         ]
 
     def _setup_menus(self):
@@ -820,6 +840,13 @@ class MainWindow(QMainWindow):
         self._overflow_btn.setMenu(self._overflow_menu)
         tb.addWidget(self._overflow_btn)
 
+        # 32 px hit targets regardless of style or stylesheet.
+        for action in tb.actions():
+            button = tb.widgetForAction(action)
+            if isinstance(button, QToolButton):
+                button.setMinimumSize(HIT_TARGET, HIT_TARGET)
+        self._overflow_btn.setMinimumSize(HIT_TARGET, HIT_TARGET)
+
     def _build_overflow_menu(self):
         m = self._overflow_menu
         m.clear()
@@ -831,12 +858,8 @@ class MainWindow(QMainWindow):
         m.addAction(self._rotate_left_action)
         m.addAction(self._rotate_right_action)
         m.addSeparator()
-        m.addAction(self._back_action)
-        m.addAction(self._forward_action)
         m.addAction(self._add_bookmark_action)
-        m.addAction(self._copy_action)
         m.addAction(self._export_action)
-        m.addAction(self._export_annot_action)
         m.addSeparator()
         m.addAction(self._rulers_action)
         m.addAction(self._layout_grid_action)
@@ -1495,6 +1518,7 @@ class MainWindow(QMainWindow):
         self._recent_files = self._recent_files[:10]
         self._settings.setValue("recent_files", self._recent_files)
         self._rebuild_recent_menu()
+        self._welcome.set_recent_files(self._recent_files)
 
     # --------------------------- File/document ---------------------------
     def _open_dialog(self):
@@ -1622,6 +1646,15 @@ class MainWindow(QMainWindow):
         self._handle_drop_event(e)
 
     def eventFilter(self, obj, e):
+        if (
+            obj is self._tabs.tabBar()
+            and e.type() == QEvent.Type.MouseButtonRelease
+            and e.button() == Qt.MouseButton.MiddleButton
+        ):
+            index = self._tabs.tabBar().tabAt(e.position().toPoint())
+            if index >= 0:
+                self._close_tab_index(index)
+                return True
         is_drop_target = obj is self._tabs
         if not is_drop_target and isinstance(obj, PdfView):
             is_drop_target = True
@@ -1982,6 +2015,11 @@ class MainWindow(QMainWindow):
         self.current_view().set_search_highlights([])
         self._search_results_list.clear()
         self._search_count_lbl.setText("")
+        self._search_title.title.setText("Search Results")
+        if self._search_input.text():
+            self._search_input_updating = True
+            self._search_input.clear()
+            self._search_input_updating = False
 
     def _update_search_count_label(self, ctx: TabContext | None = None):
         ctx = ctx or self.current_context()
@@ -3088,6 +3126,9 @@ class MainWindow(QMainWindow):
             action.setEnabled(has_doc)
         self._zoom_combo.setEnabled(has_doc)
         self._search_field.setEnabled(has_doc)
+        for widget in (self._annotation_filter, self._annotation_edit_btn, self._annotation_delete_btn,
+                       self._annotation_export_btn, self._outline_filter):
+            widget.setEnabled(has_doc)
         self._update_capability_actions()
 
     # --------------------------- Viewer capabilities ---------------------------
@@ -3115,12 +3156,14 @@ class MainWindow(QMainWindow):
         for mode, act in self._page_mode_actions.items():
             act.setEnabled(can_page)
             act.setChecked(mode == page_mode)
+        self._page_layout_menu.setEnabled(can_page)
 
         can_color = has_doc and self._view_supports(view, "set_color_mode", "color_mode")
         color_mode = view.color_mode() if can_color else None
         for mode, act in self._color_mode_actions.items():
             act.setEnabled(can_color)
             act.setChecked(mode == color_mode)
+        self._reading_mode_menu.setEnabled(can_color)
 
         can_history = has_doc and self._view_supports(view, "go_back", "go_forward", "can_go_back", "can_go_forward")
         self._back_action.setEnabled(bool(can_history and view.can_go_back()))
@@ -3282,6 +3325,15 @@ class MainWindow(QMainWindow):
         self._sync_zoom_combo()
         self._sync_tool_actions(view.tool)
         self._update_action_states(has_doc)
+        self._update_empty_state()
+
+    def _update_empty_state(self):
+        empty = self._tabs.count() <= 1 and self.current_view().document is None
+        if empty and self._welcome.isHidden():
+            self._welcome.set_recent_files(self._recent_files)
+        self._welcome.setVisible(empty)
+        if empty:
+            self._welcome.raise_()
 
     # ----------------------- Performance mode helpers -----------------------
     def _on_performance_mode_toggled(self, checked: bool) -> None:

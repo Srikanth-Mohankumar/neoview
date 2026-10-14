@@ -112,8 +112,9 @@ def test_toolbar_is_one_icon_only_row_with_shortcut_tooltips(qtbot):
     for widget in (win._search_field, win._page_field, win._zoom_combo, win._overflow_btn):
         assert win._main_toolbar.isAncestorOf(widget)
     # 32 px hit targets for the icon buttons.
-    button = win._main_toolbar.widgetForAction(win._open_action)
-    assert button.sizeHint().height() >= 30
+    for action in (win._open_action, win._zoom_in_action, win._inspector_action):
+        button = win._main_toolbar.widgetForAction(action)
+        assert button.width() >= 32 and button.height() >= 32, action.text()
 
 
 def test_toolbar_tool_segment_switches_view_tool(two_pdfs, qtbot):
@@ -569,3 +570,56 @@ def test_password_prompt_gives_up_after_max_attempts(qtbot, monkeypatch):
     assert not win._unlock_and_open(FakeView(), "/tmp/locked.pdf")
     assert FakeView.tries == password.MAX_ATTEMPTS
     assert "Could not unlock" in win._status.currentMessage()
+
+
+# --------------------------------------------------------------------------- empty state, tabs
+
+
+def test_empty_state_shown_without_document(two_pdfs, qtbot):
+    a, _b = two_pdfs
+    win = _window(qtbot)
+    assert win._welcome.isVisible()
+    assert win._welcome.open_button.isVisible()
+    win._open_file(str(a))
+    QApplication.processEvents()
+    assert not win._welcome.isVisible()
+    win._close_current_tab()
+    QApplication.processEvents()
+    assert win._welcome.isVisible()
+    # The file just closed is offered as a recent file.
+    assert [b.toolTip() for b in win._welcome.recent_buttons] == [str(a.resolve())]
+
+
+def test_empty_state_open_button_and_recent_entry(two_pdfs, qtbot, monkeypatch):
+    from PySide6.QtWidgets import QFileDialog
+
+    a, b = two_pdfs
+    win = _window(qtbot)
+    win._add_recent_file(str(b))
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *_a, **_k: (str(a), "PDF (*.pdf)"))
+    win._welcome.open_button.click()
+    assert win.current_context().file_path == str(a.resolve())
+    win._close_current_tab()
+
+    # Most recent first: a (just closed), then b.
+    assert [btn.toolTip() for btn in win._welcome.recent_buttons] == [str(a.resolve()), str(b.resolve())]
+    win._welcome.recent_buttons[1].click()
+    assert win.current_context().file_path == str(b.resolve())
+
+
+def test_tab_bar_only_with_two_documents_and_middle_click_closes(two_pdfs, qtbot):
+    a, b = two_pdfs
+    win = _window(qtbot)
+    win._open_file(str(a))
+    QApplication.processEvents()
+    assert not win._tabs.tabBar().isVisible()
+    win._open_file(str(b))
+    QApplication.processEvents()
+    assert win._tabs.tabBar().isVisible()
+
+    bar = win._tabs.tabBar()
+    qtbot.mouseClick(bar, Qt.MouseButton.MiddleButton, pos=bar.tabRect(0).center())
+    QApplication.processEvents()
+    assert win._tabs.count() == 1
+    assert win.current_context().file_path == str(b.resolve())
+

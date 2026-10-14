@@ -54,7 +54,7 @@ class PageField(QWidget):
 
     def set_pages(self, current: int, total: int) -> None:
         """Show ``current`` (1-based) of ``total``; leaves the text alone while the user edits."""
-        self.total_label.setText(f"/ {total}")
+        self.total_label.setText(f"/ {total}" if total else "")
         if not self.edit.hasFocus():
             self.edit.setText(str(current) if total else "")
         self.edit.setEnabled(total > 0)

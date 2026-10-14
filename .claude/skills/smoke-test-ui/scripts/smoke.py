@@ -218,6 +218,18 @@ def main() -> int:
         step(name, fn)
     step("menus", menus)
 
+    def close_doc():
+        win._close_current_tab()
+        pump(300)
+        assert win.current_view().document is None, "document still open"
+        welcome = getattr(win, "_welcome", None)
+        if welcome is not None:
+            assert welcome.isVisible(), "welcome panel not shown after closing"
+            return f"{len(welcome.recent_buttons)} recent file(s) offered"
+        return "closed"
+
+    step("close", close_doc)
+
     win.close()
     pump()
     for r in results:

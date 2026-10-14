@@ -102,6 +102,9 @@ QFrame#ToolSegment QToolButton:checked {
 QFrame#ToolSegment QToolButton:checked:hover {
     background: $accent_hover;
 }
+QFrame#ToolSegment QToolButton:checked:disabled {
+    background: $hover;
+}
 
 /* Page field "n / N" */
 QLineEdit#PageInput {
