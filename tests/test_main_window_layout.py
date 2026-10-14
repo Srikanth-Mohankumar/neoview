@@ -811,3 +811,87 @@ def test_encrypted_pdf_cancel_leaves_window_empty(tmp_path: Path, two_pdfs, qtbo
     assert win._tabs.count() == 1
     assert win.current_context().file_path == str(a.resolve())
 
+
+# --------------------------------------------------------------------------- theme switching
+
+
+@pytest.fixture
+def restore_app_theme(monkeypatch):
+    """Theme switching mutates the shared QApplication; put it back afterwards."""
+    monkeypatch.delenv("NEOVIEW_THEME", raising=False)
+    app = QApplication.instance()
+    saved = (app.styleSheet(), app.palette(), app.font(), app.property("theme_mode"))
+    yield app
+    sheet, palette, font, mode = saved
+    app.setStyleSheet(sheet)
+    app.setPalette(palette)
+    app.setFont(font)
+    app.setProperty("theme_mode", mode)
+    icons.clear_cache()
+
+
+def _glyph_color(icon) -> str:
+    image = icon.pixmap(24, 24).toImage()
+    darkest = None
+    for x in range(image.width()):
+        for y in range(image.height()):
+            c = image.pixelColor(x, y)
+            if c.alpha() == 255 and (darkest is None or c.lightness() < darkest.lightness()):
+                darkest = c
+    return darkest.name() if darkest is not None else ""
+
+
+def test_theme_switch_at_runtime_retints_and_persists(two_pdfs, qtbot, restore_app_theme):
+    from neoview import theme
+
+    app = restore_app_theme
+    a, _b = two_pdfs
+    win = _window(qtbot)
+    win._open_file(str(a))
+    win._theme_actions["light"].trigger()
+    assert _glyph_color(win._open_action.icon()) == theme.icon_color("light")
+
+    win._theme_actions["dark"].trigger()
+    assert app.property("theme_mode") == "dark"
+    assert win._settings.value("view/theme") == "dark"
+    assert win._theme_actions["dark"].isChecked()
+    # Icons already on screen were re-rendered in the dark theme's colour.
+    assert _glyph_color(win._open_action.icon()) == theme.icon_color("dark")
+    assert _glyph_color(win._sidebar.tab_button("outline").icon()) == theme.icon_color("dark")
+    # The canvas behind the pages follows, and the chrome rules were re-installed for dark.
+    assert win.current_view().backgroundBrush().color().name() == theme.tokens("dark")["canvas"]
+    assert theme.tokens("dark")["surface"] in app.styleSheet().split("neoview.ui.chrome", 1)[1]
+
+
+def test_saved_theme_applies_at_startup(qtbot, restore_app_theme):
+    app = restore_app_theme
+    first = _window(qtbot)
+    first._settings.setValue("view/theme", "dark")
+    app.setProperty("theme_mode", "light")
+    second = _window(qtbot)  # shares the isolated settings store
+    assert app.property("theme_mode") == "dark"
+    assert second._theme_actions["dark"].isChecked()
+
+
+def test_neoview_theme_env_overrides_saved_theme(qtbot, restore_app_theme, monkeypatch):
+    app = restore_app_theme
+    first = _window(qtbot)
+    first._settings.setValue("view/theme", "dark")
+    app.setProperty("theme_mode", "light")
+    monkeypatch.setenv("NEOVIEW_THEME", "light")
+    second = _window(qtbot)
+    assert app.property("theme_mode") == "light"
+    assert second._theme_actions["light"].isChecked()
+
+
+def test_system_theme_follows_platform_scheme(qtbot, restore_app_theme, monkeypatch):
+    app = restore_app_theme
+    win = _window(qtbot)
+    monkeypatch.setattr(MainWindow, "_system_theme", staticmethod(lambda: "dark"))
+    win._theme_actions["system"].trigger()
+    assert app.property("theme_mode") == "dark"
+    assert win._settings.value("view/theme") == "system"
+    monkeypatch.setattr(MainWindow, "_system_theme", staticmethod(lambda: "light"))
+    win._on_system_color_scheme_changed()
+    assert app.property("theme_mode") == "light"
+

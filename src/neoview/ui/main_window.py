@@ -225,6 +225,8 @@ class MainWindow(QMainWindow):
     def _setup_ui(self):
         # Icons are tinted for the active theme; the binder re-tints them on a theme switch.
         self._icons = IconBinder()
+        # Before any icon is bound, so the first tint is already the right one.
+        self._theme_choice = self._startup_theme_choice()
         install_chrome_stylesheet(QApplication.instance(), theme.current_mode())
         self.setDockOptions(QMainWindow.DockOption.AnimatedDocks)
 
@@ -653,6 +655,20 @@ class MainWindow(QMainWindow):
 
         self._about_action = self._action(f"&About {APP_NAME}", self._show_about, icon="info")
 
+        self._theme_group = QActionGroup(self)
+        self._theme_group.setExclusive(True)
+        self._theme_actions: dict[str, QAction] = {}
+        for choice, label, glyph in (
+            ("light", "&Light", "sun"), ("dark", "&Dark", "moon"), ("system", "&System", "sun-moon"),
+        ):
+            act = self._action(
+                label, lambda _checked=False, c=choice: self._set_theme(c), icon=glyph,
+                name=f"action_theme_{choice}", checkable=True, tip=f"{label.replace('&', '')} theme",
+            )
+            act.setChecked(choice == self._theme_choice)
+            self._theme_group.addAction(act)
+            self._theme_actions[choice] = act
+
         # Actions that need an open document; see _update_action_states.
         self._doc_actions = [
             self._close_tab_action, self._reload_action, self._export_action, self._export_annot_action,
@@ -726,6 +742,10 @@ class MainWindow(QMainWindow):
         view_m.addSeparator()
         view_m.addAction(self._fullscreen_action)
         view_m.addAction(self._presentation_action)
+        view_m.addSeparator()
+        self._theme_menu = view_m.addMenu("T&heme")
+        for act in self._theme_actions.values():
+            self._theme_menu.addAction(act)
         view_m.addAction(self._reset_layout_action)
         self._view_menu = view_m
 
@@ -869,6 +889,8 @@ class MainWindow(QMainWindow):
         m.addAction(self._layout_grid_action)
         m.addAction(self._fullscreen_action)
         m.addAction(self._presentation_action)
+        m.addSeparator()
+        m.addMenu(self._theme_menu)
 
     def _setup_annotation_toolbar(self):
         """Create the contextual annotation toolbar (shown below the main toolbar)."""
@@ -3298,6 +3320,69 @@ class MainWindow(QMainWindow):
         if self._unlock_and_open(view, path) and self._is_current_view(view):
             self._refresh_document_info()
             self._update_status()
+
+    # --------------------------- Theme ---------------------------
+    THEME_CHOICES = ("light", "dark", "system")
+
+    @staticmethod
+    def _system_theme() -> str:
+        hints = QGuiApplication.styleHints()
+        scheme = hints.colorScheme() if hasattr(hints, "colorScheme") else None
+        return "dark" if scheme == Qt.ColorScheme.Dark else "light"
+
+    def _resolve_theme(self, choice: str) -> str:
+        return self._system_theme() if choice == "system" else theme.normalize_mode(choice)
+
+    def _startup_theme_choice(self) -> str:
+        """The theme menu's initial choice; applies a saved theme the app did not start with.
+
+        NEOVIEW_THEME (already applied by app.main) wins over the saved choice. Without
+        either, nothing is applied: the app keeps whatever theme it has.
+        """
+        hints = QGuiApplication.styleHints()
+        if hasattr(hints, "colorSchemeChanged"):
+            hints.colorSchemeChanged.connect(self._on_system_color_scheme_changed)
+        env = os.getenv("NEOVIEW_THEME", "").strip().lower()
+        if env:
+            return theme.normalize_mode(env)
+        saved = self._settings.value("view/theme", "", type=str)
+        if saved not in self.THEME_CHOICES:
+            return theme.current_mode()
+        mode = self._resolve_theme(saved)
+        app = QApplication.instance()
+        if mode != theme.current_mode() and app is not None:
+            theme.apply_theme(app, mode)
+        return saved
+
+    def _set_theme(self, choice: str, persist: bool = True):
+        """Switch theme at runtime: palette, stylesheets, icon tints, canvas and thumbnails."""
+        if choice not in self.THEME_CHOICES:
+            return
+        self._theme_choice = choice
+        if persist:
+            self._settings.setValue("view/theme", choice)
+        for key, act in self._theme_actions.items():
+            act.setChecked(key == choice)
+        mode = self._resolve_theme(choice)
+        app = QApplication.instance()
+        if app is None:
+            return
+        if mode != theme.current_mode() or not app.styleSheet():
+            theme.apply_theme(app, mode)
+        install_chrome_stylesheet(app, mode)
+        self._icons.retint()
+        self._ann_toolbar.retint()
+        self._thumb_icon_cache.clear()
+        for idx in range(self._tabs.count()):
+            widget = self._tabs.widget(idx)
+            apply_colors = getattr(widget, "apply_theme_colors", None)
+            if callable(apply_colors):
+                apply_colors()
+        self._populate_thumbnails()
+
+    def _on_system_color_scheme_changed(self, *_args):
+        if self._theme_choice == "system":
+            self._set_theme("system", persist=False)
 
     def _show_about(self):
         try:
