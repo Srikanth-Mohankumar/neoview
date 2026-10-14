@@ -330,10 +330,9 @@ class MainWindow(QMainWindow):
             return
 
         self._load_search_from_context()
+        # _refresh_document_info rebuilds the outline, thumbnails and annotation list
+        # (or clears them for an empty tab); calling them here again did it twice.
         self._refresh_document_info()
-        self._populate_outline()
-        self._populate_thumbnails()
-        self._populate_annotation_list()
         self._update_status()
 
         if hasattr(self, "_perf_action"):
@@ -2693,9 +2692,8 @@ class MainWindow(QMainWindow):
             all_annotations = ctx.sidecar_state.annotations + ctx.native_annotations
             view.set_annotations(all_annotations)
         if self._is_current_view(view):
+            # Also rebuilds the outline, thumbnails and annotation list.
             self._refresh_document_info()
-            self._populate_outline()
-            self._populate_annotation_list()
 
     # --------------------------- Reload / watch ---------------------------
     def _stop_watch(self):
