@@ -245,6 +245,24 @@ def main() -> int:
         pump(300)
         return "continuous, normal"
 
+    def two_documents():
+        import shutil
+
+        second = work / "smoke-2.pdf"
+        shutil.copyfile(pdf, second)
+        win._open_file(str(second))
+        pump(400)
+        bar = win._tabs.tabBar()
+        assert win._tabs.count() == 2, f"{win._tabs.count()} tabs"
+        assert bar.isVisible(), "tab bar hidden with two documents"
+        return "tab bar shown"
+
+    def back_to_one():
+        win._close_current_tab()
+        pump(300)
+        assert not win._tabs.tabBar().isVisible(), "tab bar still shown with one document"
+        return "tab bar hidden"
+
     def reload_doc():
         view = win.current_view()
         assert view.reload_document(), "reload_document returned False"
@@ -258,6 +276,7 @@ def main() -> int:
                      ("sidebar-bookmarks", sidebar("bookmarks")),
                      ("sidebar-annotations", sidebar("annotations")), ("annotate", annotate),
                      ("two-page-night", layout_modes), ("reset-modes", reset_modes),
+                     ("two-documents", two_documents), ("one-document", back_to_one),
                      ("reload", reload_doc)]:
         step(name, fn)
     step("menus", menus)
