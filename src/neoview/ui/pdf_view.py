@@ -33,11 +33,11 @@ from PySide6.QtWidgets import (
     QLabel,
     QMenu,
     QMessageBox,
-    QStyle,
     QToolTip,
 )
 
 from neoview.models.view_state import AnnotationRecord
+from neoview.ui import icons
 from neoview.ui.annotation_item import AnnotationItem
 from neoview.ui.page_item import PageItem
 from neoview.ui.selection import SelectionRect
@@ -177,7 +177,7 @@ class PdfView(QGraphicsView):
         self._link_badge.setObjectName("LinkBadge")
         self._link_badge.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self._link_badge.setFixedSize(18, 18)
-        link_icon = self.style().standardIcon(QStyle.StandardPixmap.SP_FileLinkIcon)
+        link_icon = icons.icon("link", size=12)
         self._link_badge.setPixmap(link_icon.pixmap(12, 12))
         self._link_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._link_badge.hide()
