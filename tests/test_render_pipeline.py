@@ -25,7 +25,9 @@ def _make_pdf(path: Path, n_pages: int = 3, fill: tuple | None = None) -> None:
         page.insert_text((40, 60), f"page {i + 1}", fontsize=14)
         if fill is not None:
             page.draw_rect(fitz.Rect(0, 0, PAGE_W, PAGE_H), color=fill, fill=fill)
-    doc.save(str(path))
+    # Overwrite in place, like a TeX rebuild: Windows refuses to delete (what doc.save does)
+    # a file the viewer still has open.
+    Path(path).write_bytes(doc.tobytes())
     doc.close()
 
 

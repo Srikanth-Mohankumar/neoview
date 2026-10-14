@@ -21,7 +21,9 @@ def _make_pdf(path: Path, n_pages: int = 8) -> Path:
     # A GoTo link on page 1 to page 6 (or the last page of a short document).
     doc[0].insert_link({"kind": fitz.LINK_GOTO, "from": fitz.Rect(40, 100, 200, 130),
                         "page": min(5, n_pages - 1), "to": fitz.Point(0, 0)})
-    doc.save(str(path))
+    # Overwrite in place, like a TeX rebuild: Windows refuses to delete (what doc.save does)
+    # a file the viewer still has open.
+    Path(path).write_bytes(doc.tobytes())
     doc.close()
     return path
 

@@ -16,11 +16,14 @@ def _make_pdf(path: Path, n_pages: int = 2, user_pw: str | None = None) -> Path:
     for i in range(n_pages):
         page = doc.new_page(width=300, height=400)
         page.insert_text((40, 60), f"page {i + 1}")
+    # Overwrite in place, like a TeX rebuild: Windows refuses to delete (what doc.save does)
+    # a file the viewer still has open.
     if user_pw:
-        doc.save(str(path), encryption=fitz.PDF_ENCRYPT_AES_256, user_pw=user_pw,
-                 owner_pw=user_pw + "-owner")
+        data = doc.tobytes(encryption=fitz.PDF_ENCRYPT_AES_256, user_pw=user_pw,
+                           owner_pw=user_pw + "-owner")
     else:
-        doc.save(str(path))
+        data = doc.tobytes()
+    Path(path).write_bytes(data)
     doc.close()
     return path
 

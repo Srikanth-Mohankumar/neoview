@@ -22,7 +22,9 @@ def _make_pdf(path: Path, sizes=SIZES) -> Path:
     for i, (w, h) in enumerate(sizes):
         page = doc.new_page(width=w, height=h)
         page.insert_text((30, 50), f"page {i + 1}", fontsize=20)
-    doc.save(str(path))
+    # Overwrite in place, like a TeX rebuild: Windows refuses to delete (what doc.save does)
+    # a file the viewer still has open.
+    Path(path).write_bytes(doc.tobytes())
     doc.close()
     return path
 

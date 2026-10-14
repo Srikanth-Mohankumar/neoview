@@ -21,7 +21,9 @@ def _make_pdf(path: Path, n_pages: int = 6) -> Path:
         # Mostly white paper with black text and a red bar near the bottom.
         page.insert_text((30, 50), f"page {i + 1}", fontsize=24)
         page.draw_rect(fitz.Rect(30, 330, 270, 370), color=(1, 0, 0), fill=(1, 0, 0))
-    doc.save(str(path))
+    # Overwrite in place, like a TeX rebuild: Windows refuses to delete (what doc.save does)
+    # a file the viewer still has open.
+    Path(path).write_bytes(doc.tobytes())
     doc.close()
     return path
 
