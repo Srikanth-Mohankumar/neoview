@@ -4,13 +4,13 @@ WEBVTT
 Intro
 
 00:03.000 --> 00:07.958
-1. Open: welcome screen, recent files, tabs
+1. Open: welcome screen with recent files; two PDFs in tabs
 
 00:07.958 --> 00:13.792
-2. Navigate: outline filter, back and forward
+2. Navigate: filter the outline, jump to a section, go back
 
 00:13.792 --> 00:20.167
-3. Zoom: smooth scrolling, zoom around the cursor
+3. Zoom: smooth scrolling; pinch zoom keeps the word under the cursor
 
 00:20.167 --> 00:25.042
 4. Search: live results with context
@@ -19,31 +19,31 @@ Intro
 5. Inspect fonts: font, size and style on hover
 
 00:31.375 --> 00:37.667
-6. Measure: pt, pc, mm or in; keyboard nudge
+6. Measure: width, height, X and Y; units pt, mm, pc; nudge with the keys
 
 00:37.667 --> 00:41.625
-7. Rulers and layout grid
+7. Rulers in points and a layout grid you configure
 
 00:41.625 --> 00:44.208
-8. Export the measured area as PNG
+8. Export the measured area as a PNG, choosing the DPI
 
 00:44.208 --> 00:50.750
-9. Annotate: highlight, note, shapes
+9. Annotate: highlight, sticky note and rectangle, listed in the sidebar
 
 00:50.750 --> 00:54.667
-10. Layouts and reading modes
+10. Reading modes: two pages side by side; sepia and night
 
 00:54.667 --> 00:57.250
-11. Presentation mode
+11. Full-screen presentation with F5
 
 00:57.250 --> 00:59.833
-12. Print
+12. The print dialog
 
 00:59.833 --> 01:03.458
-13. Auto-reload after a rebuild
+13. Auto-reload: the PDF is rebuilt on disk and reloads in place
 
 01:03.458 --> 01:06.667
-14. Light, dark or system theme
+14. Dark theme: switch at runtime; thumbnails in the sidebar
 
 01:06.667 --> 01:10.167
 Get NeoView
