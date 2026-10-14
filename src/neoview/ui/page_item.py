@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import itertools
+import sys
 from collections import OrderedDict
 
 import fitz
@@ -16,6 +17,34 @@ _doc_tokens = itertools.count(1)
 def new_doc_token() -> int:
     """Return a process-unique token for one loaded document (an open or a reload)."""
     return next(_doc_tokens)
+
+
+_malloc_trim = None
+
+
+def release_freed_memory() -> None:
+    """Best effort: hand freed heap memory back to the OS after dropping page pixmaps.
+
+    glibc keeps freed multi-megabyte pixmap buffers in the process heap, so RSS stays at its
+    peak after a large document is closed although the memory is free (measured: 602 MB ->
+    104 MB with malloc_trim after reading 300 image pages). Only glibc has malloc_trim; on
+    other platforms this does nothing.
+    """
+    global _malloc_trim
+    if _malloc_trim is None:
+        _malloc_trim = False
+        if sys.platform.startswith("linux"):
+            try:
+                import ctypes
+
+                _malloc_trim = ctypes.CDLL("libc.so.6").malloc_trim
+            except (OSError, AttributeError):
+                _malloc_trim = False
+    if _malloc_trim:
+        try:
+            _malloc_trim(0)
+        except Exception:
+            pass
 
 
 class PageItem(QGraphicsPixmapItem):
