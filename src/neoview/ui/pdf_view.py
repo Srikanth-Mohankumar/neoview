@@ -43,6 +43,7 @@ from neoview import theme
 from neoview.models.view_state import AnnotationRecord
 from neoview.ui import icons
 from neoview.ui.annotation_item import AnnotationItem
+from neoview.ui.navigation_history import HistoryEntry, NavigationHistory
 from neoview.ui.page_item import PageItem, new_doc_token, release_freed_memory
 from neoview.ui.password import unlock
 from neoview.ui.render_scheduler import RenderRequest, RenderScheduler
@@ -79,6 +80,7 @@ class PdfView(QGraphicsView):
     document_loaded = Signal()
     performance_mode_toggled = Signal(bool)
     password_required = Signal(str)  # path of an encrypted PDF that needs a (new) password
+    history_changed = Signal(bool, bool)  # (can_go_back, can_go_forward)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -107,6 +109,10 @@ class PdfView(QGraphicsView):
         self._doc_password: str | None = None
         self._pages: list[PageItem] = []
         self._page_positions: list[float] = []
+        # Back/forward history of jumps (links, outline, search, go-to-page).
+        self._history = NavigationHistory(on_change=self.history_changed.emit)
+        self._restoring_history = False
+        self._jump_depth = 0
         self._zoom: float = 1.0
         self._zoom_mode: str = self.ZOOM_MODE_CUSTOM
         self._tool: ToolMode = ToolMode.HAND
@@ -429,6 +435,7 @@ class PdfView(QGraphicsView):
             self._doc = doc
             self._doc_path = os.path.abspath(path)
             self._doc_password = password if encrypted else None
+            self._history.clear()
             self._clear_selection()
             self._render_all_pages()
             self.document_loaded.emit()
@@ -523,6 +530,7 @@ class PdfView(QGraphicsView):
             self._doc = None
         self._doc_path = None
         self._doc_password = None
+        self._history.clear()
         self._scene.clear()
         self._pages.clear()
         self._page_positions.clear()
@@ -964,20 +972,95 @@ class PdfView(QGraphicsView):
         return None
 
     def go_to_page(self, page_num: int):
+        """Jump to *page_num* (zero-based); recorded in the back/forward history."""
+        self._record_jump(lambda: self._scroll_to_page(page_num))
+
+    def _scroll_to_page(self, page_num: int, offset: float = 0.0) -> None:
+        """Scroll so *page_num*'s top (plus *offset* scene units) is at the viewport top."""
         if 0 <= page_num < len(self._page_positions):
-            self.verticalScrollBar().setValue(int(self._page_positions[page_num]))
+            self.verticalScrollBar().setValue(int(self._page_positions[page_num] + offset))
 
     def next_page(self):
-        self.go_to_page(self.current_page + 1)
+        self._scroll_to_page(self.current_page + 1)
 
     def prev_page(self):
-        self.go_to_page(self.current_page - 1)
+        self._scroll_to_page(self.current_page - 1)
 
     def first_page(self):
         self.go_to_page(0)
 
     def last_page(self):
         self.go_to_page(self.page_count - 1)
+
+    # ------------------------------------------------------------------
+    # Back / forward history
+    # ------------------------------------------------------------------
+
+    def _current_location(self) -> HistoryEntry | None:
+        """Where the viewport top is: page index, offset into that page (points), zoom."""
+        if not self._page_positions:
+            return None
+        top = float(self.verticalScrollBar().value())
+        idx = max(0, bisect_right(self._page_positions, top) - 1)
+        idx = min(idx, len(self._page_positions) - 1)
+        return HistoryEntry(idx, (top - self._page_positions[idx]) / self._zoom, self._zoom)
+
+    def _record_jump(self, jump):
+        """Run *jump* and, if it moved the view, record before/after in the history.
+
+        Nested jumps (go_to_page inside a link jump) and history restores record nothing.
+        """
+        if self._restoring_history or self._jump_depth:
+            return jump()
+        before = self._current_location()
+        self._jump_depth += 1
+        try:
+            result = jump()
+        finally:
+            self._jump_depth -= 1
+        after = self._current_location()
+        if before is not None and after is not None and not before.same_place(after):
+            self._history.push(before)
+            self._history.push(after)
+        return result
+
+    def _restore_location(self, entry: HistoryEntry) -> None:
+        if not self._page_positions:
+            return
+        self._restoring_history = True
+        try:
+            if abs(entry.zoom - self._zoom) >= 1e-3:
+                self.set_zoom(entry.zoom, immediate=True, zoom_mode=self.ZOOM_MODE_CUSTOM)
+            idx = min(max(entry.page_index, 0), len(self._page_positions) - 1)
+            self._scroll_to_page(idx, entry.scroll_y * self._zoom)
+        finally:
+            self._restoring_history = False
+
+    def can_go_back(self) -> bool:
+        return self._history.can_go_back()
+
+    def can_go_forward(self) -> bool:
+        return self._history.can_go_forward()
+
+    def go_back(self) -> bool:
+        """Return to the location before the last jump. False if there is none."""
+        if not self._history.can_go_back():
+            return False
+        entry = self._history.back(current=self._current_location())
+        if entry is None:
+            return False
+        self._restore_location(entry)
+        return True
+
+    def go_forward(self) -> bool:
+        """Redo the jump undone by go_back. False if there is none."""
+        if not self._history.can_go_forward():
+            return False
+        entry = self._history.forward(current=self._current_location())
+        if entry is None:
+            return False
+        self._restore_location(entry)
+        return True
 
     def _clear_selection(self):
         if self._selection:
@@ -1074,7 +1157,9 @@ class PdfView(QGraphicsView):
                 item.set_selected_highlight(item.annotation_id == ann_id)
 
     def scroll_to_page_y(self, page_idx: int, y: float):
-        self._scroll_to_destination(page_idx, y, y_is_pdf_coords=False)
+        self._record_jump(
+            lambda: self._scroll_to_destination(page_idx, y, y_is_pdf_coords=False)
+        )
 
     def _annotation_hit_at_scene_pos(self, scene_pos: QPointF) -> str | None:
         for item in self._scene.items(scene_pos):
@@ -1314,6 +1399,9 @@ class PdfView(QGraphicsView):
         return bool(self._text_highlight_items)
 
     def scroll_to_rect(self, page_idx: int, rect: fitz.Rect):
+        self._record_jump(lambda: self._scroll_to_rect(page_idx, rect))
+
+    def _scroll_to_rect(self, page_idx: int, rect: fitz.Rect):
         if 0 <= page_idx < len(self._pages):
             page = self._pages[page_idx]
             y = page.pos().y() + rect.y0 * self._zoom - 40
@@ -1619,6 +1707,9 @@ class PdfView(QGraphicsView):
     def _activate_link(self, link_info: dict):
         if not link_info:
             return
+        self._record_jump(lambda: self._follow_link(link_info))
+
+    def _follow_link(self, link_info: dict):
         link = link_info["link"]
         self._hide_link_badge()
 
