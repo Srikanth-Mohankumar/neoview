@@ -1,129 +1,173 @@
-/**
- * NeoView Landing Page Interactions
- * Tab switching, copy-to-clipboard, smooth scrolling
+/*
+ * NeoView site: theme toggle, theme-aware screenshots, copy buttons.
+ * Plain JS, no dependencies. Screenshot data lives in screens.js.
  */
+(function () {
+  'use strict';
 
-document.addEventListener('DOMContentLoaded', () => {
-    initTabs();
-    initCopyButtons();
-    initSmoothScroll();
-    initScrollAnimations();
-});
+  var root = document.documentElement;
+  var STORAGE_KEY = 'neoview-theme';
+  var darkQuery = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
 
-/**
- * Tab functionality for installation section
- */
-function initTabs() {
-    const tabButtons = document.querySelectorAll('.tab-btn');
-    const tabPanes = document.querySelectorAll('.tab-pane');
+  function storedTheme() {
+    try {
+      var t = localStorage.getItem(STORAGE_KEY);
+      return t === 'light' || t === 'dark' ? t : null;
+    } catch (e) {
+      return null;
+    }
+  }
 
-    tabButtons.forEach(btn => {
-        btn.addEventListener('click', () => {
-            const targetTab = btn.dataset.tab;
+  function currentTheme() {
+    var t = root.getAttribute('data-theme');
+    if (t === 'light' || t === 'dark') return t;
+    return darkQuery && darkQuery.matches ? 'dark' : 'light';
+  }
 
-            // Update button states
-            tabButtons.forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
+  /* ---------- Screenshots ---------- */
 
-            // Update pane visibility
-            tabPanes.forEach(pane => {
-                pane.classList.remove('active');
-                if (pane.id === targetTab) {
-                    pane.classList.add('active');
-                }
-            });
-        });
+  var screens = Array.isArray(window.NEOVIEW_SCREENS) ? window.NEOVIEW_SCREENS : [];
+
+  function screenById(id) {
+    for (var i = 0; i < screens.length; i++) {
+      if (screens[i].id === id) return screens[i];
+    }
+    return null;
+  }
+
+  function srcFor(entry, theme) {
+    return theme === 'dark' && entry.dark ? entry.dark : entry.light;
+  }
+
+  function buildGallery() {
+    var grid = document.querySelector('[data-gallery]');
+    if (!grid || !screens.length) return;
+    var frag = document.createDocumentFragment();
+    screens.forEach(function (entry) {
+      if (entry.hero) return; /* already shown large at the top of the page */
+      var fig = document.createElement('figure');
+      fig.className = 'shot';
+      var link = document.createElement('a');
+      link.setAttribute('data-screen-link', entry.id);
+      var img = document.createElement('img');
+      img.setAttribute('data-screen', entry.id);
+      img.width = entry.width;
+      img.height = entry.height;
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      img.alt = entry.alt || '';
+      link.appendChild(img);
+      var cap = document.createElement('figcaption');
+      cap.textContent = entry.caption || '';
+      fig.appendChild(link);
+      fig.appendChild(cap);
+      frag.appendChild(fig);
     });
-}
+    grid.textContent = '';
+    grid.appendChild(frag);
+  }
 
-/**
- * Copy-to-clipboard functionality
- */
-function initCopyButtons() {
-    const copyButtons = document.querySelectorAll('.copy-btn');
-
-    copyButtons.forEach(btn => {
-        btn.addEventListener('click', async () => {
-            const textToCopy = btn.dataset.copy;
-            
-            try {
-                // Decode HTML entities for proper copying
-                const decodedText = textToCopy
-                    .replace(/&#10;/g, '\n')
-                    .replace(/&amp;/g, '&')
-                    .replace(/&lt;/g, '<')
-                    .replace(/&gt;/g, '>');
-                
-                await navigator.clipboard.writeText(decodedText);
-                
-                // Visual feedback
-                btn.classList.add('copied');
-                btn.innerHTML = `
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M20 6L9 17l-5-5"/>
-                    </svg>
-                `;
-                
-                setTimeout(() => {
-                    btn.classList.remove('copied');
-                    btn.innerHTML = `
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <rect x="9" y="9" width="13" height="13" rx="2"/>
-                            <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
-                        </svg>
-                    `;
-                }, 2000);
-            } catch (err) {
-                console.error('Failed to copy:', err);
-            }
-        });
+  function applyScreens(theme) {
+    document.querySelectorAll('img[data-screen]').forEach(function (img) {
+      var entry = screenById(img.getAttribute('data-screen'));
+      if (!entry) return;
+      var src = srcFor(entry, theme);
+      if (img.getAttribute('src') !== src) img.setAttribute('src', src);
+      if (entry.alt && img.closest('.shot') === null) img.alt = entry.alt;
     });
-}
-
-/**
- * Smooth scroll for anchor links
- */
-function initSmoothScroll() {
-    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
-        anchor.addEventListener('click', (e) => {
-            const targetId = anchor.getAttribute('href');
-            if (targetId === '#') return;
-            
-            const target = document.querySelector(targetId);
-            if (target) {
-                e.preventDefault();
-                target.scrollIntoView({
-                    behavior: 'smooth',
-                    block: 'start'
-                });
-            }
-        });
+    document.querySelectorAll('a[data-screen-link]').forEach(function (a) {
+      var entry = screenById(a.getAttribute('data-screen-link'));
+      if (entry) a.href = srcFor(entry, theme);
     });
-}
+  }
 
-/**
- * Intersection Observer for scroll animations
- */
-function initScrollAnimations() {
-    const observerOptions = {
-        threshold: 0.1,
-        rootMargin: '0px 0px -50px 0px'
+  /* ---------- Theme toggle ---------- */
+
+  var toggle = document.querySelector('.theme-toggle');
+
+  function syncToggle(theme) {
+    if (!toggle) return;
+    var next = theme === 'dark' ? 'light' : 'dark';
+    toggle.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    toggle.setAttribute('title', 'Switch to ' + next + ' theme');
+  }
+
+  function setTheme(theme, remember) {
+    root.setAttribute('data-theme', theme);
+    if (remember) {
+      try { localStorage.setItem(STORAGE_KEY, theme); } catch (e) { /* ignore */ }
+    }
+    syncToggle(theme);
+    applyScreens(theme);
+  }
+
+  if (toggle) {
+    toggle.hidden = false;
+    toggle.addEventListener('click', function () {
+      setTheme(currentTheme() === 'dark' ? 'light' : 'dark', true);
+    });
+  }
+
+  if (darkQuery) {
+    var onSystemChange = function () {
+      if (storedTheme()) return; /* an explicit choice wins */
+      root.removeAttribute('data-theme');
+      syncToggle(currentTheme());
+      applyScreens(currentTheme());
     };
+    if (darkQuery.addEventListener) darkQuery.addEventListener('change', onSystemChange);
+    else if (darkQuery.addListener) darkQuery.addListener(onSystemChange);
+  }
 
-    const observer = new IntersectionObserver((entries) => {
-        entries.forEach(entry => {
-            if (entry.isIntersecting) {
-                entry.target.classList.add('animate-in');
-                observer.unobserve(entry.target);
-            }
-        });
-    }, observerOptions);
+  /* ---------- Copy buttons ---------- */
 
-    // Observe elements with animation classes
-    const animatedElements = document.querySelectorAll('.reveal');
-    
-    animatedElements.forEach((el, index) => {
-        el.style.transitionDelay = `${Math.min(index * 0.04, 0.24)}s`;
-        observer.observe(el);
+  var status = document.createElement('p');
+  status.className = 'visually-hidden';
+  status.setAttribute('role', 'status');
+  document.body.appendChild(status);
+
+  function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      return navigator.clipboard.writeText(text);
+    }
+    return new Promise(function (resolve, reject) {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      var ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      document.body.removeChild(ta);
+      if (ok) resolve(); else reject(new Error('copy failed'));
     });
-}
+  }
+
+  document.querySelectorAll('.copy-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var text = btn.getAttribute('data-copy');
+      if (!text) {
+        var code = btn.parentElement.querySelector('code');
+        text = code ? code.textContent : '';
+      }
+      copyText(text).then(function () {
+        btn.classList.add('copied');
+        status.textContent = 'Copied to clipboard';
+        window.setTimeout(function () {
+          btn.classList.remove('copied');
+          status.textContent = '';
+        }, 1800);
+      }, function () {
+        status.textContent = 'Copy failed. Select the text and copy it manually.';
+      });
+    });
+  });
+
+  /* ---------- Init ---------- */
+
+  buildGallery();
+  setTheme(currentTheme(), false);
+  if (!storedTheme()) root.removeAttribute('data-theme');
+})();
