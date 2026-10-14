@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import time
+from bisect import bisect_right
 from collections import deque
 from uuid import uuid4
 
@@ -199,6 +200,9 @@ class MainWindow(QMainWindow):
         self._thumb_icon_cache: dict[tuple, QIcon] = {}
         self._thumb_queue: deque[int] = deque()
         self._thumb_queued: set[int] = set()
+        # (toc root item, sorted TOC pages, items in the same order) for bisecting
+        # in _sync_outline_current_page; rebuilt by _populate_outline.
+        self._outline_sync_index: tuple[QTreeWidgetItem, list[int], list[QTreeWidgetItem]] | None = None
 
         self._watcher = QFileSystemWatcher(self)
         self._watcher.fileChanged.connect(self._on_change)
@@ -1675,6 +1679,7 @@ class MainWindow(QMainWindow):
 
         filt = self._outline_filter.text().strip().lower()
 
+        toc_entries: list[tuple[int, int, QTreeWidgetItem]] = []
         if doc:
             for level, title, page in doc.get_toc(simple=True):
                 page_idx = max(0, page - 1)
@@ -1685,6 +1690,16 @@ class MainWindow(QMainWindow):
                 item.setData(0, self.ROLE_KIND, "toc")
                 item.setData(0, self.ROLE_PAGE, page_idx)
                 root_toc.addChild(item)
+                toc_entries.append((page_idx, len(toc_entries), item))
+
+        # Sorted by (page, outline order): bisecting for the last page <= current
+        # lands on the same item the old linear scan picked (later entry wins ties).
+        toc_entries.sort(key=lambda entry: (entry[0], entry[1]))
+        self._outline_sync_index = (
+            root_toc,
+            [entry[0] for entry in toc_entries],
+            [entry[2] for entry in toc_entries],
+        )
 
         for bookmark in ctx.sidecar_state.bookmarks:
             if filt and filt not in bookmark.title.lower() and filt not in str(bookmark.page + 1):
@@ -1703,6 +1718,18 @@ class MainWindow(QMainWindow):
 
         root_toc = self._outline_tree.topLevelItem(0)
         if root_toc is None:
+            return
+
+        # Runs on every scroll tick; a linear scan over the TOC cost ~4 ms per
+        # tick with a 4963-entry outline. Use the index built by _populate_outline.
+        index = self._outline_sync_index
+        if index is not None and index[0] is root_toc:
+            _root, pages, items = index
+            pos = bisect_right(pages, page_idx) - 1
+            if pos >= 0:
+                self._outline_tree.blockSignals(True)
+                self._outline_tree.setCurrentItem(items[pos])
+                self._outline_tree.blockSignals(False)
             return
 
         for i in range(root_toc.childCount()):
