@@ -899,3 +899,15 @@ def test_system_theme_follows_platform_scheme(qtbot, restore_app_theme, monkeypa
     win._on_system_color_scheme_changed()
     assert app.property("theme_mode") == "light"
 
+
+
+def test_welcome_hides_recent_heading_when_there_are_no_recent_files(qtbot, tmp_path):
+    win = _window(qtbot)
+    panel = win._welcome
+    assert panel._recent_header.isHidden()
+    pdf = tmp_path / "a.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n")
+    panel.set_recent_files([str(pdf)])
+    assert not panel._recent_header.isHidden()
+    panel.set_recent_files([])
+    assert panel._recent_header.isHidden()

@@ -115,6 +115,7 @@ class WelcomePanel(QWidget):
 
     def set_recent_files(self, paths: list[str]) -> None:
         shown = [p for p in paths if p][:MAX_RECENT]
+        self._recent_header.setVisible(bool(shown))  # no empty "RECENT" heading
         if shown == [btn.toolTip() for btn in self.recent_buttons]:
             return
         for btn in self.recent_buttons:
