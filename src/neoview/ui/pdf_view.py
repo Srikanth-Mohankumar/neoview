@@ -7,7 +7,7 @@ import os
 import re
 from bisect import bisect_right
 from enum import Enum, auto
-from typing import Dict, List, Optional, Tuple
+from typing import Optional
 from urllib.parse import unquote
 
 import fitz
@@ -103,8 +103,8 @@ class PdfView(QGraphicsView):
 
         self._doc: Optional[fitz.Document] = None
         self._doc_path: Optional[str] = None
-        self._pages: List[PageItem] = []
-        self._page_positions: List[float] = []
+        self._pages: list[PageItem] = []
+        self._page_positions: list[float] = []
         self._zoom: float = 1.0
         self._zoom_mode: str = self.ZOOM_MODE_CUSTOM
         self._tool: ToolMode = ToolMode.HAND
@@ -127,15 +127,15 @@ class PdfView(QGraphicsView):
         self._text_select_start: Optional[QPointF] = None
         self._text_select_page: int = -1
         self._text_select_item: Optional[QGraphicsRectItem] = None
-        self._text_highlight_items: List[Tuple[int, QGraphicsRectItem]] = []
+        self._text_highlight_items: list[tuple[int, QGraphicsRectItem]] = []
         self._text_inspect_item: Optional[QGraphicsRectItem] = None
         self._text_inspect_page: int = -1
 
-        self._search_highlights: List[tuple] = []
-        self._search_items: List[QGraphicsRectItem] = []
-        self._annotations: List[AnnotationRecord] = []
-        self._annotation_items: List[Tuple[int, AnnotationItem]] = []
-        self._annotation_index: Dict[str, AnnotationRecord] = {}
+        self._search_highlights: list[tuple] = []
+        self._search_items: list[QGraphicsRectItem] = []
+        self._annotations: list[AnnotationRecord] = []
+        self._annotation_items: list[tuple[int, AnnotationItem]] = []
+        self._annotation_index: dict[str, AnnotationRecord] = {}
         self._selected_annotation_id: Optional[str] = None
 
         # Annotate tool state
@@ -148,12 +148,12 @@ class PdfView(QGraphicsView):
         self._annotate_start: Optional[QPointF] = None
         self._annotate_page: int = -1
         self._annotate_preview_rect: Optional[QGraphicsRectItem] = None
-        self._annotate_freehand_points: List[List[float]] = []
+        self._annotate_freehand_points: list[list[float]] = []
         self._annotate_freehand_path_item: Optional[QGraphicsPathItem] = None
 
-        self._page_links: List[List[Tuple[QRectF, Dict]]] = []
-        self._hover_link: Optional[Dict] = None
-        self._pressed_link: Optional[Dict] = None
+        self._page_links: list[list[tuple[QRectF, dict]]] = []
+        self._hover_link: Optional[dict] = None
+        self._pressed_link: Optional[dict] = None
         self._pressed_pos: Optional[QPointF] = None
         self._link_highlight_item: Optional[QGraphicsRectItem] = None
 
@@ -543,7 +543,7 @@ class PdfView(QGraphicsView):
         gap = 20
         y = gap
 
-        positions: List[float] = []
+        positions: list[float] = []
         for p in self._pages:
             render_zoom = p.render_zoom if p.render_zoom > 0 else self._zoom
             render_factor = getattr(p, "render_scale_factor", PageItem.BASE_RENDER_SCALE)
@@ -590,7 +590,7 @@ class PdfView(QGraphicsView):
     def _cache_page_links(self):
         self._page_links = []
         for page_item in self._pages:
-            links: List[Tuple[QRectF, Dict]] = []
+            links: list[tuple[QRectF, dict]] = []
             try:
                 for link in page_item._fitz_page.get_links():
                     src = link.get("from")
@@ -607,13 +607,13 @@ class PdfView(QGraphicsView):
                 pass
             self._page_links.append(links)
 
-    def _visible_page_indices(self, overscan: int = 0) -> List[int]:
+    def _visible_page_indices(self, overscan: int = 0) -> list[int]:
         if not self._pages:
             return []
         visible_rect = self.mapToScene(self.viewport().rect()).boundingRect()
         top = visible_rect.top()
         bottom = visible_rect.bottom()
-        visible: List[int] = []
+        visible: list[int] = []
 
         start_idx = max(0, bisect_right(self._page_positions, top) - 1)
         for idx in range(start_idx, len(self._pages)):
@@ -886,7 +886,7 @@ class PdfView(QGraphicsView):
         self._text_inspect_page = page_idx
         return True
 
-    def set_search_highlights(self, highlights: List[tuple]):
+    def set_search_highlights(self, highlights: list[tuple]):
         self._search_highlights = highlights
         self._rebuild_search_highlights()
 
@@ -902,7 +902,7 @@ class PdfView(QGraphicsView):
                 self._scene.removeItem(item)
         self._annotation_items.clear()
 
-    def set_annotations(self, annotations: List[AnnotationRecord]):
+    def set_annotations(self, annotations: list[AnnotationRecord]):
         self._annotations = list(annotations or [])
         self._annotation_index = {item.id: item for item in self._annotations if item.id}
         self._rebuild_annotation_items()
@@ -1222,7 +1222,7 @@ class PdfView(QGraphicsView):
         self._pressed_link = None
         self._pressed_pos = None
 
-    def _same_link(self, first: Dict, second: Dict) -> bool:
+    def _same_link(self, first: dict, second: dict) -> bool:
         f = first.get("link", {})
         s = second.get("link", {})
         return (
@@ -1318,7 +1318,7 @@ class PdfView(QGraphicsView):
         except (TypeError, ValueError):
             return None
 
-    def _resolve_named_destination(self, name: str) -> Tuple[Optional[int], Optional[float]]:
+    def _resolve_named_destination(self, name: str) -> tuple[Optional[int], Optional[float]]:
         if not self._doc:
             return (None, None)
         key = str(name or "").strip()
@@ -1352,7 +1352,7 @@ class PdfView(QGraphicsView):
             target_y = self._parse_dest_string_y(str(target.get("dest", "")))
         return (page_idx, target_y)
 
-    def _resolve_uri_destination(self, uri: str) -> Tuple[Optional[int], Optional[float]]:
+    def _resolve_uri_destination(self, uri: str) -> tuple[Optional[int], Optional[float]]:
         if not self._doc:
             return (None, None)
         try:
@@ -1363,7 +1363,7 @@ class PdfView(QGraphicsView):
             return (page_id, y)
         return (None, None)
 
-    def _link_at_scene_pos(self, scene_pos: QPointF) -> Optional[Dict]:
+    def _link_at_scene_pos(self, scene_pos: QPointF) -> Optional[dict]:
         page_idx = self._get_page_at(scene_pos)
         if page_idx < 0 or page_idx >= len(self._page_links):
             return None
@@ -1388,7 +1388,7 @@ class PdfView(QGraphicsView):
         self._link_highlight_item = item
         return item
 
-    def _show_link_highlight(self, link_info: Dict):
+    def _show_link_highlight(self, link_info: dict):
         page_idx = link_info.get("page_idx", -1)
         if not (0 <= page_idx < len(self._pages)):
             return
@@ -1407,7 +1407,7 @@ class PdfView(QGraphicsView):
         highlight.setRect(scene_rect)
         highlight.show()
 
-    def _link_tooltip_text(self, link: Dict) -> str:
+    def _link_tooltip_text(self, link: dict) -> str:
         uri = str(link.get("uri") or "").strip()
         if uri:
             if uri.startswith("#"):
@@ -1457,7 +1457,7 @@ class PdfView(QGraphicsView):
         if tooltip:
             QToolTip.showText(self.viewport().mapToGlobal(viewport_pos + QPoint(14, 16)), tooltip, self.viewport())
 
-    def _activate_link(self, link_info: Dict):
+    def _activate_link(self, link_info: dict):
         if not link_info:
             return
         link = link_info["link"]
@@ -2315,7 +2315,7 @@ class PdfView(QGraphicsView):
             painter.setPen(major_pen)
             self._paint_corner_marks_for_page(painter, page_view_rect, major_x, major_y)
 
-    def _paint_corner_marks_for_page(self, painter: QPainter, page_view_rect: QRectF, major_x: List[float], major_y: List[float]):
+    def _paint_corner_marks_for_page(self, painter: QPainter, page_view_rect: QRectF, major_x: list[float], major_y: list[float]):
         if len(major_x) < 2 or len(major_y) < 2:
             return
         for left_pt, right_pt in zip(major_x, major_x[1:]):

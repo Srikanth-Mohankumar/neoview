@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Optional
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import (
@@ -209,7 +209,7 @@ class AnnotationItem(QGraphicsItem):
         p.drawEllipse(r)
 
     def _paint_freehand(
-        self, p: QPainter, points: List[List[float]], color: QColor, bw: float, opacity: float
+        self, p: QPainter, points: list[list[float]], color: QColor, bw: float, opacity: float
     ):
         if len(points) < 2:
             return

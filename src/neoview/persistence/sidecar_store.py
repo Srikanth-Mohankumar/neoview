@@ -8,7 +8,7 @@ import os
 import re
 import tempfile
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Iterable, Optional
 
 from neoview.models.view_state import (
     ANNOTATION_TYPES,
@@ -60,7 +60,7 @@ def _coerce_color(value: str, default: str = "#f7c948") -> str:
     return default
 
 
-def _coerce_points(value: Any) -> List[List[float]]:
+def _coerce_points(value: Any) -> list[list[float]]:
     """Coerce a raw value to a list of [x, y] float pairs."""
     if not isinstance(value, list):
         return []
@@ -74,7 +74,7 @@ def _coerce_points(value: Any) -> List[List[float]]:
     return result
 
 
-def _annotation_from_dict(item: Dict[str, Any]) -> Optional[AnnotationRecord]:
+def _annotation_from_dict(item: dict[str, Any]) -> Optional[AnnotationRecord]:
     if not isinstance(item, dict):
         return None
     rect = _coerce_rect(item.get("rect"))
@@ -148,7 +148,7 @@ def _annotation_from_dict(item: Dict[str, Any]) -> Optional[AnnotationRecord]:
 _MAX_BOOKMARK_TITLE_LEN = 1024
 
 
-def _bookmark_from_dict(item: Dict[str, Any]) -> Optional[BookmarkRecord]:
+def _bookmark_from_dict(item: dict[str, Any]) -> Optional[BookmarkRecord]:
     if not isinstance(item, dict):
         return None
     bid = str(item.get("id", "")).strip()
@@ -175,8 +175,8 @@ def _bookmark_from_dict(item: Dict[str, Any]) -> Optional[BookmarkRecord]:
     return BookmarkRecord(id=bid, title=title, page=page, y=y, created_at=created)
 
 
-def _annotation_to_dict(record: AnnotationRecord) -> Dict[str, Any]:
-    d: Dict[str, Any] = {
+def _annotation_to_dict(record: AnnotationRecord) -> dict[str, Any]:
+    d: dict[str, Any] = {
         "id": record.id,
         "type": record.type,
         "page": int(record.page),
@@ -200,7 +200,7 @@ def _annotation_to_dict(record: AnnotationRecord) -> Dict[str, Any]:
     return d
 
 
-def _bookmark_to_dict(record: BookmarkRecord) -> Dict[str, Any]:
+def _bookmark_to_dict(record: BookmarkRecord) -> dict[str, Any]:
     return {
         "id": record.id,
         "title": record.title,
@@ -220,7 +220,7 @@ def _rename_broken(path: str) -> None:
         return
 
 
-def _iter_records(source: Any) -> Iterable[Dict[str, Any]]:
+def _iter_records(source: Any) -> Iterable[dict[str, Any]]:
     if not isinstance(source, list):
         return []
     return [item for item in source if isinstance(item, dict)]

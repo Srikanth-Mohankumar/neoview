@@ -8,7 +8,7 @@ import os
 import sys
 import time
 from collections import deque
-from typing import Dict, List, Optional, Tuple
+from typing import Optional
 from uuid import uuid4
 
 import fitz
@@ -153,11 +153,11 @@ class MainWindow(QMainWindow):
         self.setAcceptDrops(True)
 
         self._current_file: Optional[str] = None
-        self._last_file_sig: Optional[Tuple[int, int, int]] = None
+        self._last_file_sig: Optional[tuple[int, int, int]] = None
         self._settings = QSettings("NeoView", "NeoView")
-        self._recent_files: List[str] = self._settings.value("recent_files", [], type=list)
+        self._recent_files: list[str] = self._settings.value("recent_files", [], type=list)
         self._recent_menu: Optional[object] = None
-        self._document_sessions: Dict[str, Dict[str, object]] = self._load_json_setting("documents/session", {})
+        self._document_sessions: dict[str, dict[str, object]] = self._load_json_setting("documents/session", {})
         self._startup_last_file = ""
         if not pdf_path:
             self._startup_last_file = self._settings.value("session/last_active_file", "", type=str)
@@ -179,12 +179,12 @@ class MainWindow(QMainWindow):
         }
 
         self._view: Optional[PdfView] = None
-        self._tab_contexts: Dict[PdfView, TabContext] = {}
-        self._sidecar_timers: Dict[PdfView, QTimer] = {}
+        self._tab_contexts: dict[PdfView, TabContext] = {}
+        self._sidecar_timers: dict[PdfView, QTimer] = {}
 
         # Active-tab thumbnail state.
         self._thumb_source_key: str = ""
-        self._thumb_icon_cache: Dict[tuple, QIcon] = {}
+        self._thumb_icon_cache: dict[tuple, QIcon] = {}
         self._thumb_queue: deque[int] = deque()
         self._thumb_queued: set[int] = set()
 
@@ -214,7 +214,7 @@ class MainWindow(QMainWindow):
         self._search_batch_timer = QTimer(self)
         self._search_batch_timer.setSingleShot(True)
         self._search_batch_timer.timeout.connect(self._process_search_batch)
-        self._search_operation: Optional[Dict[str, object]] = None
+        self._search_operation: Optional[dict[str, object]] = None
         self._reload_in_progress = False
         self._last_maximize_at: float = 0.0
 
@@ -1506,8 +1506,8 @@ class MainWindow(QMainWindow):
             self.update()
             target.viewport().update()
 
-    def _extract_pdf_paths_from_urls(self, urls: List[QUrl]) -> List[str]:
-        paths: List[str] = []
+    def _extract_pdf_paths_from_urls(self, urls: list[QUrl]) -> list[str]:
+        paths: list[str] = []
         seen: set[str] = set()
         for url in urls:
             if not url.isLocalFile():
@@ -1890,10 +1890,10 @@ class MainWindow(QMainWindow):
         self._search_batch_timer.stop()
         self._search_operation = None
 
-    def _search_page_rects(self, page: fitz.Page, query: str) -> List[fitz.Rect]:
+    def _search_page_rects(self, page: fitz.Page, query: str) -> list[fitz.Rect]:
         return list(page.search_for(query))
 
-    def _scan_search_batch(self, operation: Dict[str, object]) -> bool:
+    def _scan_search_batch(self, operation: dict[str, object]) -> bool:
         doc = operation["doc"]
         query = operation["query"]
         case_sensitive = bool(operation["case_sensitive"])
@@ -1933,7 +1933,7 @@ class MainWindow(QMainWindow):
         operation["page_idx"] = page_idx
         return page_idx >= doc.page_count or len(results) >= result_limit
 
-    def _apply_search_results(self, view: PdfView, ctx: TabContext, results: List[SearchMatch], post_nav: int = 0):
+    def _apply_search_results(self, view: PdfView, ctx: TabContext, results: list[SearchMatch], post_nav: int = 0):
         ctx.search_results = list(results)
         ctx.search_index = 0 if results else -1
 
@@ -2009,7 +2009,7 @@ class MainWindow(QMainWindow):
 
         case_sensitive = self._search_case_chk.isChecked()
         if doc.page_count <= self.SEARCH_SYNC_PAGE_THRESHOLD:
-            operation: Dict[str, object] = {
+            operation: dict[str, object] = {
                 "doc": doc,
                 "query": query,
                 "case_sensitive": case_sensitive,
@@ -2904,7 +2904,7 @@ class MainWindow(QMainWindow):
             return
         self._schedule_reload_if_modified()
 
-    def _file_signature(self, path: Optional[str]) -> Optional[Tuple[int, int, int]]:
+    def _file_signature(self, path: Optional[str]) -> Optional[tuple[int, int, int]]:
         if not path or not os.path.exists(path):
             return None
         try:

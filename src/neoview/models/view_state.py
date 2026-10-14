@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
-RectTuple = Tuple[float, float, float, float]
+RectTuple = tuple[float, float, float, float]
 
 # All supported annotation types.
 ANNOTATION_TYPES = {
@@ -42,9 +42,9 @@ class AnnotationRecord:
     # Font size for text-box annotations
     font_size: float = 12.0
     # Freehand path: list of [x, y] pairs in PDF coordinates
-    points: List[List[float]] = field(default_factory=list)
+    points: list[list[float]] = field(default_factory=list)
     # Arbitrary extra data (reserved for future use)
-    extra: Dict[str, Any] = field(default_factory=dict)
+    extra: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -63,8 +63,8 @@ class DocumentSidecarState:
     """On-disk sidecar payload."""
 
     version: int = 1
-    annotations: List[AnnotationRecord] = field(default_factory=list)
-    bookmarks: List[BookmarkRecord] = field(default_factory=list)
+    annotations: list[AnnotationRecord] = field(default_factory=list)
+    bookmarks: list[BookmarkRecord] = field(default_factory=list)
 
 
 @dataclass
@@ -83,8 +83,8 @@ class TabContext:
     file_path: Optional[str] = None
     search_query: str = ""
     search_index: int = -1
-    search_results: List[SearchMatch] = field(default_factory=list)
+    search_results: list[SearchMatch] = field(default_factory=list)
     sidecar_state: DocumentSidecarState = field(default_factory=DocumentSidecarState)
     sidecar_error: str = ""
     # Annotations read from the PDF itself (e.g. made in Acrobat). Read-only; not persisted to sidecar.
-    native_annotations: List[AnnotationRecord] = field(default_factory=list)
+    native_annotations: list[AnnotationRecord] = field(default_factory=list)
