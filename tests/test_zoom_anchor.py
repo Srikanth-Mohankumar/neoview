@@ -12,7 +12,8 @@ from pathlib import Path
 
 import fitz
 import pytest
-from PySide6.QtCore import QPoint, QPointF
+from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtGui import QWheelEvent
 from PySide6.QtWidgets import QApplication
 
 from neoview.ui.pdf_view import PdfView
@@ -446,6 +447,178 @@ class TestZoomAtViewportPoint:
             assert view._zoom <= 10.0
             assert view.verticalScrollBar().value() == scroll_v_before
             assert view.horizontalScrollBar().value() == scroll_h_before
+        finally:
+            view.close_document()
+            view.close()
+
+
+# ---------------------------------------------------------------------------
+# Input paths: Ctrl+wheel and touchpad pinch (QNativeGestureEvent)
+# ---------------------------------------------------------------------------
+
+PAGE_W, PAGE_H = 595, 842
+PAGE_MODES = ["continuous", "single", "two-page", "two-page-cover"]
+
+
+@pytest.fixture()
+def pdf_book(tmp_path: Path) -> Path:
+    """Eight A4 pages: enough that page index 3 sits mid-document in every mode."""
+    p = tmp_path / "book.pdf"
+    _make_pdf(p, [(PAGE_W, PAGE_H)] * 8)
+    return p
+
+
+def _centre(view: PdfView) -> QPoint:
+    return view.viewport().rect().center()
+
+
+def _ctrl_wheel(view: PdfView, pos: QPoint, *, angle: int = 0, pixel: int = 0) -> bool:
+    """Send a Ctrl+wheel event to the viewport; return whether it was accepted."""
+    ev = QWheelEvent(QPointF(pos), QPointF(view.viewport().mapToGlobal(pos)),
+                     QPoint(0, pixel), QPoint(0, angle), Qt.MouseButton.NoButton,
+                     Qt.KeyboardModifier.ControlModifier, Qt.ScrollPhase.NoScrollPhase, False)
+    QApplication.sendEvent(view.viewport(), ev)
+    return ev.isAccepted()
+
+
+def _anchor_under(view: PdfView, vp: QPoint) -> tuple[int, float, float]:
+    """Page-local point under *vp*; in a gap, relative to the nearest page."""
+    scene_pt = view.mapToScene(vp)
+    idx = view._get_page_at(scene_pt)
+    if idx < 0:
+        idx = view._nearest_page_index(scene_pt)
+    page = view._pages[idx]
+    return (idx, (scene_pt.x() - page.pos().x()) / view._zoom,
+            (scene_pt.y() - page.pos().y()) / view._zoom)
+
+
+def _drift(view: PdfView, anchor: tuple[int, float, float], vp: QPoint) -> tuple[int, int]:
+    """How far (viewport px) the anchored page point now is from *vp*."""
+    idx, lx, ly = anchor
+    page = view._pages[idx]
+    now = view.mapFromScene(QPointF(page.pos().x() + lx * view._zoom,
+                                    page.pos().y() + ly * view._zoom))
+    return abs(now.x() - vp.x()), abs(now.y() - vp.y())
+
+
+# How each UI path zooms in (by 1.25x or a little more). Buttons, Ctrl+= and the zoom
+# box keep the viewport centre fixed; wheel and pinch keep the point under the cursor
+# fixed. Here the cursor is at the centre too, so one invariant covers every path.
+ZOOM_IN_PATHS = {
+    "zoom_by": lambda v: v.zoom_by(1.25),  # toolbar button and Ctrl+= / Ctrl++
+    "set_zoom": lambda v: v.set_zoom(v.zoom * 1.25),  # zoom box in the status bar
+    "ctrl_wheel_angle": lambda v: [_ctrl_wheel(v, _centre(v), angle=120) for _ in range(3)],
+    "ctrl_wheel_pixel": lambda v: [_ctrl_wheel(v, _centre(v), pixel=12) for _ in range(30)],
+}
+
+
+@pytest.mark.parametrize("path", sorted(ZOOM_IN_PATHS))
+@pytest.mark.parametrize("mode", PAGE_MODES)
+def test_zoom_in_on_page_four_stays_on_page_four(pdf_book: Path, mode: str, path: str):
+    """User report: zooming in while reading the 4th page showed the 3rd page."""
+    view = _load_view(pdf_book)
+    try:
+        view.set_page_mode(mode)
+        view.go_to_page(3)
+        QApplication.processEvents()
+        page_before = view.current_page
+        # The two-page modes report the first page of the spread; page 3 must be in it.
+        assert 3 in view._row_pages(view._page_row[page_before])
+        centre = _centre(view)
+        anchor = _anchor_under(view, centre)
+        zoom_before = view.zoom
+
+        ZOOM_IN_PATHS[path](view)
+        QApplication.processEvents()
+
+        assert view.zoom > zoom_before * 1.2, f"{path} did not zoom in ({view.zoom})"
+        assert view.current_page == page_before
+        dx, dy = _drift(view, anchor, centre)
+        assert dx <= 2 and dy <= 2, f"{mode}/{path}: centre point drifted by ({dx}, {dy}) px"
+    finally:
+        view.close_document()
+        view.close()
+
+
+@pytest.mark.parametrize("mode", PAGE_MODES)
+def test_zoom_out_on_page_four_stays_on_page_four(pdf_book: Path, mode: str):
+    view = _load_view(pdf_book)
+    try:
+        view.set_page_mode(mode)
+        view.set_zoom(2.0, immediate=True)
+        view.go_to_page(3)
+        # Read from mid-page: in single mode the scene is just this page, and at its very
+        # top zooming out would need the scrollbar to go below its minimum.
+        bar = view.verticalScrollBar()
+        bar.setValue(bar.value() + view.viewport().height() // 2)
+        QApplication.processEvents()
+        page_before = view.current_page
+        anchor = _anchor_under(view, _centre(view))
+
+        view.zoom_by(0.8)
+        QApplication.processEvents()
+
+        assert view.current_page == page_before
+        dx, dy = _drift(view, anchor, _centre(view))
+        assert dx <= 2 and dy <= 2, f"{mode}: centre point drifted by ({dx}, {dy}) px"
+    finally:
+        view.close_document()
+        view.close()
+
+
+def test_zoom_at_document_top_keeps_the_top(pdf_book: Path):
+    """Opening applies fit-width; the first page must still start at the top."""
+    view = _load_view(pdf_book)
+    try:
+        assert view.verticalScrollBar().value() == view.verticalScrollBar().minimum()
+        view.zoom_by(1.25)
+        view.fit_width()
+        QApplication.processEvents()
+        assert view.verticalScrollBar().value() == view.verticalScrollBar().minimum()
+        assert view.current_page == 0
+    finally:
+        view.close_document()
+        view.close()
+
+
+class TestCtrlWheel:
+    def test_angle_delta_zooms_in_and_out(self, pdf_book: Path):
+        view = _load_view(pdf_book)
+        try:
+            assert _ctrl_wheel(view, _centre(view), angle=120)
+            assert view.zoom == pytest.approx(1.08, rel=1e-3)
+            _ctrl_wheel(view, _centre(view), angle=-240)
+            assert view.zoom == pytest.approx(1.08 / 1.08 ** 2, rel=1e-3)
+        finally:
+            view.close_document()
+            view.close()
+
+    def test_high_resolution_deltas_zoom_smoothly(self, pdf_book: Path):
+        """Touchpad scrolling sends many small pixelDelta-only (or tiny angleDelta) events."""
+        view = _load_view(pdf_book)
+        try:
+            for _ in range(10):
+                _ctrl_wheel(view, _centre(view), pixel=3)
+            assert view.zoom == pytest.approx(1.08 ** (30 / 120), rel=1e-3)
+            for _ in range(10):
+                _ctrl_wheel(view, _centre(view), angle=-3)
+            assert view.zoom == pytest.approx(1.0, rel=1e-3)
+        finally:
+            view.close_document()
+            view.close()
+
+    def test_ctrl_wheel_keeps_point_under_cursor(self, pdf_book: Path):
+        view = _load_view(pdf_book)
+        try:
+            view.set_zoom(2.0, immediate=True)
+            QApplication.processEvents()
+            pos = _viewport_for_page_local(view, 0, 300.0, 150.0)
+            anchor = _anchor_under(view, pos)
+            for _ in range(30):
+                _ctrl_wheel(view, pos, angle=8)
+            assert view.zoom > 2.2
+            dx, dy = _drift(view, anchor, pos)
+            assert dx <= 2 and dy <= 2, f"wheel zoom drifted by ({dx}, {dy}) px"
         finally:
             view.close_document()
             view.close()
