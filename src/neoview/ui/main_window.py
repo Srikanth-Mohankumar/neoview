@@ -3415,8 +3415,12 @@ class MainWindow(QMainWindow):
             self,
             f"About {APP_NAME}",
             f"<h3>{APP_NAME} {html.escape(ver)}</h3>"
-            "<p>A PDF viewer with measurement tools, annotations and auto-reload for LaTeX "
-            "workflows.</p><p>Icons: Lucide (ISC). Font: Inter (SIL OFL 1.1).</p>",
+            "<p>The PDF viewer for reviewing typeset pages: inspect fonts, measure, annotate, "
+            "and auto-reload LaTeX or Typst output.</p>"
+            '<p><a href="https://srikanth-mohankumar.github.io/neoview/">Website</a> &middot; '
+            '<a href="https://github.com/Srikanth-Mohankumar/neoview">GitHub</a></p>'
+            "<p>Free and open source under the MIT licence.<br>"
+            "Icons: Lucide (ISC licence). Font: Inter (SIL Open Font License 1.1).</p>",
         )
 
     def _update_status(self):
