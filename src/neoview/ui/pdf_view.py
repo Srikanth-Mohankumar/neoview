@@ -44,6 +44,7 @@ from neoview.models.view_state import AnnotationRecord
 from neoview.ui import icons
 from neoview.ui.annotation_item import AnnotationItem
 from neoview.ui.page_item import PageItem, new_doc_token, release_freed_memory
+from neoview.ui.password import unlock
 from neoview.ui.render_scheduler import RenderRequest, RenderScheduler
 from neoview.ui.selection import SelectionRect
 
@@ -77,6 +78,7 @@ class PdfView(QGraphicsView):
     annotation_edit_requested = Signal(str)  # emits annotation id (double-click / context menu)
     document_loaded = Signal()
     performance_mode_toggled = Signal(bool)
+    password_required = Signal(str)  # path of an encrypted PDF that needs a (new) password
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -101,6 +103,8 @@ class PdfView(QGraphicsView):
 
         self._doc: fitz.Document | None = None
         self._doc_path: str | None = None
+        # Password the open document was unlocked with; memory only, never persisted.
+        self._doc_password: str | None = None
         self._pages: list[PageItem] = []
         self._page_positions: list[float] = []
         self._zoom: float = 1.0
@@ -393,10 +397,28 @@ class PdfView(QGraphicsView):
                 self.setCursor(Qt.CursorShape.CrossCursor)
             self.setDragMode(QGraphicsView.DragMode.NoDrag)
 
-    def open_document(self, path: str) -> bool:
+    def document_password(self) -> str | None:
+        """Password the open document was unlocked with (None if it needs none)."""
+        return self._doc_password
+
+    def open_document(self, path: str, password: str | None = None) -> bool:
+        """Open *path*; returns False on failure and keeps the current document.
+
+        An encrypted PDF opened without its password (or with a wrong one) shows no error
+        box: the view emits ``password_required(path)`` and returns False, and the caller
+        prompts and calls ``open_document(path, password)`` again.
+        """
         try:
             doc = fitz.open(path)
+            # Check encryption before anything touches pages: page_count and page access
+            # are meaningless until the document is authenticated.
+            encrypted = bool(doc.needs_pass)
+            if encrypted and not unlock(doc, password or ""):
+                doc.close()
+                self.password_required.emit(path)
+                return False
             if doc.page_count == 0:
+                doc.close()
                 raise ValueError("PDF has no pages")
 
             # Renders in flight hold pages of the old document: drop them before closing it.
@@ -406,6 +428,7 @@ class PdfView(QGraphicsView):
 
             self._doc = doc
             self._doc_path = os.path.abspath(path)
+            self._doc_password = password if encrypted else None
             self._clear_selection()
             self._render_all_pages()
             self.document_loaded.emit()
@@ -425,6 +448,12 @@ class PdfView(QGraphicsView):
         new_doc = None
         try:
             new_doc = fitz.open(self._doc_path)
+            if new_doc.needs_pass and not unlock(new_doc, self._doc_password or ""):
+                # Rebuilt with a different password (or newly encrypted): ask again.
+                new_doc.close()
+                new_doc = None
+                self.password_required.emit(self._doc_path)
+                return False
             if new_doc.page_count == 0:
                 new_doc.close()
                 return False
@@ -493,6 +522,7 @@ class PdfView(QGraphicsView):
             self._doc.close()
             self._doc = None
         self._doc_path = None
+        self._doc_password = None
         self._scene.clear()
         self._pages.clear()
         self._page_positions.clear()
