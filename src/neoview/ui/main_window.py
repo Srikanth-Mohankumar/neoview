@@ -2066,11 +2066,29 @@ class MainWindow(QMainWindow):
             return
         self._search_count_lbl.setText("0/0")
 
-    def _search_snippet(self, page: fitz.Page, rect: fitz.Rect) -> str:
-        clip = fitz.Rect(rect.x0 - 80, rect.y0 - 10, rect.x1 + 80, rect.y1 + 10)
-        clip &= page.rect
-        text = page.get_textbox(clip).strip().replace("\n", " ")
-        return text[:160] if text else "(match)"
+    def _search_snippet(self, page: fitz.Page, rect: fitz.Rect, context_words: int = 6) -> str:
+        """The match's own text line, trimmed to a few whole words either side.
+
+        A padded clip box picked up fragments of the lines above and below and cut words
+        in half, so build the snippet from the words on the matching line instead.
+        """
+        mid_y = (rect.y0 + rect.y1) / 2
+        # get_text("words") rows: x0, y0, x1, y1, word, block_no, line_no, word_no
+        line = sorted(
+            (w for w in page.get_text("words") if w[1] <= mid_y <= w[3]),
+            key=lambda w: w[0],
+        )
+        hits = [i for i, w in enumerate(line) if w[0] < rect.x1 and w[2] > rect.x0]
+        if not hits:
+            return "(match)"
+        start = max(0, hits[0] - context_words)
+        end = min(len(line), hits[-1] + context_words + 1)
+        text = " ".join(w[4] for w in line[start:end])
+        if start > 0:
+            text = "… " + text
+        if end < len(line):
+            text += " …"
+        return text[:160]
 
     def _cancel_search_operation(self):
         self._search_batch_timer.stop()

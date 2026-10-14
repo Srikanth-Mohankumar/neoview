@@ -472,3 +472,26 @@ def test_opening_second_file_saves_session_of_the_document_being_left(tmp_path: 
 
     saved = win._document_sessions.get(os.path.abspath(str(a)))
     assert saved is not None and saved.get("page") == 3
+
+
+def test_search_snippet_is_the_matching_line_without_neighbour_fragments(tmp_path: Path):
+    pdf = tmp_path / "lines.pdf"
+    doc = fitz.open()
+    page = doc.new_page(width=595, height=842)
+    page.insert_text((72, 100), "alpha bravo charlie delta echo foxtrot golf hotel india", fontsize=11)
+    page.insert_text((72, 113), "one two three needle four five six seven eight", fontsize=11)
+    page.insert_text((72, 126), "zulu yankee xray whiskey victor uniform tango sierra", fontsize=11)
+    doc.save(str(pdf))
+    doc.close()
+
+    win = MainWindow()
+    try:
+        with fitz.open(str(pdf)) as d:
+            p = d[0]
+            rect = p.search_for("needle")[0]
+            snippet = win._search_snippet(p, rect)
+        assert "one two three needle four five six" in snippet
+        for word in ("charlie", "delta", "xray", "whiskey"):
+            assert word not in snippet, snippet
+    finally:
+        win.close()
