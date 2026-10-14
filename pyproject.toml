@@ -25,7 +25,10 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Visualization",
 ]
 dependencies = [
-  "PySide6",
+  # PySide6 6.12.0 drops a reference to None on every void-returning call; on Python < 3.12
+  # (None not yet immortal) that aborts the process ("none_dealloc"). 6.11.1 is unaffected.
+  "PySide6!=6.12.0; python_version < '3.12'",
+  "PySide6; python_version >= '3.12'",
   "PyMuPDF",
 ]
 
@@ -55,7 +58,12 @@ where = ["src"]
 "" = "src"
 
 [tool.setuptools.package-data]
-neoview = ["assets/*.png", "assets/*.ico"]
+neoview = [
+    "assets/*.png",
+    "assets/*.ico",
+    "assets/icons/*",
+    "assets/fonts/*",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

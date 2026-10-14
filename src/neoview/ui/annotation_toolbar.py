@@ -15,18 +15,20 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-# (type_key, label, tooltip)
+from neoview.ui import icons
+
+# (type_key, bundled icon, tooltip)
 _ANNOTATION_TOOLS = [
-    ("highlight",      "H",  "Highlight (drag to mark text)"),
-    ("underline",      "U",  "Underline"),
-    ("strikethrough",  "S",  "Strikethrough"),
-    ("note",           "N",  "Sticky note"),
-    ("text-box",       "T",  "Text box"),
-    ("rectangle",      "[]", "Rectangle shape"),
-    ("ellipse",        "O",  "Ellipse/circle shape"),
-    ("line",           "/",  "Line"),
-    ("arrow",          "->", "Arrow"),
-    ("freehand",       "~",  "Freehand / ink"),
+    ("highlight",      "highlighter",   "Highlight (drag to mark text)"),
+    ("underline",      "underline",     "Underline"),
+    ("strikethrough",  "strikethrough", "Strikethrough"),
+    ("note",           "sticky-note",   "Sticky note"),
+    ("text-box",       "type",          "Text box"),
+    ("rectangle",      "square",        "Rectangle"),
+    ("ellipse",        "circle",        "Ellipse"),
+    ("line",           "slash",         "Line"),
+    ("arrow",          "move-up-right", "Arrow"),
+    ("freehand",       "pencil",        "Freehand / ink"),
 ]
 
 
@@ -81,6 +83,11 @@ class AnnotationToolbar(QToolBar):
         self._current_color = hex_color
         self._color_btn.setIcon(_color_icon(hex_color))
 
+    def retint(self) -> None:
+        """Re-render the tool glyphs in the current theme's colour (after a theme switch)."""
+        for btn in self._type_buttons.values():
+            btn.setIcon(icons.icon(str(btn.property("icon_name"))))
+
     def set_type(self, type_key: str):
         self._current_type = type_key
         for k, btn in self._type_buttons.items():
@@ -94,10 +101,12 @@ class AnnotationToolbar(QToolBar):
         self.setIconSize(QSize(18, 18))
 
         # ---- annotation type buttons ----
-        for type_key, label, tip in _ANNOTATION_TOOLS:
+        for type_key, icon_name, tip in _ANNOTATION_TOOLS:
             btn = QToolButton(self)
-            btn.setText(label)
+            btn.setIcon(icons.icon(icon_name))
+            btn.setProperty("icon_name", icon_name)
             btn.setToolTip(tip)
+            btn.setAccessibleName(tip)
             btn.setCheckable(True)
             btn.setChecked(type_key == self._current_type)
             btn.setMinimumSize(30, 28)
@@ -119,7 +128,7 @@ class AnnotationToolbar(QToolBar):
 
         # ---- opacity ----
         opacity_lbl = QLabel("Opacity")
-        opacity_lbl.setStyleSheet("font-size: 11px; color: #888; padding: 0 2px;")
+        opacity_lbl.setObjectName("MutedLabel")
         self.addWidget(opacity_lbl)
         self._opacity_slider = QSlider(Qt.Orientation.Horizontal)
         self._opacity_slider.setRange(5, 100)
@@ -130,21 +139,23 @@ class AnnotationToolbar(QToolBar):
         self.addWidget(self._opacity_slider)
         self._opacity_label = QLabel("30%")
         self._opacity_label.setFixedWidth(36)
-        self._opacity_label.setStyleSheet("font-size: 11px;")
+        self._opacity_label.setObjectName("MutedLabel")
         self.addWidget(self._opacity_label)
 
         self.addSeparator()
 
         # ---- stroke width (for shapes, freehand, line, arrow) ----
         width_lbl = QLabel("Stroke")
-        width_lbl.setStyleSheet("font-size: 11px; color: #888; padding: 0 2px;")
+        width_lbl.setObjectName("MutedLabel")
         self.addWidget(width_lbl)
         self._width_spin = QDoubleSpinBox()
         self._width_spin.setRange(0.5, 20.0)
         self._width_spin.setSingleStep(0.5)
         self._width_spin.setValue(2.0)
         self._width_spin.setDecimals(1)
-        self._width_spin.setFixedWidth(62)
+        # Width from the style's size hint (padding + arrows + widest value), not a guess:
+        # a fixed 62px left the themed field 14px for text and showed "2." for "2.0".
+        self._width_spin.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self._width_spin.setToolTip("Stroke / border width (pt)")
         self._width_spin.valueChanged.connect(self._on_width_changed)
         self.addWidget(self._width_spin)

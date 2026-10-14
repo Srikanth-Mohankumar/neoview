@@ -21,7 +21,11 @@ Most free PDF viewers only cover part of the workflow. NeoView is built for the 
 - Live PDF reload while external tools rebuild the file
 - Multi-tab viewing with per-document session restore
 - Text find panel with live results, search navigation, and highlight overlays
-- Outline, bookmarks, thumbnails, and page info side panels
+- Sidebar with thumbnails, outline, bookmarks, and annotations; inspector panel for measurements, fonts, and document info
+- Same look on Linux and Windows: bundled Inter font and Lucide icons, light and dark themes
+- Single, continuous, two-page, and two-page-with-cover layouts; night and sepia reading modes
+- Print, presentation mode, password-protected PDFs, and back/forward navigation
+- Large documents stay responsive: pages render in the background with bounded memory
 - Measurement and rectangular selection tools with pt, pica, and mm readouts
 - Crop/export workflow for selected regions as PNG
 - Annotation workflows:
@@ -68,12 +72,15 @@ NeoView is designed to reduce tool switching. Instead of opening one app for rea
 
 - Open one or many PDFs in tabs
 - Reuse an already-open tab for the same file
-- Page navigation with page combo, PgUp/PgDn, Home/End
+- Page navigation with the page field, PgUp/PgDn, Home/End, Go to Page (Ctrl+G), and Back/Forward (Alt+Left/Right)
 - Fit Width, Fit Page, Actual Size, custom zoom, Ctrl+wheel, and pinch zoom
-- Rotation controls and fullscreen mode
-- Outline panel for PDF table of contents
-- Thumbnail panel for quick page jumping
-- Page info / document info panel
+- Rotation controls, fullscreen, and presentation mode (F5)
+- Page layouts: single, continuous, two-page, two-page with cover
+- Reading modes: normal, night, sepia
+- Sidebar (F9) with outline, thumbnails, bookmarks, and annotations
+- Inspector (Ctrl+Shift+I) with measurement, font, and document info
+- Print (Ctrl+P) and password-protected PDFs
+- Light, dark, or system theme (View > Theme)
 
 ### Search
 
@@ -209,21 +216,31 @@ Container usage exists for niche reproducible-environment or development scenari
 | Shortcut | Action |
 |----------|--------|
 | `Ctrl+O` | Open PDF |
+| `Ctrl+W` | Close document |
+| `Ctrl+P` | Print |
 | `Ctrl+Q` | Quit |
-| `Ctrl+F` | Find |
-| `Ctrl+Shift+F` | Toggle search panel |
-| `Ctrl+Shift+O` | Toggle navigation panel |
-| `Ctrl+Shift+T` | Toggle thumbnails panel |
-| `Ctrl+Shift+I` | Toggle page info panel |
-| `Ctrl+D` | Add bookmark |
+| `Ctrl+F` | Find (focus the search field) |
+| `F3 / Shift+F3` | Next / previous match |
+| `Ctrl+Shift+F` | Toggle search results panel |
+| `F9` | Toggle sidebar |
+| `Ctrl+Shift+T / Ctrl+Shift+O / Ctrl+Shift+B / Ctrl+Shift+A` | Sidebar: thumbnails / outline / bookmarks / annotations |
+| `Ctrl+Shift+I` | Toggle inspector |
+| `1 / 2 / 3 / 4` | Select / Hand / Measure / Annotate tool |
+| `Ctrl+= or Ctrl++ / Ctrl+-` | Zoom in / out |
 | `Ctrl+Wheel` | Zoom in or out |
-| `W` | Fit width |
-| `F` | Fit page |
-| `Ctrl+1` | Actual size |
-| `PgUp` / `PgDn` | Previous / next page |
-| `Home` / `End` | First / last page |
-| `Ctrl+L` / `Ctrl+R` | Rotate left / right |
-| `Ctrl+0` | Reset rotation |
+| `Ctrl+1 or W` | Fit width |
+| `Ctrl+2 or F` | Fit page |
+| `Ctrl+0` | Actual size |
+| `PgUp / PgDn` | Previous / next page |
+| `Home / End` | First / last page |
+| `Ctrl+G` | Go to page |
+| `Alt+Left / Alt+Right` | Back / forward |
+| `Ctrl+L / Ctrl+R` | Rotate left / right |
+| `F11` | Full screen |
+| `F5` | Presentation |
+| `Ctrl+Shift+R` | Reload |
+| `Ctrl+Tab / Ctrl+Shift+Tab` | Next / previous tab |
+| `Ctrl+D` | Add bookmark |
 | `Ctrl+C` | Copy measurements or selected text context |
 | `Ctrl+S` | Export selection as PNG |
 | `Ctrl+Shift+H` | Add highlight from selection |
@@ -233,8 +250,10 @@ Container usage exists for niche reproducible-environment or development scenari
 | `Shift+Arrow` | Move selection by 10 pt |
 | `Ctrl+Arrow` | Resize selection by 1 pt |
 | `Ctrl+Shift+Arrow` | Resize selection by 10 pt |
-| `Delete` / `Backspace` | Delete selected annotation |
+| `Delete / Backspace` | Delete selected annotation |
 | `Escape` | Clear selection |
+
+In presentation mode: Right/Space/PgDn next, Left/Backspace/PgUp previous, Home/End, B black screen, Esc exit.
 
 ## Development
 

@@ -23,8 +23,14 @@ python3 -m venv .venv && . .venv/bin/activate && pip install -e .[dev]   # manua
 - `app.py:main()` creates the `QApplication`, applies `LIGHT_STYLE` or `DARK_STYLE` from
   `theme.py` (light by default, dark when `NEOVIEW_THEME=dark`), and opens `MainWindow` with an
   optional PDF path from argv.
-- `ui/main_window.py` — `MainWindow`: menus, toolbar, status bar, tabs (`QTabWidget`, one
-  `PdfView` per tab), and the dock panels (Search, Navigation, Thumbnails, Inspector).
+- `ui/main_window.py` — `MainWindow`: actions, menus, tabs (`QTabWidget`, one `PdfView` per
+  tab, tab bar shown with 2+ documents), search/outline/thumbnail logic, and the wiring of the
+  chrome built in focused modules: `ui/toolbar.py` (page field, zoom box, tool segment, search
+  field), `ui/sidebar.py` (left dock: Thumbnails, Outline, Bookmarks, Annotations),
+  `ui/inspector.py` (right dock: measurement, text, document info), `ui/statusbar.py`,
+  `ui/welcome.py` (empty state), `ui/chrome.py` (icon re-tinting, stylesheet for these widgets,
+  appended to the theme's), `ui/annotation_io.py` (native annotations, annotated export).
+  Search results are a bottom dock.
 - `ui/pdf_view.py` — `PdfView` (a `QGraphicsView`): rendering, input, zoom, and tool modes
   (`ToolMode`). Its scene holds one `PageItem` per page (`ui/page_item.py`, PyMuPDF render at
   2x with a shared LRU pixmap cache), the measurement `SelectionRect` (`ui/selection.py`), and
@@ -38,7 +44,8 @@ python3 -m venv .venv && . .venv/bin/activate && pip install -e .[dev]   # manua
   per-view `QTimer`s. `QSettings` holds window geometry, recent files, session and per-document
   view state.
 
-Where to add things: UI elements (menus, toolbar buttons, docks) in `main_window.py`; viewer
+Where to add things: actions and menus in `main_window.py`, new widgets in the module for their
+area (toolbar, sidebar, inspector); viewer
 behaviour in `pdf_view.py`; data models in `models/view_state.py`; persistence in
 `persistence/sidecar_store.py`; unit helpers in `utils/units.py`.
 

@@ -53,3 +53,21 @@ def _release_page_pixmap_cache():
     except Exception:
         pass
     gc.collect()
+
+
+@pytest.fixture(autouse=True)
+def _flush_deferred_deletes(_qt_app):
+    """Actually delete the widgets earlier tests closed.
+
+    qtbot closes registered widgets with deleteLater(), and Qt only runs deferred deletes
+    from an event loop, which a test suite never returns to. Without this, every
+    MainWindow ever built (with its ~300 child widgets) stays alive for the whole run,
+    and anything that repolishes all widgets - applying a theme - slows down with it.
+    Flushing before each test also covers windows closed in the previous teardown.
+    """
+    from PySide6.QtCore import QCoreApplication, QEvent
+
+    # (_release_page_pixmap_cache already ran gc.collect() after the previous test.)
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    yield
+

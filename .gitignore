@@ -21,3 +21,6 @@ CLAUDE.local.md
 
 # CI smoke-test screenshots
 smoke-shots/
+
+# Claude Code agent worktrees
+.claude/worktrees/

@@ -264,6 +264,34 @@ def test_add_bookmark_saves_to_sidecar(tmp_path: Path, monkeypatch):
     win.close()
 
 
+def test_edits_autosave_after_closing_last_tab_and_reopening(tmp_path: Path, monkeypatch, qtbot):
+    # Closing the last tab keeps the view for reuse; its debounced sidecar
+    # save must keep working for the next document opened in it.
+    pdf = tmp_path / "reopen.pdf"
+    _create_pdf(pdf, pages=2)
+    monkeypatch.setattr(
+        "neoview.ui.main_window.QInputDialog.getText",
+        lambda *_args, **_kwargs: ("AfterReopen", True),
+    )
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win._open_file(str(pdf))
+    QApplication.processEvents()
+    assert win._tabs.count() == 1
+
+    win._close_tab_index(0)
+    QApplication.processEvents()
+    win._open_file(str(pdf))
+    QApplication.processEvents()
+
+    win._add_bookmark()  # marks the sidecar dirty; no explicit save here
+    qtbot.waitUntil(
+        lambda: [b.title for b in load_sidecar(str(pdf)).bookmarks] == ["AfterReopen"],
+        timeout=3000,
+    )
+
+
 def test_search_panel_builds_snippet_results(tmp_path: Path):
     pdf = tmp_path / "search.pdf"
     _create_pdf(pdf, pages=2, text_prefix="Findable")
@@ -420,3 +448,50 @@ def test_tab_switch_wraparound_actions(tmp_path: Path):
     QApplication.processEvents()
     assert os.path.abspath(win.current_context().file_path or "") == os.path.abspath(str(pdf_b))
     win.close()
+
+
+def test_opening_second_file_saves_session_of_the_document_being_left(tmp_path: Path, qtbot):
+    # The reading position of the document you leave must be saved, not the new empty tab's.
+    a = tmp_path / "a.pdf"
+    b = tmp_path / "b.pdf"
+    _create_pdf(a, pages=5)
+    _create_pdf(b, pages=2)
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.resize(900, 700)
+    win.show()
+    win._open_file(str(a))
+    QApplication.processEvents()
+    win.current_view().go_to_page(3)
+    QApplication.processEvents()
+    assert win.current_view().current_page == 3
+
+    win._open_file(str(b))
+    QApplication.processEvents()
+
+    saved = win._document_sessions.get(os.path.abspath(str(a)))
+    assert saved is not None and saved.get("page") == 3
+
+
+def test_search_snippet_is_the_matching_line_without_neighbour_fragments(tmp_path: Path):
+    pdf = tmp_path / "lines.pdf"
+    doc = fitz.open()
+    page = doc.new_page(width=595, height=842)
+    page.insert_text((72, 100), "alpha bravo charlie delta echo foxtrot golf hotel india", fontsize=11)
+    page.insert_text((72, 113), "one two three needle four five six seven eight", fontsize=11)
+    page.insert_text((72, 126), "zulu yankee xray whiskey victor uniform tango sierra", fontsize=11)
+    doc.save(str(pdf))
+    doc.close()
+
+    win = MainWindow()
+    try:
+        with fitz.open(str(pdf)) as d:
+            p = d[0]
+            rect = p.search_for("needle")[0]
+            snippet = win._search_snippet(p, rect)
+        assert "one two three needle four five six" in snippet
+        for word in ("charlie", "delta", "xray", "whiskey"):
+            assert word not in snippet, snippet
+    finally:
+        win.close()
