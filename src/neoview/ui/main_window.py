@@ -15,7 +15,6 @@ from PySide6.QtCore import (
     QEvent,
     QFileSystemWatcher,
     QPoint,
-    QPointF,
     QRect,
     QRectF,
     QSettings,
@@ -34,10 +33,7 @@ from PySide6.QtGui import (
     QIcon,
     QImage,
     QKeySequence,
-    QPainter,
-    QPen,
     QPixmap,
-    QPolygonF,
     QWindowStateChangeEvent,
 )
 from PySide6.QtWidgets import (
@@ -3164,52 +3160,16 @@ class MainWindow(QMainWindow):
 
     # --------------------------- Utility widgets ---------------------------
     def _hand_icon(self) -> QIcon:
-        for name in (
-            "cursor-openhand",
-            "pan",
-            "tool-pan",
-            "input-touchpad",
-            "draw-freehand",
-        ):
-            icon = QIcon.fromTheme(name)
-            if not icon.isNull():
-                return icon
+        from neoview.ui import icons
 
-        app = QApplication.instance()
-        is_dark = str(app.property("theme_mode") or "").lower() == "dark" if app else False
-        line_color = QColor("#cccccc") if is_dark else QColor("#555555")
-        fill_color = QColor("#37547a") if is_dark else QColor("#ffffff")
-
-        pix = QPixmap(20, 20)
-        pix.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(pix)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        painter.setPen(QPen(line_color, 1.3))
-        painter.setBrush(fill_color)
-
-        painter.drawRoundedRect(7.0, 9.0, 7.0, 7.0, 1.6, 1.6)  # palm
-        painter.drawRoundedRect(7.0, 4.0, 1.4, 5.4, 0.7, 0.7)  # index
-        painter.drawRoundedRect(8.8, 3.5, 1.4, 5.8, 0.7, 0.7)  # middle
-        painter.drawRoundedRect(10.6, 4.0, 1.4, 5.4, 0.7, 0.7)  # ring
-        painter.drawRoundedRect(12.4, 4.8, 1.4, 4.6, 0.7, 0.7)  # pinky
-
-        thumb = QPolygonF(
-            [
-                QPointF(7.0, 10.2),
-                QPointF(4.4, 9.0),
-                QPointF(3.8, 11.7),
-                QPointF(6.6, 12.8),
-            ]
-        )
-        painter.drawPolygon(thumb)
-        painter.end()
-        return QIcon(pix)
+        return icons.icon("hand")
 
     def _icon(self, name: str, fallback: QStyle.StandardPixmap) -> QIcon:
-        icon = QIcon.fromTheme(name)
-        if not icon.isNull():
-            return icon
-        return self.style().standardIcon(fallback)
+        # Bundled Lucide icons on every platform; freedesktop names are mapped, the
+        # fallback is unused but kept so existing call sites stay valid.
+        from neoview.ui import icons
+
+        return icons.icon(name)
 
     def _action(self, text: str, slot, shortcut=None) -> QAction:
         action = QAction(text, self)
