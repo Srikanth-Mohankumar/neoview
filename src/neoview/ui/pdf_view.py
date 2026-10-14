@@ -714,6 +714,22 @@ class PdfView(QGraphicsView):
             self._rerender_pages()
         self.color_mode_changed.emit(mode)
 
+    def drawForeground(self, painter: QPainter, rect: QRectF) -> None:  # noqa: N802 - Qt API
+        super().drawForeground(painter, rect)
+        if not self._is_paged():
+            return
+        # Single mode: the scene still holds the other pages' overlays (annotations, search
+        # hits). When the viewport is larger than the shown page's scene rect they would
+        # be visible around it, so paint the canvas over everything outside the rect.
+        scene_rect = self.sceneRect()
+        brush = self.backgroundBrush()
+        if rect.top() < scene_rect.top():
+            painter.fillRect(QRectF(rect.left(), rect.top(), rect.width(),
+                                    scene_rect.top() - rect.top()), brush)
+        if rect.bottom() > scene_rect.bottom():
+            painter.fillRect(QRectF(rect.left(), scene_rect.bottom(), rect.width(),
+                                    rect.bottom() - scene_rect.bottom()), brush)
+
     def _is_paged(self) -> bool:
         return self._page_mode == "single" and bool(self._pages)
 
@@ -1562,6 +1578,8 @@ class PdfView(QGraphicsView):
 
     def _get_page_at(self, scene_pos: QPointF) -> int:
         for i, page in enumerate(self._pages):
+            if not page.isVisible():
+                continue  # single mode: only the shown page can be hit
             rect = QRectF(page.pos(), page.page_rect.size() * self._zoom)
             if rect.contains(scene_pos):
                 return i
@@ -1577,6 +1595,8 @@ class PdfView(QGraphicsView):
         best_idx = 0
         best_dist = float("inf")
         for i, page in enumerate(self._pages):
+            if not page.isVisible():
+                continue
             page_top = page.pos().y()
             page_bottom = page_top + page.page_rect.height() * self._zoom
             if page_top <= y <= page_bottom:

@@ -207,3 +207,23 @@ def test_reload_keeps_page_mode(view, tmp_path):
     assert view.page_mode() == "two-page-cover"
     assert view._layout.rows[0] == (0,)
     assert len(view._pages) == len(SIZES) + 1
+
+
+def test_single_mode_hides_other_pages_overlays_and_hits(view):
+    from PySide6.QtCore import QRectF
+
+    view.set_page_mode("single")
+    view.set_zoom(0.25, immediate=True)  # viewport much taller than the shown page
+    # A big search hit on page 2, which single mode does not show.
+    view.set_search_highlights([(1, QRectF(0, 0, SIZES[1][0], SIZES[1][1]), True)])
+    QApplication.processEvents()
+    hidden = view._pages[1]
+    centre = hidden.pos() + QPointF(SIZES[1][0] * view.zoom / 2, SIZES[1][1] * view.zoom / 2)
+    assert view._get_page_at(centre) == -1
+    vp = view.mapFromScene(centre)
+    assert view.viewport().rect().contains(vp)
+    img = view.viewport().grab().toImage()
+    assert img.pixelColor(vp.x(), vp.y()).rgb() == view.backgroundBrush().color().rgb()
+    # The shown page is still hit-testable.
+    shown = view._pages[0]
+    assert view._get_page_at(shown.pos() + QPointF(5, 5)) == 0
