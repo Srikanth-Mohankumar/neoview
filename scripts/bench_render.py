@@ -9,7 +9,7 @@ leak between trials. Generated documents:
 
 - ``vector``: 100 pages, text paragraphs and many vector shapes on every page;
 - ``images``: the same, plus a large (2400x1800) photo-like image on every 10th page;
-- ``book``: 650 pages of dense text (a long book);
+- ``book``: 650 pages of dense text with 20 internal links per page (a long book);
 - ``book-images``: the same, plus a distinct 1500x1000 image on every page.
 
 Metrics per trial (wall clock, seconds unless noted):
@@ -108,6 +108,14 @@ def make_book(path: Path, with_images: bool, n_pages: int = 650) -> None:
             line = " ".join(words[(i + k + j) % len(words)] for j in range(15))
             page.insert_text((72, y), line, fontsize=9.5)
             y += 12
+    # A real book is full of cross-references (TOC, index, citations): 20 internal links per
+    # page, so the cost of reading links at open time is exercised.
+    for i, page in enumerate(doc):
+        for k in range(20):
+            rect = fitz.Rect(72 + (k % 5) * 90, 80 + (k // 5) * 12 - 9, 72 + (k % 5) * 90 + 60,
+                             80 + (k // 5) * 12 + 2)
+            page.insert_link({"kind": fitz.LINK_GOTO, "from": rect,
+                              "page": (i * 7 + k * 31) % n_pages, "to": fitz.Point(72, 100)})
     doc.save(str(path), deflate=True, garbage=1)
     doc.close()
 
