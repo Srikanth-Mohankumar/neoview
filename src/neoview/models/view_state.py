@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 RectTuple = tuple[float, float, float, float]
 
@@ -80,7 +80,7 @@ class SearchMatch:
 class TabContext:
     """Per-tab mutable state."""
 
-    file_path: Optional[str] = None
+    file_path: str | None = None
     search_query: str = ""
     search_index: int = -1
     search_results: list[SearchMatch] = field(default_factory=list)

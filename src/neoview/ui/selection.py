@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QPen
 from PySide6.QtWidgets import QGraphicsRectItem
@@ -29,9 +27,9 @@ class SelectionRect(QGraphicsRectItem):
         self.setZValue(1000)
         self.setAcceptHoverEvents(True)
 
-        self._drag_mode: Optional[str] = None
-        self._drag_start: Optional[QPointF] = None
-        self._start_rect: Optional[QRectF] = None
+        self._drag_mode: str | None = None
+        self._drag_start: QPointF | None = None
+        self._start_rect: QRectF | None = None
 
         self._sync()
 

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections import OrderedDict
-from typing import Optional
 
 import fitz
 from PySide6.QtCore import QPointF, QRectF, Qt
@@ -29,7 +28,7 @@ class PageItem(QGraphicsPixmapItem):
         self.render_scale_factor: float = self.BASE_RENDER_SCALE
         self.rotation_degrees: int = 0
         self.setTransformationMode(Qt.TransformationMode.SmoothTransformation)
-        self._shadow: Optional[QGraphicsDropShadowEffect] = None
+        self._shadow: QGraphicsDropShadowEffect | None = None
         if lazy:
             # Defer the drop-shadow until first real render — Qt would otherwise
             # allocate an offscreen buffer per page even for placeholders.
@@ -84,7 +83,7 @@ class PageItem(QGraphicsPixmapItem):
         return (doc_name, doc_identity, page_num, round(scale, 2), round(render_scale, 2), int(rotation) % 360)
 
     @classmethod
-    def _cache_get(cls, key: tuple) -> Optional[QPixmap]:
+    def _cache_get(cls, key: tuple) -> QPixmap | None:
         pixmap = cls._PIXMAP_CACHE.get(key)
         if pixmap is None:
             return None
@@ -128,7 +127,7 @@ class PageItem(QGraphicsPixmapItem):
         self._render(self._fitz_page, scale)
         return True
 
-    def get_text_info_at(self, page_point: QPointF) -> Optional[dict]:
+    def get_text_info_at(self, page_point: QPointF) -> dict | None:
         """Get font info for text at the given page coordinate."""
         try:
             blocks = self._fitz_page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)["blocks"]

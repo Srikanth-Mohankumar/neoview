@@ -8,7 +8,7 @@ import os
 import re
 import tempfile
 from datetime import datetime, timezone
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable
 
 from neoview.models.view_state import (
     ANNOTATION_TYPES,
@@ -39,7 +39,7 @@ def sidecar_path_for(pdf_path: str) -> str:
     return f"{os.path.abspath(pdf_path)}.neoview.json"
 
 
-def _coerce_rect(value: Any) -> Optional[tuple[float, float, float, float]]:
+def _coerce_rect(value: Any) -> tuple[float, float, float, float] | None:
     if not isinstance(value, (list, tuple)) or len(value) != 4:
         return None
     try:
@@ -74,7 +74,7 @@ def _coerce_points(value: Any) -> list[list[float]]:
     return result
 
 
-def _annotation_from_dict(item: dict[str, Any]) -> Optional[AnnotationRecord]:
+def _annotation_from_dict(item: dict[str, Any]) -> AnnotationRecord | None:
     if not isinstance(item, dict):
         return None
     rect = _coerce_rect(item.get("rect"))
@@ -148,7 +148,7 @@ def _annotation_from_dict(item: dict[str, Any]) -> Optional[AnnotationRecord]:
 _MAX_BOOKMARK_TITLE_LEN = 1024
 
 
-def _bookmark_from_dict(item: dict[str, Any]) -> Optional[BookmarkRecord]:
+def _bookmark_from_dict(item: dict[str, Any]) -> BookmarkRecord | None:
     if not isinstance(item, dict):
         return None
     bid = str(item.get("id", "")).strip()

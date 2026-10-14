@@ -7,7 +7,6 @@ import os
 import re
 from bisect import bisect_right
 from enum import Enum, auto
-from typing import Optional
 from urllib.parse import unquote
 
 import fitz
@@ -101,8 +100,8 @@ class PdfView(QGraphicsView):
         self._scene = QGraphicsScene(self)
         self.setScene(self._scene)
 
-        self._doc: Optional[fitz.Document] = None
-        self._doc_path: Optional[str] = None
+        self._doc: fitz.Document | None = None
+        self._doc_path: str | None = None
         self._pages: list[PageItem] = []
         self._page_positions: list[float] = []
         self._zoom: float = 1.0
@@ -124,11 +123,11 @@ class PdfView(QGraphicsView):
         self._rerender_timer.timeout.connect(self._rerender_pages)
 
         self._text_selecting = False
-        self._text_select_start: Optional[QPointF] = None
+        self._text_select_start: QPointF | None = None
         self._text_select_page: int = -1
-        self._text_select_item: Optional[QGraphicsRectItem] = None
+        self._text_select_item: QGraphicsRectItem | None = None
         self._text_highlight_items: list[tuple[int, QGraphicsRectItem]] = []
-        self._text_inspect_item: Optional[QGraphicsRectItem] = None
+        self._text_inspect_item: QGraphicsRectItem | None = None
         self._text_inspect_page: int = -1
 
         self._search_highlights: list[tuple] = []
@@ -136,7 +135,7 @@ class PdfView(QGraphicsView):
         self._annotations: list[AnnotationRecord] = []
         self._annotation_items: list[tuple[int, AnnotationItem]] = []
         self._annotation_index: dict[str, AnnotationRecord] = {}
-        self._selected_annotation_id: Optional[str] = None
+        self._selected_annotation_id: str | None = None
 
         # Annotate tool state
         self._annotate_type: str = "highlight"
@@ -145,26 +144,26 @@ class PdfView(QGraphicsView):
         self._annotate_border_width: float = 2.0
         self._annotate_font_size: float = 12.0
         self._annotate_creating: bool = False
-        self._annotate_start: Optional[QPointF] = None
+        self._annotate_start: QPointF | None = None
         self._annotate_page: int = -1
-        self._annotate_preview_rect: Optional[QGraphicsRectItem] = None
+        self._annotate_preview_rect: QGraphicsRectItem | None = None
         self._annotate_freehand_points: list[list[float]] = []
-        self._annotate_freehand_path_item: Optional[QGraphicsPathItem] = None
+        self._annotate_freehand_path_item: QGraphicsPathItem | None = None
 
         self._page_links: list[list[tuple[QRectF, dict]]] = []
-        self._hover_link: Optional[dict] = None
-        self._pressed_link: Optional[dict] = None
-        self._pressed_pos: Optional[QPointF] = None
-        self._link_highlight_item: Optional[QGraphicsRectItem] = None
+        self._hover_link: dict | None = None
+        self._pressed_link: dict | None = None
+        self._pressed_pos: QPointF | None = None
+        self._link_highlight_item: QGraphicsRectItem | None = None
 
-        self._selection: Optional[SelectionRect] = None
+        self._selection: SelectionRect | None = None
         self._selection_page: int = -1
         self._creating = False
-        self._create_start: Optional[QPointF] = None
+        self._create_start: QPointF | None = None
         self._interacting = False
 
         self._panning = False
-        self._pan_start: Optional[QPointF] = None
+        self._pan_start: QPointF | None = None
 
         self._performance_mode = False
         self._pinch_start_zoom: float = 1.0
@@ -190,11 +189,11 @@ class PdfView(QGraphicsView):
         self._update_cursor()
 
     @property
-    def document(self) -> Optional[fitz.Document]:
+    def document(self) -> fitz.Document | None:
         return self._doc
 
     @property
-    def doc_path(self) -> Optional[str]:
+    def doc_path(self) -> str | None:
         return self._doc_path
 
     @property
@@ -278,7 +277,7 @@ class PdfView(QGraphicsView):
         return idx
 
     @property
-    def selection_rect(self) -> Optional[QRectF]:
+    def selection_rect(self) -> QRectF | None:
         return self._selection.pdf_rect if self._selection else None
 
     @property
@@ -758,7 +757,7 @@ class PdfView(QGraphicsView):
     def zoom_by(self, factor: float):
         self.set_zoom(self._zoom * factor, zoom_mode=self.ZOOM_MODE_CUSTOM)
 
-    def _fit_reference_rect(self) -> Optional[QRectF]:
+    def _fit_reference_rect(self) -> QRectF | None:
         """Return the page rect used to compute fit zoom. Prefers current page so
         mixed-page-size documents (covers, landscape inserts) fit correctly."""
         if not self._pages:
@@ -798,7 +797,7 @@ class PdfView(QGraphicsView):
     def actual_size(self):
         self.set_zoom(1.0, immediate=True, zoom_mode=self.ZOOM_MODE_ACTUAL_SIZE)
 
-    def current_page_size(self) -> Optional[QRectF]:
+    def current_page_size(self) -> QRectF | None:
         if 0 <= self.current_page < len(self._pages):
             page = self._pages[self.current_page]
             return page.page_rect
@@ -859,7 +858,7 @@ class PdfView(QGraphicsView):
         self._text_inspect_item = None
         self._text_inspect_page = -1
 
-    def _update_text_inspection(self, page_idx: int, info: Optional[dict]) -> bool:
+    def _update_text_inspection(self, page_idx: int, info: dict | None) -> bool:
         bbox = info.get("bbox") if info else None
         if not bbox or not (0 <= page_idx < len(self._pages)):
             self._clear_text_inspection()
@@ -907,7 +906,7 @@ class PdfView(QGraphicsView):
         self._annotation_index = {item.id: item for item in self._annotations if item.id}
         self._rebuild_annotation_items()
 
-    def select_annotation(self, ann_id: Optional[str]):
+    def select_annotation(self, ann_id: str | None):
         """Visually select/deselect an annotation by id."""
         self._selected_annotation_id = ann_id
         for _pg, item in self._annotation_items:
@@ -917,7 +916,7 @@ class PdfView(QGraphicsView):
     def scroll_to_page_y(self, page_idx: int, y: float):
         self._scroll_to_destination(page_idx, y, y_is_pdf_coords=False)
 
-    def _annotation_hit_at_scene_pos(self, scene_pos: QPointF) -> Optional[str]:
+    def _annotation_hit_at_scene_pos(self, scene_pos: QPointF) -> str | None:
         for item in self._scene.items(scene_pos):
             if isinstance(item, AnnotationItem):
                 return item.annotation_id
@@ -1232,7 +1231,7 @@ class PdfView(QGraphicsView):
             and f.get("kind") == s.get("kind")
         )
 
-    def _extract_target_y(self, target) -> Optional[float]:
+    def _extract_target_y(self, target) -> float | None:
         if target is None:
             return None
         if isinstance(target, (tuple, list)) and len(target) >= 2:
@@ -1254,7 +1253,7 @@ class PdfView(QGraphicsView):
                 return None
         return None
 
-    def _page_height(self, page_idx: int) -> Optional[float]:
+    def _page_height(self, page_idx: int) -> float | None:
         if not (0 <= page_idx < len(self._pages)):
             return None
         page = self._pages[page_idx]
@@ -1283,7 +1282,7 @@ class PdfView(QGraphicsView):
                 pass
         return None
 
-    def _scroll_to_destination(self, page_idx: int, target_y: Optional[float], *, y_is_pdf_coords: bool = False):
+    def _scroll_to_destination(self, page_idx: int, target_y: float | None, *, y_is_pdf_coords: bool = False):
         if not isinstance(page_idx, int) or not (0 <= page_idx < self.page_count):
             return
         self.go_to_page(page_idx)
@@ -1306,7 +1305,7 @@ class PdfView(QGraphicsView):
         dest_y = page.pos().y() + y_value * self._zoom - 30
         self.verticalScrollBar().setValue(int(max(0, dest_y)))
 
-    def _parse_dest_string_y(self, dest: str) -> Optional[float]:
+    def _parse_dest_string_y(self, dest: str) -> float | None:
         if not isinstance(dest, str):
             return None
         # PDF destination strings commonly look like "/XYZ left top zoom".
@@ -1318,7 +1317,7 @@ class PdfView(QGraphicsView):
         except (TypeError, ValueError):
             return None
 
-    def _resolve_named_destination(self, name: str) -> tuple[Optional[int], Optional[float]]:
+    def _resolve_named_destination(self, name: str) -> tuple[int | None, float | None]:
         if not self._doc:
             return (None, None)
         key = str(name or "").strip()
@@ -1352,7 +1351,7 @@ class PdfView(QGraphicsView):
             target_y = self._parse_dest_string_y(str(target.get("dest", "")))
         return (page_idx, target_y)
 
-    def _resolve_uri_destination(self, uri: str) -> tuple[Optional[int], Optional[float]]:
+    def _resolve_uri_destination(self, uri: str) -> tuple[int | None, float | None]:
         if not self._doc:
             return (None, None)
         try:
@@ -1363,7 +1362,7 @@ class PdfView(QGraphicsView):
             return (page_id, y)
         return (None, None)
 
-    def _link_at_scene_pos(self, scene_pos: QPointF) -> Optional[dict]:
+    def _link_at_scene_pos(self, scene_pos: QPointF) -> dict | None:
         page_idx = self._get_page_at(scene_pos)
         if page_idx < 0 or page_idx >= len(self._page_links):
             return None

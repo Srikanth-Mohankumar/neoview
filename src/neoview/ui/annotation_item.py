@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import (
     QBrush,
@@ -73,7 +71,7 @@ class AnnotationItem(QGraphicsItem):
         r = QRectF(float(x), float(y), max(1.0, float(w)), max(1.0, float(h)))
         return r.adjusted(-2, -2, 2, 2)
 
-    def paint(self, painter: QPainter, option: QStyleOptionGraphicsItem, widget: Optional[QWidget] = None):
+    def paint(self, painter: QPainter, option: QStyleOptionGraphicsItem, widget: QWidget | None = None):
         ann = self._record
         x, y, w, h = ann.rect
         base_rect = QRectF(float(x), float(y), max(0.0, float(w)), max(0.0, float(h)))

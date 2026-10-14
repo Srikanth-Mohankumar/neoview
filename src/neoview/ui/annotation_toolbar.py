@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
@@ -60,7 +58,7 @@ class AnnotationToolbar(QToolBar):
     opacity_changed = Signal(float)
     border_width_changed = Signal(float)
 
-    def __init__(self, parent: Optional[QWidget] = None):
+    def __init__(self, parent: QWidget | None = None):
         super().__init__("Annotations", parent)
         self.setObjectName("AnnotationToolbar")
         self.setMovable(False)

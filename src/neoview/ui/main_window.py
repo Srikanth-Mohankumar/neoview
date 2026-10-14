@@ -8,7 +8,6 @@ import os
 import sys
 import time
 from collections import deque
-from typing import Optional
 from uuid import uuid4
 
 import fitz
@@ -142,7 +141,7 @@ class MainWindow(QMainWindow):
     _INSPECTOR_TAB_ANNOTATIONS = 2
     _INSPECTOR_TAB_DOCUMENT = 3
 
-    def __init__(self, pdf_path: Optional[str] = None):
+    def __init__(self, pdf_path: str | None = None):
         super().__init__()
 
         self.setWindowTitle(APP_NAME)
@@ -152,11 +151,11 @@ class MainWindow(QMainWindow):
         self.resize(1280, 900)
         self.setAcceptDrops(True)
 
-        self._current_file: Optional[str] = None
-        self._last_file_sig: Optional[tuple[int, int, int]] = None
+        self._current_file: str | None = None
+        self._last_file_sig: tuple[int, int, int] | None = None
         self._settings = QSettings("NeoView", "NeoView")
         self._recent_files: list[str] = self._settings.value("recent_files", [], type=list)
-        self._recent_menu: Optional[object] = None
+        self._recent_menu: object | None = None
         self._document_sessions: dict[str, dict[str, object]] = self._load_json_setting("documents/session", {})
         self._startup_last_file = ""
         if not pdf_path:
@@ -178,7 +177,7 @@ class MainWindow(QMainWindow):
             "color": self._settings.value("view/layout_grid_color", "#d92fd4", type=str),
         }
 
-        self._view: Optional[PdfView] = None
+        self._view: PdfView | None = None
         self._tab_contexts: dict[PdfView, TabContext] = {}
         self._sidecar_timers: dict[PdfView, QTimer] = {}
 
@@ -214,7 +213,7 @@ class MainWindow(QMainWindow):
         self._search_batch_timer = QTimer(self)
         self._search_batch_timer.setSingleShot(True)
         self._search_batch_timer.timeout.connect(self._process_search_batch)
-        self._search_operation: Optional[dict[str, object]] = None
+        self._search_operation: dict[str, object] | None = None
         self._reload_in_progress = False
         self._last_maximize_at: float = 0.0
 
@@ -307,7 +306,7 @@ class MainWindow(QMainWindow):
             self._tab_contexts[view] = ctx
         return ctx
 
-    def _set_current_file(self, file_path: Optional[str]):
+    def _set_current_file(self, file_path: str | None):
         self._current_file = os.path.abspath(file_path) if file_path else None
         self._settings.setValue("session/last_active_file", self._current_file or "")
 
@@ -392,7 +391,7 @@ class MainWindow(QMainWindow):
     def _switch_to_previous_tab(self):
         self._switch_tab_relative(-1)
 
-    def _find_open_view(self, path: str) -> Optional[PdfView]:
+    def _find_open_view(self, path: str) -> PdfView | None:
         target = os.path.abspath(path)
         for idx in range(self._tabs.count()):
             widget = self._tabs.widget(idx)
@@ -1739,7 +1738,7 @@ class MainWindow(QMainWindow):
         elif chosen is delete_action:
             self._delete_bookmark(str(bookmark_id))
 
-    def _find_bookmark_by_id(self, bookmark_id: str) -> Optional[BookmarkRecord]:
+    def _find_bookmark_by_id(self, bookmark_id: str) -> BookmarkRecord | None:
         ctx = self.current_context()
         for bookmark in ctx.sidecar_state.bookmarks:
             if bookmark.id == bookmark_id:
@@ -1863,7 +1862,7 @@ class MainWindow(QMainWindow):
         self._search_results_list.clear()
         self._search_count_lbl.setText("")
 
-    def _update_search_count_label(self, ctx: Optional[TabContext] = None):
+    def _update_search_count_label(self, ctx: TabContext | None = None):
         ctx = ctx or self.current_context()
         query = ctx.search_query.strip()
         if not query:
@@ -1978,7 +1977,7 @@ class MainWindow(QMainWindow):
     def _execute_search_current(
         self,
         allow_short_query: bool = True,
-        max_results: Optional[int] = None,
+        max_results: int | None = None,
         post_nav: int = 0,
     ):
         self._search_timer.stop()
@@ -2179,7 +2178,7 @@ class MainWindow(QMainWindow):
         # rebuild on every filter change.  set_annotations() is called only when
         # annotation data actually changes (load, create, delete, edit).
 
-    def _find_annotation_by_id(self, ann_id: str) -> Optional[AnnotationRecord]:
+    def _find_annotation_by_id(self, ann_id: str) -> AnnotationRecord | None:
         ctx = self.current_context()
         for ann in ctx.sidecar_state.annotations:
             if ann.id == ann_id:
@@ -2192,7 +2191,7 @@ class MainWindow(QMainWindow):
     def _is_native_annotation_id(self, ann_id: str) -> bool:
         return ann_id.startswith("native-")
 
-    def _selected_annotation_id(self) -> Optional[str]:
+    def _selected_annotation_id(self) -> str | None:
         item = self._annotation_list.currentItem()
         if item is None:
             return None
@@ -2343,7 +2342,7 @@ class MainWindow(QMainWindow):
         self._populate_annotation_list()
         self._status.showMessage("Annotation deleted", 1200)
 
-    def _build_annotation_from_selection(self, ann_type: str) -> Optional[AnnotationRecord]:
+    def _build_annotation_from_selection(self, ann_type: str) -> AnnotationRecord | None:
         view = self.current_view()
         sel = view.selection_rect
         page_idx = view.selection_page
@@ -2904,7 +2903,7 @@ class MainWindow(QMainWindow):
             return
         self._schedule_reload_if_modified()
 
-    def _file_signature(self, path: Optional[str]) -> Optional[tuple[int, int, int]]:
+    def _file_signature(self, path: str | None) -> tuple[int, int, int] | None:
         if not path or not os.path.exists(path):
             return None
         try:
@@ -3088,7 +3087,7 @@ class MainWindow(QMainWindow):
             self._stop_watch()
 
     # --------------------------- Status/update ---------------------------
-    def _update_measurements_panel(self, sel: Optional[QRectF]):
+    def _update_measurements_panel(self, sel: QRectF | None):
         if not sel:
             self._measure_w.setText("W  --")
             self._measure_h.setText("H  --")
@@ -3276,7 +3275,7 @@ class MainWindow(QMainWindow):
             text += f" {hour}:{minute}"
         return text
 
-    def _format_file_size(self, path: Optional[str]) -> str:
+    def _format_file_size(self, path: str | None) -> str:
         if not path:
             return "--"
         try:
