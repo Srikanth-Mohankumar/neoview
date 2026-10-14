@@ -194,3 +194,15 @@ def test_encrypted_document(qtbot, tmp_path):
         assert w.page_count() == 3
     finally:
         w.close()
+
+
+def test_present_goes_full_screen(qtbot, pdf):
+    w = PresentationWindow(str(pdf))
+    qtbot.addWidget(w)
+    try:
+        w.present()
+        QApplication.processEvents()
+        assert w.isVisible()
+        assert w.isFullScreen()
+    finally:
+        w.close()
