@@ -46,7 +46,13 @@ from neoview.ui import icons
 from neoview.ui.annotation_item import AnnotationItem
 from neoview.ui.navigation_history import HistoryEntry, NavigationHistory
 from neoview.ui.page_item import PageItem, new_doc_token, release_freed_memory
-from neoview.ui.page_modes import PAGE_MODES, PageLayout, layout_pages
+from neoview.ui.page_modes import (
+    COLOR_MODES,
+    PAGE_MODES,
+    PageLayout,
+    apply_color_mode,
+    layout_pages,
+)
 from neoview.ui.password import unlock
 from neoview.ui.render_scheduler import RenderRequest, RenderScheduler
 from neoview.ui.selection import SelectionRect
@@ -84,6 +90,7 @@ class PdfView(QGraphicsView):
     password_required = Signal(str)  # path of an encrypted PDF that needs a (new) password
     history_changed = Signal(bool, bool)  # (can_go_back, can_go_forward)
     page_mode_changed = Signal(str)
+    color_mode_changed = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -115,6 +122,7 @@ class PdfView(QGraphicsView):
         # share a row in the two-page modes).
         self._page_positions: list[float] = []
         self._page_mode: str = "continuous"
+        self._color_mode: str = "normal"
         self._layout: PageLayout | None = None
         self._page_row: list[int] = []
         self._single_row = 0  # row shown in "single" mode
@@ -224,7 +232,11 @@ class PdfView(QGraphicsView):
     # ------------------------------------------------------------------
 
     def canvas_color(self) -> QColor:
-        """Colour of the area around the pages for the current theme."""
+        """Colour of the area around the pages for the current theme and reading mode."""
+        if self._color_mode == "night":
+            # Night pages are near-black: use the dark canvas even in the light theme so
+            # the page edges stay visible and the screen stays dark.
+            return QColor(theme.tokens("dark")["canvas"])
         return QColor(theme.tokens()["canvas"])
 
     def apply_theme_colors(self) -> None:
@@ -638,7 +650,8 @@ class PdfView(QGraphicsView):
         items: list[tuple[PageItem, float]] = []
         y = float(self.PAGE_GAP)
         for i in range(doc.page_count):
-            item = PageItem(doc.load_page(i), self._zoom, i, doc_token=self._doc_token)
+            item = PageItem(doc.load_page(i), self._zoom, i, doc_token=self._doc_token,
+                            color_mode=self._color_mode)
             items.append((item, y))
             y += item.page_rect.height() * self._zoom + self.PAGE_GAP
         return items, y
@@ -678,6 +691,28 @@ class PdfView(QGraphicsView):
             if not self._performance_mode:
                 self._rerender_timer.start(0)
         self.page_mode_changed.emit(mode)
+
+    def color_mode(self) -> str:
+        return self._color_mode
+
+    def set_color_mode(self, mode: str) -> None:
+        """Reading colour mode for page content: "normal", "night" or "sepia"."""
+        if mode not in COLOR_MODES:
+            raise ValueError(f"unknown color mode {mode!r}; expected one of {COLOR_MODES}")
+        if mode == self._color_mode:
+            return
+        self._color_mode = mode
+        for page in self._pages:
+            page.color_mode = mode
+            if page.is_blank:
+                page.release(self._zoom)  # placeholder in the new paper colour
+        # Rendered pages keep showing the old colours until their re-render arrives;
+        # cached renders in the new mode (switching back) are installed at once.
+        self.apply_theme_colors()
+        if self._pages and not self._performance_mode:
+            self._rerender_timer.stop()
+            self._rerender_pages()
+        self.color_mode_changed.emit(mode)
 
     def _is_paged(self) -> bool:
         return self._page_mode == "single" and bool(self._pages)
@@ -759,6 +794,8 @@ class PdfView(QGraphicsView):
         stale_zoom = abs(zoom - self._zoom) >= 0.01
         if stale_zoom and not item.is_preview:
             return  # the page already shows a real render; a newer one is queued
+        if item.color_mode != "normal":
+            image = apply_color_mode(image, item.color_mode)
         item.apply_render(QPixmap.fromImage(image), zoom, factor, self._zoom)
         self._rendered_pages.add(page_index)
         if stale_zoom:
