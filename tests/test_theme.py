@@ -180,3 +180,21 @@ def test_numeric_readouts_use_bundled_ui_font_not_system_monospace(_qt_app):
     family = app_font_family() or theme.UI_FONT_FAMILY
     assert f'"{family}"' in block
     assert "monospace" not in block
+
+
+@pytest.mark.parametrize("mode", ["light", "dark"])
+def test_windows_and_dialogs_get_an_opaque_theme_background(_qt_app, mode):
+    # A later "QWidget { background: transparent }" rule used to override the
+    # "QMainWindow, QDialog" background (same specificity, later wins), so dialogs
+    # (About, Print, message boxes) showed black on X11 in the light theme.
+    from PySide6.QtWidgets import QDialog, QMainWindow, QMessageBox
+
+    theme.apply_theme(_qt_app, mode)
+    expected = theme.tokens(mode)["background"]
+    for cls in (QMainWindow, QDialog, QMessageBox):
+        w = cls()
+        w.ensurePolished()
+        color = w.palette().window().color()
+        assert color.alpha() == 255, (cls.__name__, color.name(), color.alpha())
+        assert color.name() == expected, (cls.__name__, color.name())
+        w.deleteLater()

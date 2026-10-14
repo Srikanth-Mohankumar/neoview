@@ -251,14 +251,16 @@ _TEMPLATE = Template(
     selection-color: $accent_text;
 }
 
-/* Main containers */
-QMainWindow,
-QDialog {
-    background: $background;
-}
+/* Main containers. The window/dialog rule must come AFTER the transparent QWidget
+   rule: both are plain type selectors, so the later one wins, and a transparent
+   window shows black on X11 (About, Print and message boxes). */
 QWidget {
     background: transparent;
     color: $text;
+}
+QMainWindow,
+QDialog {
+    background: $background;
 }
 QMainWindow::separator {
     background: $background;
