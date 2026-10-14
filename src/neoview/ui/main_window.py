@@ -215,6 +215,10 @@ class MainWindow(QMainWindow):
         self._search_batch_timer.timeout.connect(self._process_search_batch)
         self._search_operation: dict[str, object] | None = None
         self._reload_in_progress = False
+        # True while _open_file runs: PdfView emits document_loaded from inside
+        # open_document(), before the tab context knows its file, and _open_file
+        # refreshes every panel itself afterwards. See _on_view_document_loaded.
+        self._open_in_progress = False
         self._last_maximize_at: float = 0.0
 
         self._setup_ui()
@@ -1464,6 +1468,7 @@ class MainWindow(QMainWindow):
         self._save_current_document_session()
         self._stop_watch()
         self.setUpdatesEnabled(False)
+        self._open_in_progress = True
         try:
             if not target.open_document(norm_path):
                 if create_new_tab:
@@ -1494,13 +1499,15 @@ class MainWindow(QMainWindow):
             self.setWindowTitle(f"{APP_NAME} - {os.path.basename(norm_path)}")
 
             self._clear_search()
-            self._populate_outline()
-            self._populate_annotation_list()
+            # One full panel refresh (info, outline, thumbnails, annotation list)
+            # now that the context is complete; document_loaded skipped it.
+            self._refresh_document_info()
             self._update_status()
             self._update_mtime()
             self._start_watch()
             self._schedule_session_save()
         finally:
+            self._open_in_progress = False
             self.setUpdatesEnabled(True)
             self.update()
             target.viewport().update()
@@ -2846,6 +2853,11 @@ class MainWindow(QMainWindow):
 
     def _on_view_document_loaded(self, view: PdfView):
         if self._reload_in_progress:
+            return
+        if self._open_in_progress:
+            # _open_file loads the sidecar and native annotations and refreshes
+            # the panels once itself. Doing it here as well rebuilt the outline
+            # and annotation list two extra times per open (O(TOC entries) each).
             return
         ctx = self._context_for_view(view)
         if ctx.file_path:
