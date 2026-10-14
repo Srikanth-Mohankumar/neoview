@@ -21,6 +21,7 @@ from PySide6.QtGui import (
     QImage,
     QKeyEvent,
     QMouseEvent,
+    QNativeGestureEvent,
     QPainter,
     QPainterPath,
     QPen,
@@ -198,6 +199,9 @@ class PdfView(QGraphicsView):
 
         self._performance_mode = False
         self._pinch_start_zoom: float = 1.0
+        # Anchor of the last cursor zoom, reused by the next wheel/pinch step at the same
+        # point so scrollbar rounding does not add up over a gesture (see _cursor_anchor).
+        self._cursor_zoom_anchor: tuple | None = None
         self._rotation: int = 0
 
         self._measure_badge = QLabel(self.viewport())
@@ -1002,6 +1006,26 @@ class PdfView(QGraphicsView):
         zoom_mode: str = ZOOM_MODE_CUSTOM,
         force_if_close: bool = False,
     ):
+        """Set the zoom, keeping the point at the viewport centre where it is (at the
+        top edge instead when scrolled to the top)."""
+        self._apply_zoom(z, immediate=immediate, zoom_mode=zoom_mode,
+                         force_if_close=force_if_close)
+
+    def _apply_zoom(
+        self,
+        z: float,
+        *,
+        immediate: bool = False,
+        zoom_mode: str = ZOOM_MODE_CUSTOM,
+        force_if_close: bool = False,
+        anchor_vp: QPoint | None = None,
+        anchor: tuple[int, float, float] | None = None,
+        min_change: float = 0.01,
+    ) -> tuple[int, float, float] | None:
+        """Change the zoom and keep the page point under *anchor_vp* (default: the
+        viewport centre) under it. *anchor* is that page point if the caller already
+        knows it. Changes smaller than *min_change* are ignored (wheel and pinch steps
+        pass 0 so that small steps add up). Return the anchor used."""
         z = max(0.1, min(z, 10.0))
         if zoom_mode not in {
             self.ZOOM_MODE_CUSTOM,
@@ -1010,23 +1034,36 @@ class PdfView(QGraphicsView):
             self.ZOOM_MODE_ACTUAL_SIZE,
         }:
             zoom_mode = self.ZOOM_MODE_CUSTOM
+        vbar = self.verticalScrollBar()
+        # At the very top (a document just opened, or fitted), stay at the top.
+        pin_top = anchor_vp is None and vbar.value() <= vbar.minimum()
+        if anchor_vp is None:
+            anchor_vp = self.viewport().rect().center()
 
-        if abs(z - self._zoom) < 0.01:
+        if z == self._zoom or abs(z - self._zoom) < min_change:
             self._zoom_mode = zoom_mode
             if force_if_close and self._pages and self._pages_need_rerender_for_zoom(z):
+                anchor = anchor or self._zoom_anchor_at(anchor_vp)
                 self._zoom = z
                 self._layout_pages()
+                self._scroll_anchor_to(anchor, anchor_vp, keep_top=pin_top)
                 if immediate:
                     self._rerender_timer.stop()
                     self._rerender_pages()
                 elif not self._performance_mode:
                     self._rerender_timer.start(55)
-            return
+            return anchor
 
+        if self._pages:
+            # Before the zoom changes: the point is read in the current layout.
+            anchor = anchor or self._zoom_anchor_at(anchor_vp)
         self._zoom = z
         self._zoom_mode = zoom_mode
         if self._pages:
             self._layout_pages()
+            # Relayout moves every page but leaves the scroll position as it was, which
+            # would show an earlier page after zooming in. Scroll the anchor back.
+            self._scroll_anchor_to(anchor, anchor_vp, keep_top=pin_top)
             if immediate:
                 self._rerender_timer.stop()
                 self._rerender_pages()
@@ -1037,6 +1074,49 @@ class PdfView(QGraphicsView):
         else:
             self._render_all_pages()
         self.zoom_changed.emit(z)
+        return anchor
+
+    def _zoom_anchor_at(self, viewport_pos: QPoint) -> tuple[int, float, float] | None:
+        """(page index, page-local x, y in points) of the point under *viewport_pos*.
+
+        Between pages the nearest page is used, with a local point just outside it, so
+        the gap stays where it is too.
+        """
+        if not self._pages:
+            return None
+        inverse, ok = self.viewportTransform().inverted()
+        if not ok:
+            return None
+        scene_pt = inverse.map(QPointF(viewport_pos))
+        idx = self._get_page_at(scene_pt)
+        if idx < 0:
+            idx = self._nearest_page_index(scene_pt)
+            if idx < 0:
+                return None
+        page = self._pages[idx]
+        return (idx, (scene_pt.x() - page.pos().x()) / self._zoom,
+                (scene_pt.y() - page.pos().y()) / self._zoom)
+
+    def _scroll_anchor_to(self, anchor: tuple[int, float, float] | None,
+                          viewport_pos: QPoint, keep_top: bool = False) -> None:
+        """Scroll so the page point *anchor* is under *viewport_pos* again; with
+        *keep_top*, only horizontally, and scroll vertically to the top."""
+        if keep_top:
+            self.verticalScrollBar().setValue(self.verticalScrollBar().minimum())
+        if anchor is None or not (0 <= anchor[0] < len(self._pages)):
+            return
+        idx, local_x, local_y = anchor
+        page = self._pages[idx]
+        target = QPointF(page.pos().x() + local_x * self._zoom,
+                         page.pos().y() + local_y * self._zoom)
+        # Work in viewport pixels (what the scrollbars count), so rotation is handled too.
+        now = self.viewportTransform().map(target)
+        dx = round(now.x() - viewport_pos.x())
+        dy = round(now.y() - viewport_pos.y())
+        if dx:
+            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() + dx)
+        if dy and not keep_top:
+            self.verticalScrollBar().setValue(self.verticalScrollBar().value() + dy)
 
     def set_performance_mode(self, enabled: bool) -> None:
         """Enable/disable performance mode. When enabled, defers expensive zoom/scroll rerenders."""
@@ -2358,39 +2438,66 @@ class PdfView(QGraphicsView):
         """Multiply zoom by ``factor`` while keeping the content under ``viewport_pos`` fixed."""
         if not self._pages or factor <= 0:
             return
-
-        scene_before = self.mapToScene(viewport_pos)
-        anchor_page = self._get_page_at(scene_before)
-        if anchor_page < 0:
-            # Cursor is between pages — anchor to whichever page edge is closer
-            # so the gap doesn't drift away from the cursor on repeated zooms.
-            anchor_page = self._nearest_page_index(scene_before)
-            if anchor_page < 0:
-                self.zoom_by(factor)
-                return
-
-        page_before = self._pages[anchor_page]
-        zoom_before = self._zoom
-        # Page-local coordinate of the point under the cursor.
-        local_x = (scene_before.x() - page_before.pos().x()) / zoom_before
-        local_y = (scene_before.y() - page_before.pos().y()) / zoom_before
-
-        self.zoom_by(factor)
-
-        if not (0 <= anchor_page < len(self._pages)):
-            return
-        page_after = self._pages[anchor_page]
-        target_scene = QPointF(
-            page_after.pos().x() + local_x * self._zoom,
-            page_after.pos().y() + local_y * self._zoom,
+        # min_change=0: touchpads send many steps of well under 1%; each must count.
+        anchor = self._apply_zoom(self._zoom * factor, anchor_vp=viewport_pos,
+                                  anchor=self._cursor_anchor(viewport_pos), min_change=0.0)
+        self._cursor_zoom_anchor = (
+            (viewport_pos.x(), viewport_pos.y()),
+            (self.horizontalScrollBar().value(), self.verticalScrollBar().value()),
+            self._page_mode,
+            time.monotonic(),
+            anchor,
         )
-        scene_after_cursor = self.mapToScene(viewport_pos)
-        dx = target_scene.x() - scene_after_cursor.x()
-        dy = target_scene.y() - scene_after_cursor.y()
-        if dx:
-            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() + int(round(dx)))
-        if dy:
-            self.verticalScrollBar().setValue(self.verticalScrollBar().value() + int(round(dy)))
+
+    CURSOR_ANCHOR_REUSE_S = 0.5
+
+    def _cursor_anchor(self, viewport_pos: QPoint) -> tuple[int, float, float] | None:
+        """The page point of the previous cursor zoom, if this step continues it.
+
+        Reading the point back from the integer scroll position on every wheel or pinch
+        step loses up to half a pixel each time, which adds up over a gesture. While the
+        cursor and the scroll position are where the last step left them, the page
+        point under the cursor is the one already known.
+        """
+        last = self._cursor_zoom_anchor
+        if last is None:
+            return None
+        pos, scroll, mode, stamp, anchor = last
+        if (
+            pos != (viewport_pos.x(), viewport_pos.y())
+            or scroll != (self.horizontalScrollBar().value(), self.verticalScrollBar().value())
+            or mode != self._page_mode
+            or time.monotonic() - stamp > self.CURSOR_ANCHOR_REUSE_S
+        ):
+            return None
+        return anchor
+
+    def _native_gesture(self, e: QNativeGestureEvent) -> bool:
+        """Touchpad pinch (X11 with XInput 2.4, Wayland, macOS, Windows precision
+        touchpads). Return True when handled."""
+        kind = e.gestureType()
+        if kind in (Qt.NativeGestureType.BeginNativeGesture,
+                    Qt.NativeGestureType.EndNativeGesture):
+            # A new gesture starts from the pages as they are now. The relayout per
+            # step is cheap; the sharp render runs once, from the _rerender_timer
+            # debounce, after the last step.
+            self._cursor_zoom_anchor = None
+            return True
+        if kind == Qt.NativeGestureType.ZoomNativeGesture:
+            # value() is the change in scale since the previous event (e.g. 0.02).
+            factor = 1.0 + e.value()
+            if factor > 0:
+                self._zoom_at_viewport_point(e.position().toPoint(), factor)
+            return True
+        return False
+
+    def viewportEvent(self, e: QEvent) -> bool:
+        # Native gestures arrive at the viewport (the widget under the cursor), in its
+        # coordinates. The QPinchGesture grabbed in __init__ only comes from touchscreens.
+        if e.type() == QEvent.Type.NativeGesture and self._native_gesture(e):
+            e.accept()
+            return True
+        return super().viewportEvent(e)
 
     def keyPressEvent(self, e: QKeyEvent):
         key = e.key()
