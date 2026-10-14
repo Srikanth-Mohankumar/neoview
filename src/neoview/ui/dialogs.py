@@ -1,20 +1,24 @@
 """UI dialogs."""
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QColorDialog,
     QComboBox,
     QDialog,
+    QDialogButtonBox,
     QDoubleSpinBox,
+    QFormLayout,
     QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
+    QSlider,
     QSpinBox,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -228,3 +232,85 @@ class LayoutGridDialog(QDialog):
             "corner_length": float(self.corner_length.value()),
             "color": self._grid_color.name(),
         }
+
+
+class AnnotationPropertiesDialog(QDialog):
+    """Edit colour, opacity, text and stroke width of one annotation record.
+
+    The dialog never mutates the record itself; call ``apply_to(record)`` after it was
+    accepted.
+    """
+
+    _TEXT_TYPES = ("note", "text-box")
+    _STROKE_TYPES = ("rectangle", "ellipse", "line", "arrow", "freehand", "text-box")
+
+    def __init__(self, ann, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"Annotation Properties ({ann.type})")
+        self.setMinimumWidth(380)
+        form = QFormLayout(self)
+
+        # Text / contents (for types that support it)
+        self.text_edit: QTextEdit | None = None
+        if ann.type in self._TEXT_TYPES:
+            self.text_edit = QTextEdit()
+            self.text_edit.setPlainText(ann.contents)
+            self.text_edit.setFixedHeight(90)
+            form.addRow("Text:", self.text_edit)
+
+        # Color
+        self.color_btn = QPushButton()
+        self.color_btn.setFixedSize(60, 24)
+        self._color = QColor(ann.color or "#f7c948")
+        self._update_color_btn()
+        self.color_btn.clicked.connect(self._pick_color)
+        form.addRow("Color:", self.color_btn)
+
+        # Opacity
+        self.opacity_slider = QSlider(Qt.Orientation.Horizontal)
+        self.opacity_slider.setRange(5, 100)
+        self.opacity_slider.setValue(int(ann.opacity * 100))
+        opacity_label = QLabel(f"{int(ann.opacity * 100)}%")
+        self.opacity_slider.valueChanged.connect(lambda v: opacity_label.setText(f"{v}%"))
+        opacity_row = QHBoxLayout()
+        opacity_row.addWidget(self.opacity_slider)
+        opacity_row.addWidget(opacity_label)
+        opacity_container = QWidget()
+        opacity_container.setLayout(opacity_row)
+        form.addRow("Opacity:", opacity_container)
+
+        # Border width (for shapes, freehand, line, arrow)
+        self.width_spin: QDoubleSpinBox | None = None
+        if ann.type in self._STROKE_TYPES:
+            self.width_spin = QDoubleSpinBox()
+            self.width_spin.setRange(0.5, 20.0)
+            self.width_spin.setSingleStep(0.5)
+            self.width_spin.setDecimals(1)
+            self.width_spin.setValue(ann.border_width)
+            form.addRow("Stroke width:", self.width_spin)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        form.addRow(buttons)
+
+    def _update_color_btn(self):
+        pix = QPixmap(40, 16)
+        pix.fill(self._color)
+        self.color_btn.setIcon(QIcon(pix))
+        self.color_btn.setText(self._color.name())
+
+    def _pick_color(self):
+        c = QColorDialog.getColor(self._color, self, "Annotation Color")
+        if c.isValid():
+            self._color = c
+            self._update_color_btn()
+
+    def apply_to(self, ann) -> None:
+        ann.color = self._color.name()
+        ann.opacity = self.opacity_slider.value() / 100.0
+        if self.text_edit is not None:
+            ann.contents = self.text_edit.toPlainText()
+        if self.width_spin is not None:
+            ann.border_width = self.width_spin.value()
+        ann.updated_at = ""
