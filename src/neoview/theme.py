@@ -260,21 +260,21 @@ QWidget {
     color: $text;
 }
 QMainWindow::separator {
-    background: $border;
-    width: 1px;
-    height: 1px;
+    background: $background;
+    width: 5px;
+    height: 5px;
 }
 QMainWindow::separator:hover {
     background: $accent;
 }
 QSplitter::handle {
-    background: $border;
+    background: $background;
 }
 QSplitter::handle:horizontal {
-    width: 1px;
+    width: 5px;
 }
 QSplitter::handle:vertical {
-    height: 1px;
+    height: 5px;
 }
 QSplitter::handle:hover {
     background: $accent;
