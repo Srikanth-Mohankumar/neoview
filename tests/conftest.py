@@ -17,19 +17,29 @@ def _qt_app():
 
 
 @pytest.fixture(autouse=True)
-def _isolated_qsettings(tmp_path, _qt_app):
+def _isolated_qsettings(tmp_path, monkeypatch, _qt_app):
+    """Give every test its own empty settings store.
+
+    MainWindow builds QSettings("NeoView", "NeoView"), which is NativeFormat: the real
+    ~/.config/NeoView/NeoView.conf on Linux and the registry on Windows. setPath cannot
+    redirect the registry, so MainWindow gets an INI file under tmp_path instead.
+    """
+    import neoview.ui.main_window as main_window
+
     config_dir = tmp_path / "qsettings"
     config_dir.mkdir(parents=True, exist_ok=True)
+    ini_path = str(config_dir / "NeoView.ini")
 
-    QSettings.setDefaultFormat(QSettings.Format.IniFormat)
-    QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, str(config_dir))
+    # Belt and braces for any other QSettings(org, app) on Unix-like systems.
+    for fmt in (QSettings.Format.NativeFormat, QSettings.Format.IniFormat):
+        QSettings.setPath(fmt, QSettings.Scope.UserScope, str(config_dir))
 
-    settings = QSettings("NeoView", "NeoView")
-    settings.clear()
-    settings.sync()
+    monkeypatch.setattr(
+        main_window,
+        "QSettings",
+        lambda *_args, **_kwargs: QSettings(ini_path, QSettings.Format.IniFormat),
+    )
     yield
-    settings.clear()
-    settings.sync()
 
 
 @pytest.fixture(autouse=True)

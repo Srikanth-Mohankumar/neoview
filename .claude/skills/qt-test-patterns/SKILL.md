@@ -11,12 +11,11 @@ and Windows in CI. Keep new tests in that shape: fast, no real rendering waits, 
 ## What conftest.py already gives you (autouse)
 
 - `_qt_app` (session): one `QApplication`, `QT_QPA_PLATFORM=offscreen` by default.
-- `_isolated_qsettings`: meant to give each test empty settings.
-  **Known gap:** it redirects only `IniFormat`, but `MainWindow` uses
-  `QSettings("NeoView", "NeoView")`, which is NativeFormat, so tests currently read and clear
-  the developer's real `~/.config/NeoView/NeoView.conf` (the registry on Windows). Until that
-  is fixed, don't add tests that depend on pre-existing settings, and don't "fix" a test by
-  writing settings it expects to find.
+- `_isolated_qsettings`: each test gets an empty INI settings file under `tmp_path`.
+  `MainWindow`'s `QSettings` is monkeypatched to it, because `QSettings("NeoView", "NeoView")`
+  is NativeFormat (the real config file, or the registry on Windows) and `setPath` cannot
+  redirect the registry. Inspect stored values through `win._settings`; two windows in one test
+  share the store, so session-restore tests work.
 - `_release_page_pixmap_cache`: clears `PageItem._PIXMAP_CACHE` and runs `gc` after each test.
 
 Don't re-create these per test, and don't instantiate a second `QApplication`.

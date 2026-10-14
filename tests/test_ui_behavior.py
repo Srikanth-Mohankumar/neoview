@@ -271,6 +271,17 @@ def test_json_settings_round_trip():
     win.close()
 
 
+def test_settings_never_touch_real_user_config(tmp_path):
+    # MainWindow's QSettings("NeoView", "NeoView") is NativeFormat; tests must not
+    # read or clear the developer's real config file / registry key.
+    win = MainWindow()
+    try:
+        settings_file = Path(win._settings.fileName()).resolve()
+        assert settings_file.is_relative_to(tmp_path.resolve()), settings_file
+    finally:
+        win.close()
+
+
 def test_restore_document_session_applies_zoom_and_page(monkeypatch):
     class DummyDoc:
         page_count = 5
