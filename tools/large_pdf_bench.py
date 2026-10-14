@@ -95,8 +95,8 @@ def generate(out_dir: Path, pages: int) -> list[Path]:
     toc = []
     for ch in range(pages // 10):
         toc.append([1, f"Chapter {ch + 1}", ch * 10 + 1])
-        if ch % 3 == 0:
-            toc.append([2, f"Section {ch + 1}.1", ch * 10 + 3])
+        toc.append([2, f"Section {ch + 1}.1", ch * 10 + 3])
+        toc.append([2, f"Section {ch + 1}.2", ch * 10 + 6])
     doc.set_toc(toc[:200])
     for i in range(0, pages, 2):
         page = doc[i]
