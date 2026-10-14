@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import time
+from bisect import bisect_right
 from collections import deque
 from uuid import uuid4
 
@@ -119,6 +120,19 @@ class CollapsibleSection(QWidget):
         self._content.setVisible(expanded)
 
 
+def _page_may_have_annots(doc: fitz.Document, page_idx: int) -> bool:
+    """Cheap check of a page's /Annots entry without loading the page.
+
+    Returns True when the page might carry annotations (or when the check itself
+    fails, e.g. a non-PDF document), so callers fall back to loading the page.
+    """
+    try:
+        kind, _value = doc.xref_get_key(doc.page_xref(page_idx), "Annots")
+    except Exception:
+        return True
+    return kind != "null"
+
+
 class MainWindow(QMainWindow):
     ROLE_KIND = int(Qt.ItemDataRole.UserRole)
     ROLE_PAGE = int(Qt.ItemDataRole.UserRole) + 1
@@ -182,6 +196,9 @@ class MainWindow(QMainWindow):
         self._thumb_icon_cache: dict[tuple, QIcon] = {}
         self._thumb_queue: deque[int] = deque()
         self._thumb_queued: set[int] = set()
+        # (toc root item, sorted TOC pages, items in the same order) for bisecting
+        # in _sync_outline_current_page; rebuilt by _populate_outline.
+        self._outline_sync_index: tuple[QTreeWidgetItem, list[int], list[QTreeWidgetItem]] | None = None
 
         self._watcher = QFileSystemWatcher(self)
         self._watcher.fileChanged.connect(self._on_change)
@@ -211,6 +228,10 @@ class MainWindow(QMainWindow):
         self._search_batch_timer.timeout.connect(self._process_search_batch)
         self._search_operation: dict[str, object] | None = None
         self._reload_in_progress = False
+        # True while _open_file runs: PdfView emits document_loaded from inside
+        # open_document(), before the tab context knows its file, and _open_file
+        # refreshes every panel itself afterwards. See _on_view_document_loaded.
+        self._open_in_progress = False
         self._last_maximize_at: float = 0.0
 
         self._setup_ui()
@@ -864,6 +885,9 @@ class MainWindow(QMainWindow):
         self._thumbs_list.setResizeMode(QListWidget.ResizeMode.Adjust)
         self._thumbs_list.setViewMode(QListWidget.ViewMode.IconMode)
         self._thumbs_list.setMovement(QListWidget.Movement.Static)
+        # Every cell is the same fixed icon box, so let the view skip per-item size
+        # queries; without this, laying out a 5000-page list took ~0.6 s.
+        self._thumbs_list.setUniformItemSizes(True)
         self._thumbs_dock.setWidget(self._thumbs_list)
         self._thumbs_dock.setMinimumWidth(180)
         self._thumbs_dock.setMaximumWidth(520)
@@ -872,7 +896,7 @@ class MainWindow(QMainWindow):
         self._thumbs_dock.hide()
         self._thumbs_list.itemActivated.connect(self._jump_to_thumb)
         self._thumbs_list.verticalScrollBar().valueChanged.connect(self._schedule_thumbnail_render)
-        self._thumbs_dock.visibilityChanged.connect(lambda _visible: self._schedule_thumbnail_render())
+        self._thumbs_dock.visibilityChanged.connect(self._on_thumbs_visibility_changed)
 
         self._info_dock = QDockWidget("Inspector", self)
         self._info_dock.setObjectName("InspectorDock")
@@ -1460,6 +1484,7 @@ class MainWindow(QMainWindow):
         self._save_current_document_session()
         self._stop_watch()
         self.setUpdatesEnabled(False)
+        self._open_in_progress = True
         try:
             if not target.open_document(norm_path):
                 if create_new_tab:
@@ -1490,13 +1515,15 @@ class MainWindow(QMainWindow):
             self.setWindowTitle(f"{APP_NAME} - {os.path.basename(norm_path)}")
 
             self._clear_search()
-            self._populate_outline()
-            self._populate_annotation_list()
+            # One full panel refresh (info, outline, thumbnails, annotation list)
+            # now that the context is complete; document_loaded skipped it.
+            self._refresh_document_info()
             self._update_status()
             self._update_mtime()
             self._start_watch()
             self._schedule_session_save()
         finally:
+            self._open_in_progress = False
             self.setUpdatesEnabled(True)
             self.update()
             target.viewport().update()
@@ -1648,6 +1675,7 @@ class MainWindow(QMainWindow):
 
         filt = self._outline_filter.text().strip().lower()
 
+        toc_entries: list[tuple[int, int, QTreeWidgetItem]] = []
         if doc:
             for level, title, page in doc.get_toc(simple=True):
                 page_idx = max(0, page - 1)
@@ -1658,6 +1686,16 @@ class MainWindow(QMainWindow):
                 item.setData(0, self.ROLE_KIND, "toc")
                 item.setData(0, self.ROLE_PAGE, page_idx)
                 root_toc.addChild(item)
+                toc_entries.append((page_idx, len(toc_entries), item))
+
+        # Sorted by (page, outline order): bisecting for the last page <= current
+        # lands on the same item the old linear scan picked (later entry wins ties).
+        toc_entries.sort(key=lambda entry: (entry[0], entry[1]))
+        self._outline_sync_index = (
+            root_toc,
+            [entry[0] for entry in toc_entries],
+            [entry[2] for entry in toc_entries],
+        )
 
         for bookmark in ctx.sidecar_state.bookmarks:
             if filt and filt not in bookmark.title.lower() and filt not in str(bookmark.page + 1):
@@ -1676,6 +1714,18 @@ class MainWindow(QMainWindow):
 
         root_toc = self._outline_tree.topLevelItem(0)
         if root_toc is None:
+            return
+
+        # Runs on every scroll tick; a linear scan over the TOC cost ~4 ms per
+        # tick with a 4963-entry outline. Use the index built by _populate_outline.
+        index = self._outline_sync_index
+        if index is not None and index[0] is root_toc:
+            _root, pages, items = index
+            pos = bisect_right(pages, page_idx) - 1
+            if pos >= 0:
+                self._outline_tree.blockSignals(True)
+                self._outline_tree.setCurrentItem(items[pos])
+                self._outline_tree.blockSignals(False)
             return
 
         for i in range(root_toc.childCount()):
@@ -2568,6 +2618,13 @@ class MainWindow(QMainWindow):
         self._thumb_source_key = os.path.abspath(source_path) if source_path else f"doc-{id(doc)}"
         self._thumb_icon_cache = {k: v for k, v in self._thumb_icon_cache.items() if k[0] == self._thumb_source_key}
 
+        # The panel is hidden by default. Building one list item per page (and
+        # rendering thumbnails for the current page on every scroll tick) for a
+        # panel nobody sees is wasted O(pages) work on open; build it when the
+        # panel is shown instead (_on_thumbs_visibility_changed).
+        if not self._thumbs_dock.isVisible():
+            return
+
         for i in range(doc.page_count):
             item = QListWidgetItem(f"{i + 1}")
             cached = self._thumb_icon_cache.get((self._thumb_source_key, i))
@@ -2579,6 +2636,13 @@ class MainWindow(QMainWindow):
             self._thumbs_list.addItem(item)
 
         self._schedule_thumbnail_render()
+
+    def _on_thumbs_visibility_changed(self, visible: bool):
+        doc = self.current_view().document
+        if visible and doc is not None and self._thumbs_list.count() != doc.page_count:
+            self._populate_thumbnails()
+        else:
+            self._schedule_thumbnail_render()
 
     def _clear_thumbnail_queue(self):
         self._thumb_timer.stop()
@@ -2809,6 +2873,12 @@ class MainWindow(QMainWindow):
 
         try:
             for page_idx in range(doc.page_count):
+                # Loading every page just to ask for its annotations cost ~0.1 ms
+                # per page (0.55 s on a 4963-page PDF, on the GUI thread, during
+                # open). The page dictionary's /Annots key answers "has none"
+                # without building a Page, so only annotated pages get loaded.
+                if not _page_may_have_annots(doc, page_idx):
+                    continue
                 page = doc[page_idx]
                 for ann in page.annots():
                     ann_type = ann.type[0]
@@ -2842,6 +2912,11 @@ class MainWindow(QMainWindow):
 
     def _on_view_document_loaded(self, view: PdfView):
         if self._reload_in_progress:
+            return
+        if self._open_in_progress:
+            # _open_file loads the sidecar and native annotations and refreshes
+            # the panels once itself. Doing it here as well rebuilt the outline
+            # and annotation list two extra times per open (O(TOC entries) each).
             return
         ctx = self._context_for_view(view)
         if ctx.file_path:
