@@ -271,11 +271,6 @@ QPushButton#RecentFileButton:focus {
     border-color: $accent;
 }
 
-/* ---- Status bar ---- */
-QStatusBar QLabel#StatusMeasure {
-    font-family: $mono_stack;
-}
-
 /* ---- Document tabs: room for the close button ---- */
 QTabWidget#DocumentTabs > QTabBar::tab {
     padding-right: 6px;

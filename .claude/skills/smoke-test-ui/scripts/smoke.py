@@ -216,6 +216,35 @@ def main() -> int:
         assert names, "no menus"
         return ", ".join(names)
 
+    def annotate():
+        win._set_inspector_visible(False)
+        win._set_sidebar_visible(False)
+        win._on_tool_action(ToolMode.ANNOTATE)
+        pump(300)
+        assert win._ann_toolbar.isVisible(), "annotation toolbar not shown"
+        return "annotation toolbar shown"
+
+    def layout_modes():
+        win._on_tool_action(ToolMode.HAND)
+        actions = getattr(win, "_page_mode_actions", {})
+        if not actions or not actions["two-page"].isEnabled():
+            return "page modes unavailable"
+        actions["two-page"].trigger()
+        win._color_mode_actions["night"].trigger()
+        win.current_view().fit_page()
+        pump(500)
+        view = win.current_view()
+        assert view.page_mode() == "two-page" and view.color_mode() == "night"
+        return "two-page, night"
+
+    def reset_modes():
+        actions = getattr(win, "_page_mode_actions", {})
+        if actions and actions["continuous"].isEnabled():
+            actions["continuous"].trigger()
+            win._color_mode_actions["normal"].trigger()
+        pump(300)
+        return "continuous, normal"
+
     def reload_doc():
         view = win.current_view()
         assert view.reload_document(), "reload_document returned False"
@@ -227,7 +256,9 @@ def main() -> int:
                      ("search", search), ("measure", measure), ("inspector", inspector),
                      ("sidebar-thumbnails", sidebar("thumbnails")), ("sidebar-outline", sidebar("outline")),
                      ("sidebar-bookmarks", sidebar("bookmarks")),
-                     ("sidebar-annotations", sidebar("annotations")), ("reload", reload_doc)]:
+                     ("sidebar-annotations", sidebar("annotations")), ("annotate", annotate),
+                     ("two-page-night", layout_modes), ("reset-modes", reset_modes),
+                     ("reload", reload_doc)]:
         step(name, fn)
     step("menus", menus)
 

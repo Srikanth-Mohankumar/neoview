@@ -555,14 +555,14 @@ class MainWindow(QMainWindow):
         self._page_mode_group = QActionGroup(self)
         self._page_mode_group.setExclusionPolicy(QActionGroup.ExclusionPolicy.ExclusiveOptional)
         self._page_mode_actions: dict[str, QAction] = {}
-        for mode, label in (
-            ("single", "&Single Page"),
-            ("continuous", "&Continuous"),
-            ("two-page", "&Two Pages"),
-            ("two-page-cover", "Two Pages with &Cover"),
+        for mode, label, glyph in (
+            ("single", "&Single Page", "file"),
+            ("continuous", "&Continuous", "rectangle-vertical"),
+            ("two-page", "&Two Pages", "columns-2"),
+            ("two-page-cover", "Two Pages with &Cover", "book-open"),
         ):
             act = self._action(
-                label, lambda _checked=False, m=mode: self._set_page_mode(m),
+                label, lambda _checked=False, m=mode: self._set_page_mode(m), icon=glyph,
                 name=f"action_page_mode_{mode.replace('-', '_')}", checkable=True,
             )
             self._page_mode_group.addAction(act)
