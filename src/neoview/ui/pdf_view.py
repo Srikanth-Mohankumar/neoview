@@ -16,6 +16,7 @@ from PySide6.QtGui import (
     QBrush,
     QColor,
     QDesktopServices,
+    QFont,
     QImage,
     QKeyEvent,
     QMouseEvent,
@@ -38,6 +39,7 @@ from PySide6.QtWidgets import (
     QToolTip,
 )
 
+from neoview import theme
 from neoview.models.view_state import AnnotationRecord
 from neoview.ui import icons
 from neoview.ui.annotation_item import AnnotationItem
@@ -89,12 +91,6 @@ class PdfView(QGraphicsView):
         self.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        app = QApplication.instance()
-        theme_mode = ""
-        if app is not None:
-            theme_mode = str(app.property("theme_mode") or "").lower()
-        canvas_bg = "#141417" if theme_mode == "dark" else "#eef2f7"
-        self.setBackgroundBrush(QBrush(QColor(canvas_bg)))
         self.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
         self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.SmartViewportUpdate)
         self.verticalScrollBar().setSingleStep(36)
@@ -186,6 +182,7 @@ class PdfView(QGraphicsView):
         self._measure_badge.setObjectName("FloatingMeasureBadge")
         self._measure_badge.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self._measure_badge.hide()
+        self._apply_badge_font()
         self._link_badge = QLabel(self.viewport())
         self._link_badge.setObjectName("LinkBadge")
         self._link_badge.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
@@ -200,6 +197,37 @@ class PdfView(QGraphicsView):
 
         self._apply_viewport_margins()
         self._update_cursor()
+        self.apply_theme_colors()
+
+    # ------------------------------------------------------------------
+    # Theme
+    # ------------------------------------------------------------------
+
+    def canvas_color(self) -> QColor:
+        """Colour of the area around the pages for the current theme."""
+        return QColor(theme.tokens()["canvas"])
+
+    def apply_theme_colors(self) -> None:
+        """Re-read theme colours (canvas, badge font). Called again on palette changes."""
+        self.setBackgroundBrush(QBrush(self.canvas_color()))
+        self._apply_badge_font()
+        self.viewport().update()
+
+    def _apply_badge_font(self) -> None:
+        # The badge shows changing numbers: use the UI font with tabular (fixed-width)
+        # figures so it looks the same on every OS and the digits do not jitter. The
+        # widget-level rule overrides the stylesheet's monospace family; size and weight
+        # still come from the theme stylesheet.
+        font = QFont(QApplication.font())
+        font.setFeature(QFont.Tag("tnum"), 1)
+        self._measure_badge.setFont(font)
+        family = font.family().replace('"', "")
+        self._measure_badge.setStyleSheet(f'font-family: "{family}";')
+
+    def changeEvent(self, e):  # noqa: N802 - Qt API
+        super().changeEvent(e)
+        if e.type() in (QEvent.Type.PaletteChange, QEvent.Type.StyleChange):
+            self.apply_theme_colors()
 
     @property
     def document(self) -> fitz.Document | None:
