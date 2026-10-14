@@ -62,7 +62,8 @@ Rebuild from the tagged commit so the artifacts match the version, then upload. 
 ```
 
 It cleans `dist/`, builds with the repo `.venv`, runs `twine check`, and uploads everything in
-`dist/`. Check the build output names `neoview-<version>` before confirming.
+`dist/` without pausing. So before running it, confirm `git describe --tags` is `v<version>`
+and `pyproject.toml` says `version = "<version>"`.
 
 ## 5. Verify
 
