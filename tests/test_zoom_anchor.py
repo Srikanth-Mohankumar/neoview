@@ -725,3 +725,34 @@ class TestCtrlWheel:
         finally:
             view.close_document()
             view.close()
+
+
+@pytest.mark.parametrize("mode", ["continuous", "two-page"])
+def test_fit_page_shows_the_whole_current_page(tmp_path, mode):
+    # Fit Page in a standard viewer shows the entire page (or spread) you are on,
+    # even if you were reading its lower half at a higher zoom.
+    pdf = tmp_path / "doc.pdf"
+    _make_pdf(pdf, [(595, 842)] * 8)
+    view = _load_view(pdf)
+    try:
+        view.set_page_mode(mode)
+        view.set_zoom(1.5, immediate=True)
+        QApplication.processEvents()
+        view.go_to_page(4)
+        QApplication.processEvents()
+        bar = view.verticalScrollBar()
+        bar.setValue(bar.value() + 600)  # reading the lower half
+        QApplication.processEvents()
+        page = view.current_page
+
+        view.fit_page()
+        QApplication.processEvents()
+
+        assert view.current_page == page
+        top = view._page_positions[page]
+        height = view._pages[page].page_rect.height() * view.zoom
+        assert top >= bar.value() - 1
+        assert top + height <= bar.value() + view.viewport().height() + 1
+    finally:
+        view.close_document()
+        view.close()

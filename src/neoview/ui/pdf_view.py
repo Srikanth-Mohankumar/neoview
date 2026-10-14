@@ -1191,12 +1191,28 @@ class PdfView(QGraphicsView):
         view_h = max(40, self.viewport().height() - 40)
         scale_w = view_w / page_rect.width()
         scale_h = view_h / page_rect.height()
+        page = self.current_page
         self.set_zoom(
             min(scale_w, scale_h),
             immediate=True,
             zoom_mode=self.ZOOM_MODE_FIT_PAGE,
             force_if_close=True,
         )
+        self._center_page_vertically(page)
+
+    def _center_page_vertically(self, page: int) -> None:
+        """Scroll so *page* (its whole row/spread in two-page modes) is centred vertically.
+
+        Fit Page must show the entire page you are on; keeping the old centre point
+        (as the other zoom paths do) can leave part of it scrolled off.
+        """
+        if not (0 <= page < len(self._page_positions)) or self._layout is None:
+            return
+        row = self._row_pages(self._page_row[page])
+        top = min(self._page_positions[i] for i in row)
+        height = max(self._pages[i].page_rect.height() for i in row) * self._zoom
+        bar = self.verticalScrollBar()
+        bar.setValue(int(round(top + height / 2 - self.viewport().height() / 2)))
 
     def actual_size(self):
         self.set_zoom(1.0, immediate=True, zoom_mode=self.ZOOM_MODE_ACTUAL_SIZE)
