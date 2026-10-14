@@ -227,3 +227,53 @@ def test_single_mode_hides_other_pages_overlays_and_hits(view):
     # The shown page is still hit-testable.
     shown = view._pages[0]
     assert view._get_page_at(shown.pos() + QPointF(5, 5)) == 0
+
+
+def _settle(qtbot, view):
+    def done():
+        QApplication.processEvents()
+        return view.pending_render_count() == 0
+    qtbot.waitUntil(done, timeout=5000)
+    for _ in range(3):
+        QApplication.processEvents()
+
+
+@pytest.mark.parametrize("color", ["night", "sepia"])
+@pytest.mark.parametrize("mode", PAGE_MODES)
+def test_recoloured_paper_only_inside_page_rects(qtbot, view, mode, color):
+    """Paper-coloured pixels must lie on a shown page, never on the canvas around it.
+
+    Guards against a recoloured band or placeholder painted at the wrong offset. Mixed
+    page sizes make the two-page rows differ in width, so pages sit at different x.
+    """
+    from PySide6.QtCore import QRect
+
+    view.resize(1100, 700)
+    view.set_page_mode(mode)
+    view.set_color_mode(color)
+    view.fit_page()
+    _settle(qtbot, view)
+    img = view.viewport().grab().toImage()
+    # Page rects in viewport pixels (not sceneBoundingRect, which includes the shadow).
+    page_rects = []
+    for p in view._pages:
+        if not p.isVisible():
+            continue
+        top_left = view.mapFromScene(p.pos())
+        w = round(p.page_rect.width() * view.zoom)
+        h = round(p.page_rect.height() * view.zoom)
+        page_rects.append(QRect(top_left.x() - 1, top_left.y() - 1, w + 3, h + 3))
+    assert page_rects
+
+    def is_paper(c):
+        if color == "night":
+            return max(c.red(), c.green(), c.blue()) <= 8
+        return abs(c.red() - 246) <= 6 and abs(c.green() - 238) <= 6 and abs(c.blue() - 218) <= 6
+
+    stray = []
+    for y in range(0, img.height(), 5):
+        for x in range(0, img.width(), 5):
+            c = img.pixelColor(x, y)
+            if is_paper(c) and not any(r.contains(x, y) for r in page_rects):
+                stray.append((x, y))
+    assert not stray, f"{len(stray)} paper pixels outside pages, e.g. {stray[:5]}"
