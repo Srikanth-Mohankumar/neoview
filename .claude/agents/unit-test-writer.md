@@ -1,6 +1,8 @@
 ---
 name: unit-test-writer
 description: Writes new pytest tests for a named NeoView function, class or module, following the tests/conftest.py fixtures. Use when asked to add, write or extend tests, or when new code lacks coverage.
+skills:
+  - qt-test-patterns
 model: sonnet
 color: green
 ---
