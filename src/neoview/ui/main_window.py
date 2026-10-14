@@ -123,6 +123,19 @@ class CollapsibleSection(QWidget):
         self._content.setVisible(expanded)
 
 
+def _page_may_have_annots(doc: fitz.Document, page_idx: int) -> bool:
+    """Cheap check of a page's /Annots entry without loading the page.
+
+    Returns True when the page might carry annotations (or when the check itself
+    fails, e.g. a non-PDF document), so callers fall back to loading the page.
+    """
+    try:
+        kind, _value = doc.xref_get_key(doc.page_xref(page_idx), "Annots")
+    except Exception:
+        return True
+    return kind != "null"
+
+
 class MainWindow(QMainWindow):
     ROLE_KIND = int(Qt.ItemDataRole.UserRole)
     ROLE_PAGE = int(Qt.ItemDataRole.UserRole) + 1
@@ -2820,6 +2833,12 @@ class MainWindow(QMainWindow):
 
         try:
             for page_idx in range(doc.page_count):
+                # Loading every page just to ask for its annotations cost ~0.1 ms
+                # per page (0.55 s on a 4963-page PDF, on the GUI thread, during
+                # open). The page dictionary's /Annots key answers "has none"
+                # without building a Page, so only annotated pages get loaded.
+                if not _page_may_have_annots(doc, page_idx):
+                    continue
                 page = doc[page_idx]
                 for ann in page.annots():
                     ann_type = ann.type[0]
