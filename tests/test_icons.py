@@ -111,3 +111,11 @@ def test_icon_is_cached():
 def test_unknown_name_raises():
     with pytest.raises(icons.UnknownIconError, match="no-such-icon"):
         icons.icon("no-such-icon")
+
+
+def test_default_color_falls_back_to_env_theme(theme_mode, monkeypatch):
+    theme_mode(None)
+    monkeypatch.setenv("NEOVIEW_THEME", "dark")
+    assert icons.default_color() == icons.DEFAULT_COLORS["dark"]
+    monkeypatch.delenv("NEOVIEW_THEME")
+    assert icons.default_color() == icons.DEFAULT_COLORS["light"]

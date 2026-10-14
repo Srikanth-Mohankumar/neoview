@@ -14,6 +14,7 @@ copy for the disabled state. Results are cached per (name, colour, size).
 
 from __future__ import annotations
 
+import os
 from importlib import resources
 
 from PySide6.QtCore import QByteArray, QRectF, Qt
@@ -95,9 +96,15 @@ def _svg_bytes(name: str) -> bytes:
 
 
 def default_color() -> str:
-    """Glyph colour for the current QApplication 'theme_mode' (light if unset)."""
+    """Glyph colour for the current theme mode.
+
+    Reads the QApplication property "theme_mode" (set by app.main); when that is unset,
+    falls back to the NEOVIEW_THEME environment variable app.main derives it from, then light.
+    """
     app = QGuiApplication.instance()
     mode = str(app.property("theme_mode") or "").lower() if app is not None else ""
+    if not mode:
+        mode = os.environ.get("NEOVIEW_THEME", "").strip().lower()
     return DEFAULT_COLORS.get(mode, DEFAULT_COLORS["light"])
 
 
