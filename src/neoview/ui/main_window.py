@@ -12,6 +12,7 @@ from collections import deque
 from uuid import uuid4
 
 import fitz
+import shiboken6
 from PySide6.QtCore import (
     QEvent,
     QFileSystemWatcher,
@@ -72,7 +73,7 @@ from neoview.persistence.sidecar_store import (
     save_sidecar,
 )
 from neoview.resources import load_app_icon
-from neoview.ui import icons
+from neoview.ui import icons, password, presentation, printing
 from neoview.ui.annotation_io import export_annotated_pdf, load_native_annotations
 from neoview.ui.annotation_toolbar import AnnotationToolbar
 from neoview.ui.chrome import TOOLBAR_ICON, IconBinder, build_chrome_stylesheet
@@ -89,7 +90,7 @@ from neoview.ui.toolbar import (
     ToolSegment,
     ZoomBox,
 )
-from neoview.utils.units import format_length, format_size, normalize_unit
+from neoview.utils.units import UNIT_LABELS, UNITS, format_length, format_size, normalize_unit
 
 APP_NAME = "NeoView"
 
@@ -190,6 +191,7 @@ class MainWindow(QMainWindow):
         # refreshes every panel itself afterwards. See _on_view_document_loaded.
         self._open_in_progress = False
         self._last_maximize_at: float = 0.0
+        self._presentation: presentation.PresentationWindow | None = None
 
         self._setup_ui()
         self._restore_persistent_ui()
@@ -263,6 +265,14 @@ class MainWindow(QMainWindow):
         view.annotation_created.connect(lambda rec, v=view: self._on_view_annotation_created(v, rec))
         view.annotation_deleted.connect(lambda ann_id, v=view: self._on_view_annotation_deleted(v, ann_id))
         view.annotation_edit_requested.connect(lambda ann_id, v=view: self._on_view_annotation_edit_requested(v, ann_id))
+        # Phase B viewer API (docs/dev/viewer-api.md): connect only what this PdfView has.
+        for name in ("page_mode_changed", "color_mode_changed", "history_changed"):
+            signal = getattr(view, name, None)
+            if signal is not None:
+                signal.connect(lambda *_args, v=view: self._on_view_capability_changed(v))
+        password_signal = getattr(view, "password_required", None)
+        if password_signal is not None:
+            password_signal.connect(lambda path, v=view: self._on_view_password_required(v, path))
 
         timer = QTimer(self)
         timer.setSingleShot(True)
@@ -439,6 +449,10 @@ class MainWindow(QMainWindow):
             "Export PDF with &Annotations...", self._export_pdf_with_annotations, icon="file-down"
         )
         self._quit_action = self._action("&Quit", self.close, QKeySequence.StandardKey.Quit)
+        self._print_action = self._action(
+            "&Print...", self._print_document, QKeySequence.StandardKey.Print, icon="printer",
+            name="action_print", tip="Print",
+        )
 
         # Edit
         self._copy_action = self._action(
@@ -508,6 +522,36 @@ class MainWindow(QMainWindow):
         self._perf_action = self._action("Performance Mode", self._on_performance_mode_toggled, checkable=True)
         self._perf_action.setStatusTip("Pause rendering during zoom/scroll - reduces CPU on large PDFs")
         self._fullscreen_action = self._action("&Full Screen", self._toggle_fullscreen, "F11", icon="fullscreen")
+        self._presentation_action = self._action(
+            "&Presentation", self._start_presentation, "F5", icon="presentation", name="action_presentation"
+        )
+
+        # View: page layout and reading colours (Phase B PdfView API; disabled until present)
+        self._page_mode_group = QActionGroup(self)
+        self._page_mode_group.setExclusionPolicy(QActionGroup.ExclusionPolicy.ExclusiveOptional)
+        self._page_mode_actions: dict[str, QAction] = {}
+        for mode, label in (
+            ("single", "&Single Page"),
+            ("continuous", "&Continuous"),
+            ("two-page", "&Two Pages"),
+            ("two-page-cover", "Two Pages with &Cover"),
+        ):
+            act = self._action(
+                label, lambda _checked=False, m=mode: self._set_page_mode(m),
+                name=f"action_page_mode_{mode.replace('-', '_')}", checkable=True,
+            )
+            self._page_mode_group.addAction(act)
+            self._page_mode_actions[mode] = act
+        self._color_mode_group = QActionGroup(self)
+        self._color_mode_group.setExclusionPolicy(QActionGroup.ExclusionPolicy.ExclusiveOptional)
+        self._color_mode_actions: dict[str, QAction] = {}
+        for mode, label in (("normal", "&Normal"), ("night", "N&ight"), ("sepia", "&Sepia")):
+            act = self._action(
+                label, lambda _checked=False, m=mode: self._set_color_mode(m),
+                name=f"action_color_mode_{mode}", checkable=True,
+            )
+            self._color_mode_group.addAction(act)
+            self._color_mode_actions[mode] = act
         self._reset_layout_action = self._action("Reset Window &Layout", self._reset_window_layout)
 
         # Go
@@ -522,6 +566,12 @@ class MainWindow(QMainWindow):
         )
         self._last_page_action = self._action("&Last Page", lambda: view().last_page(), "End", icon="chevron-last")
         self._goto_page_action = self._action("&Go to Page...", self._focus_page_field, "Ctrl+G")
+        self._back_action = self._action(
+            "&Back", self._go_back, "Alt+Left", icon="arrow-left", name="action_go_back"
+        )
+        self._forward_action = self._action(
+            "&Forward", self._go_forward, "Alt+Right", icon="arrow-right", name="action_go_forward"
+        )
         self._next_tab_action = self._action("Next Ta&b", self._switch_to_next_tab, ["Ctrl+Tab", "Ctrl+PgDown"])
         self._prev_tab_action = self._action(
             "Previous T&ab", self._switch_to_previous_tab, ["Ctrl+Shift+Tab", "Ctrl+PgUp"]
@@ -565,6 +615,21 @@ class MainWindow(QMainWindow):
             "Add &Note (selection)", self._add_note, "Ctrl+Shift+N", icon="sticky-note"
         )
 
+        self._unit_group = QActionGroup(self)
+        self._unit_group.setExclusive(True)
+        self._unit_actions: dict[str, QAction] = {}
+        for unit in UNITS:
+            act = self._action(
+                UNIT_LABELS[unit], lambda _checked=False, u=unit: self._set_unit(u),
+                name=f"action_unit_{unit}", checkable=True,
+            )
+            act.setData(unit)
+            act.setChecked(unit == self._unit)
+            self._unit_group.addAction(act)
+            self._unit_actions[unit] = act
+
+        self._about_action = self._action(f"&About {APP_NAME}", self._show_about, icon="info")
+
         # Actions that need an open document; see _update_action_states.
         self._doc_actions = [
             self._close_tab_action, self._reload_action, self._export_action, self._export_annot_action,
@@ -587,7 +652,7 @@ class MainWindow(QMainWindow):
         file_m.addAction(self._close_tab_action)
         file_m.addAction(self._reload_action)
         file_m.addSeparator()
-        self._file_print_anchor = file_m.addSeparator()
+        file_m.addAction(self._print_action)
         file_m.addAction(self._export_action)
         file_m.addAction(self._export_annot_action)
         file_m.addSeparator()
@@ -620,7 +685,12 @@ class MainWindow(QMainWindow):
         zoom_m.addSeparator()
         for act in (self._actual_size_action, self._fit_width_action, self._fit_page_action):
             zoom_m.addAction(act)
-        self._view_menu_layout_anchor = view_m.addSeparator()
+        self._page_layout_menu = view_m.addMenu("Page &Layout")
+        for act in self._page_mode_actions.values():
+            self._page_layout_menu.addAction(act)
+        self._reading_mode_menu = view_m.addMenu("Reading &Mode")
+        for act in self._color_mode_actions.values():
+            self._reading_mode_menu.addAction(act)
         rotate_m = view_m.addMenu("R&otate")
         for act in (self._rotate_left_action, self._rotate_right_action, self._reset_rotation_action):
             rotate_m.addAction(act)
@@ -631,6 +701,7 @@ class MainWindow(QMainWindow):
         view_m.addAction(self._perf_action)
         view_m.addSeparator()
         view_m.addAction(self._fullscreen_action)
+        view_m.addAction(self._presentation_action)
         view_m.addAction(self._reset_layout_action)
         self._view_menu = view_m
 
@@ -638,7 +709,10 @@ class MainWindow(QMainWindow):
         for act in (self._first_page_action, self._prev_page_action, self._next_page_action, self._last_page_action):
             go_m.addAction(act)
         go_m.addAction(self._goto_page_action)
-        self._go_menu_history_anchor = go_m.addSeparator()
+        go_m.addSeparator()
+        go_m.addAction(self._back_action)
+        go_m.addAction(self._forward_action)
+        go_m.addSeparator()
         go_m.addAction(self._add_bookmark_action)
         go_m.addSeparator()
         go_m.addAction(self._next_tab_action)
@@ -651,7 +725,15 @@ class MainWindow(QMainWindow):
         tools_m.addSeparator()
         for act in (self._annot_highlight_action, self._annot_underline_action, self._annot_note_action):
             tools_m.addAction(act)
+        tools_m.addSeparator()
+        units_m = tools_m.addMenu("Measurement &Units")
+        for act in self._unit_actions.values():
+            units_m.addAction(act)
         self._tools_menu = tools_m
+
+        help_m = bar.addMenu("&Help")
+        help_m.addAction(self._about_action)
+        self._help_menu = help_m
 
     def _setup_toolbar(self):
         tb = QToolBar("Main toolbar", self)
@@ -667,7 +749,8 @@ class MainWindow(QMainWindow):
         tb.addAction(self._sidebar_action)
         tb.addSeparator()
         tb.addAction(self._open_action)
-        self._toolbar_print_anchor = tb.addSeparator()
+        tb.addAction(self._print_action)
+        tb.addSeparator()
 
         # -- Page navigation: [^] [ n ] / N [v]
         tb.addAction(self._prev_page_action)
@@ -743,9 +826,13 @@ class MainWindow(QMainWindow):
         m.addMenu(self._recent_menu)
         m.addAction(self._reload_action)
         m.addSeparator()
+        m.addMenu(self._page_layout_menu)
+        m.addMenu(self._reading_mode_menu)
         m.addAction(self._rotate_left_action)
         m.addAction(self._rotate_right_action)
         m.addSeparator()
+        m.addAction(self._back_action)
+        m.addAction(self._forward_action)
         m.addAction(self._add_bookmark_action)
         m.addAction(self._copy_action)
         m.addAction(self._export_action)
@@ -754,6 +841,7 @@ class MainWindow(QMainWindow):
         m.addAction(self._rulers_action)
         m.addAction(self._layout_grid_action)
         m.addAction(self._fullscreen_action)
+        m.addAction(self._presentation_action)
 
     def _setup_annotation_toolbar(self):
         """Create the contextual annotation toolbar (shown below the main toolbar)."""
@@ -1317,11 +1405,17 @@ class MainWindow(QMainWindow):
             return
 
         path = os.path.abspath(ctx.file_path)
-        self._document_sessions[path] = {
+        state: dict[str, object] = {
             "page": int(view.current_page),
             "zoom": float(view.zoom),
             "zoom_mode": view.zoom_mode,
         }
+        # Page layout and reading colours are per document view state (viewer-api.md).
+        for key in ("page_mode", "color_mode"):
+            getter = getattr(view, key, None)
+            if callable(getter):
+                state[key] = str(getter())
+        self._document_sessions[path] = state
 
     def _save_current_document_session(self):
         self._save_document_session_for_view(self.current_view())
@@ -1356,6 +1450,14 @@ class MainWindow(QMainWindow):
             page = int(state.get("page", 0))
         except (TypeError, ValueError):
             return False
+
+        for key, setter_name in (("page_mode", "set_page_mode"), ("color_mode", "set_color_mode")):
+            setter = getattr(view, setter_name, None)
+            if key in state and callable(setter):
+                try:
+                    setter(str(state[key]))
+                except ValueError:
+                    pass
 
         zoom_mode = str(state.get("zoom_mode", PdfView.ZOOM_MODE_CUSTOM))
         if zoom_mode == PdfView.ZOOM_MODE_FIT_WIDTH:
@@ -1426,7 +1528,10 @@ class MainWindow(QMainWindow):
         self.setUpdatesEnabled(False)
         self._open_in_progress = True
         try:
-            if not target.open_document(norm_path):
+            opened = target.open_document(norm_path)
+            if not opened and self._view_can_unlock(target) and self._needs_password(norm_path):
+                opened = self._unlock_and_open(target, norm_path)
+            if not opened:
                 if create_new_tab:
                     idx = self._tabs.indexOf(target)
                     if idx >= 0:
@@ -2983,6 +3088,170 @@ class MainWindow(QMainWindow):
             action.setEnabled(has_doc)
         self._zoom_combo.setEnabled(has_doc)
         self._search_field.setEnabled(has_doc)
+        self._update_capability_actions()
+
+    # --------------------------- Viewer capabilities ---------------------------
+    @staticmethod
+    def _view_supports(view, *names: str) -> bool:
+        return all(callable(getattr(view, name, None)) for name in names)
+
+    def _view_password(self, view: PdfView) -> str | None:
+        getter = getattr(view, "document_password", None)
+        return getter() if callable(getter) else None
+
+    def _update_capability_actions(self):
+        """Enable print/presentation and the Phase B actions for what the current view supports.
+
+        Page layout, reading mode and back/forward call PdfView methods that land in Phase B
+        (docs/dev/viewer-api.md). Until a view has them, their actions stay disabled.
+        """
+        view = self.current_view()
+        has_doc = view.document is not None
+        self._print_action.setEnabled(has_doc)
+        self._presentation_action.setEnabled(has_doc)
+
+        can_page = has_doc and self._view_supports(view, "set_page_mode", "page_mode")
+        page_mode = view.page_mode() if can_page else None
+        for mode, act in self._page_mode_actions.items():
+            act.setEnabled(can_page)
+            act.setChecked(mode == page_mode)
+
+        can_color = has_doc and self._view_supports(view, "set_color_mode", "color_mode")
+        color_mode = view.color_mode() if can_color else None
+        for mode, act in self._color_mode_actions.items():
+            act.setEnabled(can_color)
+            act.setChecked(mode == color_mode)
+
+        can_history = has_doc and self._view_supports(view, "go_back", "go_forward", "can_go_back", "can_go_forward")
+        self._back_action.setEnabled(bool(can_history and view.can_go_back()))
+        self._forward_action.setEnabled(bool(can_history and view.can_go_forward()))
+
+    def _on_view_capability_changed(self, view: PdfView):
+        if self._is_current_view(view):
+            self._update_capability_actions()
+        self._schedule_session_save()
+
+    def _set_page_mode(self, mode: str):
+        view = self.current_view()
+        if view.document is not None and self._view_supports(view, "set_page_mode"):
+            try:
+                view.set_page_mode(mode)
+            except ValueError as exc:
+                self._status.showMessage(str(exc), 3000)
+            self._schedule_session_save()
+        self._update_capability_actions()
+
+    def _set_color_mode(self, mode: str):
+        view = self.current_view()
+        if view.document is not None and self._view_supports(view, "set_color_mode"):
+            try:
+                view.set_color_mode(mode)
+            except ValueError as exc:
+                self._status.showMessage(str(exc), 3000)
+            self._schedule_session_save()
+        self._update_capability_actions()
+
+    def _go_back(self):
+        view = self.current_view()
+        if view.document is not None and self._view_supports(view, "go_back"):
+            view.go_back()
+        self._update_capability_actions()
+
+    def _go_forward(self):
+        view = self.current_view()
+        if view.document is not None and self._view_supports(view, "go_forward"):
+            view.go_forward()
+        self._update_capability_actions()
+
+    def _print_document(self):
+        view = self.current_view()
+        path = view.doc_path
+        if view.document is None or not path:
+            self._status.showMessage("Open a PDF first", 1500)
+            return
+        try:
+            printing.print_document(self, path, view.current_page, self._view_password(view))
+        except Exception as exc:
+            # The file is re-read from disk and may be mid-rebuild (LaTeX) or re-encrypted.
+            self._status.showMessage(f"Could not print {os.path.basename(path)}: {exc}", 6000)
+
+    def _start_presentation(self):
+        existing = self._presentation
+        if existing is not None and shiboken6.isValid(existing) and existing.isVisible():
+            existing.raise_()
+            existing.activateWindow()
+            return
+        view = self.current_view()
+        path = view.doc_path
+        if view.document is None or not path:
+            self._status.showMessage("Open a PDF first", 1500)
+            return
+        try:
+            win = presentation.PresentationWindow(path, view.current_page, self._view_password(view))
+        except Exception as exc:
+            self._status.showMessage(f"Could not start the presentation: {exc}", 6000)
+            return
+        win.closed.connect(lambda page, v=view: self._on_presentation_closed(v, page))
+        self._presentation = win
+        win.present()
+
+    def _on_presentation_closed(self, view: PdfView, page: int):
+        win = self._presentation
+        self._presentation = None
+        if shiboken6.isValid(view) and view.document is not None and 0 <= page < view.page_count:
+            view.go_to_page(page)
+        if win is not None and shiboken6.isValid(win):
+            win.deleteLater()
+
+    # Encrypted documents (Phase B: PdfView.open_document(path, password), password_required).
+    def _view_can_unlock(self, view: PdfView) -> bool:
+        return getattr(view, "password_required", None) is not None
+
+    @staticmethod
+    def _needs_password(path: str) -> bool:
+        try:
+            return password.needs_password(path)
+        except Exception:
+            return False
+
+    def _unlock_and_open(self, view: PdfView, path: str) -> bool:
+        """Ask for the password (up to MAX_ATTEMPTS times) and open ``path`` in ``view``."""
+        dlg = password.PasswordDialog(self, os.path.basename(path))
+        for _attempt in range(password.MAX_ATTEMPTS):
+            if dlg.exec() != QDialog.DialogCode.Accepted:
+                return False
+            if view.open_document(path, dlg.password()):
+                return True
+            dlg.set_error("Incorrect password. Try again.")
+        self._status.showMessage(f"Could not unlock {os.path.basename(path)}", 4000)
+        return False
+
+    def _on_view_password_required(self, view: PdfView, path: str):
+        # During _open_file the prompt runs inline (and an unopened new tab is closed).
+        if self._open_in_progress or self._reload_in_progress:
+            if self._reload_in_progress:
+                QTimer.singleShot(0, lambda v=view, p=path: self._on_view_password_required(v, p))
+            return
+        if not shiboken6.isValid(view):
+            return
+        if self._unlock_and_open(view, path) and self._is_current_view(view):
+            self._refresh_document_info()
+            self._update_status()
+
+    def _show_about(self):
+        try:
+            from importlib.metadata import version
+
+            ver = version("neoview")
+        except Exception:
+            ver = "dev"
+        QMessageBox.about(
+            self,
+            f"About {APP_NAME}",
+            f"<h3>{APP_NAME} {html.escape(ver)}</h3>"
+            "<p>A PDF viewer with measurement tools, annotations and auto-reload for LaTeX "
+            "workflows.</p><p>Icons: Lucide (ISC). Font: Inter (SIL OFL 1.1).</p>",
+        )
 
     def _update_status(self):
         view = self.current_view()
@@ -3082,6 +3351,8 @@ class MainWindow(QMainWindow):
         return f"{size:.1f} {units[unit_idx]}"
 
     def closeEvent(self, e):
+        if self._presentation is not None and shiboken6.isValid(self._presentation):
+            self._presentation.close()
         self._search_timer.stop()
         self._cancel_search_operation()
         self._reload_timer.stop()

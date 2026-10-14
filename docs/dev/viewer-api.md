@@ -156,3 +156,38 @@ focuses it. Esc inside the window closes it and the viewer follows to the last s
 
 Glyphs: use `printer`, `maximize`, `chevron-left`, `chevron-right` from the bundled Lucide set
 (`neoview.ui.icons`, added by the theme work); the Phase A modules do not import it.
+
+## Wiring status
+
+How `MainWindow` (v0.5 layout) is wired against this contract. Every action has a stable
+`objectName` so tests and future code can find it with `findChild(QAction, name)`.
+
+| Capability | Action (`objectName`) | Where | Shortcut | Status |
+| --- | --- | --- | --- | --- |
+| Print | `action_print` | File > Print..., toolbar `printer` | Ctrl+P | Live: `printing.print_document(self, view.doc_path, view.current_page, password)`; errors go to the status bar |
+| Presentation | `action_presentation` | View > Presentation, overflow menu | F5 | Live: `PresentationWindow(...).present()`; one at a time, F5 again raises it; on close the viewer goes to the last shown page |
+| Page layout | `action_page_mode_single`, `_continuous`, `_two_page`, `_two_page_cover` | View > Page Layout, overflow menu | - | Waiting for Phase B: disabled until the view has `set_page_mode` and `page_mode` |
+| Reading mode | `action_color_mode_normal`, `_night`, `_sepia` | View > Reading Mode, overflow menu | - | Waiting for Phase B: disabled until the view has `set_color_mode` and `color_mode` |
+| Back / forward | `action_go_back`, `action_go_forward` | Go > Back / Forward, overflow menu | Alt+Left / Alt+Right | Waiting for Phase B: disabled until the view has `go_back`, `go_forward`, `can_go_back`, `can_go_forward`; enabled per `can_go_*()` |
+| Password | - | prompt on open | - | Waiting for Phase B: used when the view has `password_required` |
+
+How the Phase B hooks work, so the methods only need to appear on `PdfView`:
+
+- `MainWindow._update_capability_actions()` runs on every status update (tab switch, open,
+  zoom, page change). Each group is enabled only when the current view has the methods
+  (`callable(getattr(view, name, None))`) and a document is open; checked states come from
+  `page_mode()` / `color_mode()`, back/forward enablement from `can_go_back()` /
+  `can_go_forward()`.
+- `_create_tab` connects `page_mode_changed`, `color_mode_changed` and `history_changed` when
+  the view has them; each refreshes the actions and schedules a session save.
+- The slots (`_set_page_mode`, `_set_color_mode`, `_go_back`, `_go_forward`) are no-ops when
+  the method is missing. `ValueError` from a setter is shown on the status bar.
+- Page and colour mode are saved per document in `documents/session` (QSettings) next to
+  page and zoom, and restored on open before the zoom is applied.
+- Password: when `open_document(path)` returns False, the view has `password_required` and
+  `password.needs_password(path)` is true, `_open_file` runs the `PasswordDialog` loop inline
+  (`MAX_ATTEMPTS`) calling `open_document(path, password)`; a cancelled or failed prompt
+  closes the tab that was created for it. `password_required` emitted outside an open (e.g.
+  auto-reload of a re-encrypted file) runs the same loop. Print and presentation pass
+  `view.document_password()` when the view has it, else None.
+
