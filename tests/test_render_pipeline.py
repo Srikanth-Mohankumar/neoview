@@ -246,20 +246,35 @@ def test_band_clips_tile_the_page_exactly():
     assert band_clips(rect, 0.1, 10_000_000) == [rect]
 
 
-def test_banded_render_matches_single_pass_render(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    ("width", "height", "rotation", "zoom", "cropbox"),
+    [
+        (PAGE_W, PAGE_H, 0, 1.37, None),
+        (PAGE_W, PAGE_H, 90, 1.37, None),
+        (433.7, 611.3, 0, 0.913, None),
+        (433.7, 611.3, 270, 2.21, None),
+        # Cropbox not at the origin: the page's pixel rect does not start at (0, 0).
+        (PAGE_W, PAGE_H, 0, 1.13, (31.3, 47.9, 377.1, 571.7)),
+    ],
+)
+def test_banded_render_matches_single_pass_render(
+    tmp_path, monkeypatch, width, height, rotation, zoom, cropbox
+):
     pdf = tmp_path / "doc.pdf"
     doc = fitz.open()
-    page = doc.new_page(width=PAGE_W, height=PAGE_H)
+    page = doc.new_page(width=width, height=height)
     for k in range(40):
         page.draw_circle((50 + (k * 37) % 300, 40 + k * 13), 9, color=(0, 0, 1), fill=(1, 0, 0))
         page.insert_text((30, 20 + k * 14), f"line {k} of text", fontsize=10)
+    if cropbox is not None:
+        page.set_cropbox(fitz.Rect(*cropbox))
+    page.set_rotation(rotation)
     doc.save(str(pdf))
     doc.close()
 
     monkeypatch.setattr(render_scheduler, "BAND_TARGET_PIXELS", 20_000)
     doc = fitz.open(str(pdf))
     try:
-        zoom = 1.37
         got: list[QImage] = []
         scheduler = RenderScheduler()
         scheduler.page_rendered.connect(lambda _i, _g, _z, _f, img: got.append(img))
