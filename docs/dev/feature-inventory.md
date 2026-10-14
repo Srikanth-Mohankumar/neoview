@@ -73,7 +73,7 @@ Paths are relative to `src/neoview/`.
 
 | # | Capability | Where | Demo |
 |---|---|---|---|
-| 40 | Annotate tool (4) with eleven types: highlight, underline, strikethrough, sticky note, text box, rectangle, ellipse, line, arrow, freehand | `ui/annotation_toolbar.py` `_ANNOTATION_TOOLS`; `PdfView._commit_annotate_rect`, `_commit_annotate_freehand` | Draw a few |
+| 40 | Annotate tool (4) with ten types: highlight, underline, strikethrough, sticky note, text box, rectangle, ellipse, line, arrow, freehand | `ui/annotation_toolbar.py` `_ANNOTATION_TOOLS`; `PdfView._commit_annotate_rect`, `_commit_annotate_freehand` | Draw a few |
 | 41 | Colour, opacity and stroke width on the annotation toolbar | `AnnotationToolbar` | |
 | 42 | Highlight / underline / note from a measure selection (Ctrl+Shift+H / U / N) | `main_window._add_highlight`, `_add_underline`, `_add_note` | |
 | 43 | Annotation list in the sidebar with a type filter; click to jump; Delete key or context menu deletes; double-click or context menu opens properties (text, colour, opacity, stroke width) | `main_window._populate_annotation_list`, `_annotation_filter`; `ui/dialogs.py` `AnnotationPropertiesDialog` | Annotations panel |
