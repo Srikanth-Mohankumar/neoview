@@ -2,8 +2,11 @@
 
 ``neoview.theme`` owns the application-wide stylesheet. The widgets MainWindow adds on top
 of the stock Qt ones (toolbar groups, search field, sidebar, inspector, welcome panel) are
-styled here, from the same tokens, and installed on the MainWindow itself so they cascade
-to its children. Both are regenerated when the theme changes at runtime.
+styled here, from the same tokens, and appended to the application stylesheet that
+``theme.apply_theme`` installed. Appending (rather than ``MainWindow.setStyleSheet``) keeps
+one style-sheet style for the whole app: a second, window-level sheet made every repolish,
+including a theme switch, several times slower. Sizes that must hold without any stylesheet
+(32 px hit targets) are set in code, not here.
 """
 
 from __future__ import annotations
@@ -279,6 +282,25 @@ QTabWidget#DocumentTabs > QTabBar::tab {
 }
 """
 )
+
+
+_MARKER = "\n/* ---- neoview.ui.chrome ---- */\n"
+
+
+def install_chrome_stylesheet(app, mode: str | None = None) -> bool:
+    """Append the chrome rules for ``mode`` to ``app``'s stylesheet, replacing earlier ones.
+
+    Does nothing (returns False) when the app has no stylesheet yet, i.e. no theme was
+    applied - the unit tests run that way and need no styling.
+    """
+    if app is None or not hasattr(app, "styleSheet"):
+        return False
+    base = app.styleSheet()
+    if not base:
+        return False
+    base = base.split(_MARKER, 1)[0]
+    app.setStyleSheet(base + _MARKER + build_chrome_stylesheet(mode))
+    return True
 
 
 def build_chrome_stylesheet(mode: str | None = None) -> str:

@@ -77,7 +77,7 @@ from neoview.resources import load_app_icon
 from neoview.ui import icons, password, presentation, printing
 from neoview.ui.annotation_io import export_annotated_pdf, load_native_annotations
 from neoview.ui.annotation_toolbar import AnnotationToolbar
-from neoview.ui.chrome import HIT_TARGET, TOOLBAR_ICON, IconBinder, build_chrome_stylesheet
+from neoview.ui.chrome import HIT_TARGET, TOOLBAR_ICON, IconBinder, install_chrome_stylesheet
 from neoview.ui.dialogs import AnnotationPropertiesDialog, ExportDialog, LayoutGridDialog
 from neoview.ui.inspector import InspectorPanel, PanelTitleBar
 from neoview.ui.pdf_view import PdfView, ToolMode
@@ -224,7 +224,7 @@ class MainWindow(QMainWindow):
     def _setup_ui(self):
         # Icons are tinted for the active theme; the binder re-tints them on a theme switch.
         self._icons = IconBinder()
-        self.setStyleSheet(build_chrome_stylesheet())
+        install_chrome_stylesheet(QApplication.instance(), theme.current_mode())
         self.setDockOptions(QMainWindow.DockOption.AnimatedDocks)
 
         self._tabs = QTabWidget(self)

@@ -623,3 +623,32 @@ def test_tab_bar_only_with_two_documents_and_middle_click_closes(two_pdfs, qtbot
     assert win._tabs.count() == 1
     assert win.current_context().file_path == str(b.resolve())
 
+
+# --------------------------------------------------------------------------- stylesheet
+
+
+def test_chrome_rules_join_the_app_stylesheet_once(qtbot):
+    from neoview.ui.chrome import install_chrome_stylesheet
+
+    class FakeApp:
+        sheet = "QWidget { }"
+
+        def styleSheet(self):
+            return self.sheet
+
+        def setStyleSheet(self, sheet):
+            self.sheet = sheet
+
+    app = FakeApp()
+    assert install_chrome_stylesheet(app, "light")
+    assert install_chrome_stylesheet(app, "dark")  # a theme switch replaces, never stacks
+    assert app.sheet.startswith("QWidget { }")
+    assert app.sheet.count("QFrame#SearchField {") == 1
+
+    empty = FakeApp()
+    empty.sheet = ""
+    assert not install_chrome_stylesheet(empty, "light")  # no theme applied: leave it alone
+    assert empty.sheet == ""
+
+    # No per-window sheet: one style-sheet style for the whole app keeps repolish cheap.
+    assert _window(qtbot).styleSheet() == ""
