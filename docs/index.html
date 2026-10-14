@@ -3,26 +3,26 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>NeoView - free PDF viewer for measuring and reviewing typeset PDFs</title>
-  <meta name="description" content="NeoView is a free, open-source PDF viewer for Linux and Windows. Measure regions in pt, pc and mm, inspect fonts, annotate, search and bookmark, and auto-reload PDFs rebuilt by LaTeX.">
+  <title>NeoView - the free PDF viewer for reviewing typeset pages</title>
+  <meta name="description" content="NeoView is a free, open-source PDF viewer for Linux and Windows. Inspect the font under the cursor, measure in pt, pc, mm or in, annotate, search, and auto-reload PDFs rebuilt by LaTeX or Typst - fast on 650-page books.">
   <meta name="color-scheme" content="light dark">
   <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#0f1115" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#0d1016" media="(prefers-color-scheme: dark)">
   <link rel="canonical" href="https://srikanth-mohankumar.github.io/neoview/">
 
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="NeoView">
-  <meta property="og:title" content="NeoView - free PDF viewer for measuring and reviewing typeset PDFs">
-  <meta property="og:description" content="Measure, inspect fonts, annotate and auto-reload LaTeX output. Free and open source for Linux and Windows.">
+  <meta property="og:title" content="NeoView - the free PDF viewer for reviewing typeset pages">
+  <meta property="og:description" content="Inspect fonts, measure, annotate and auto-reload LaTeX or Typst output. Free and open source for Linux and Windows.">
   <meta property="og:url" content="https://srikanth-mohankumar.github.io/neoview/">
-  <meta property="og:image" content="https://srikanth-mohankumar.github.io/neoview/assets/screens/light-09-sidebar-outline.png">
+  <meta property="og:image" content="https://srikanth-mohankumar.github.io/neoview/assets/screens/og-image.png">
   <meta property="og:image:width" content="1440">
   <meta property="og:image:height" content="900">
-  <meta property="og:image:alt" content="NeoView showing a PDF with the outline sidebar, a search match and a measurement">
+  <meta property="og:image:alt" content="NeoView with a LaTeX article open: outline sidebar, a measured table and the inspector panel.">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="NeoView - free PDF viewer for measuring and reviewing typeset PDFs">
-  <meta name="twitter:description" content="Measure, inspect fonts, annotate and auto-reload LaTeX output. Free and open source for Linux and Windows.">
-  <meta name="twitter:image" content="https://srikanth-mohankumar.github.io/neoview/assets/screens/light-09-sidebar-outline.png">
+  <meta name="twitter:title" content="NeoView - the free PDF viewer for reviewing typeset pages">
+  <meta name="twitter:description" content="Inspect fonts, measure, annotate and auto-reload LaTeX or Typst output. Free and open source for Linux and Windows.">
+  <meta name="twitter:image" content="https://srikanth-mohankumar.github.io/neoview/assets/screens/og-image.png">
 
   <link rel="icon" href="assets/favicon-32.png" type="image/png" sizes="32x32">
   <link rel="icon" href="assets/logo-mark.png" type="image/png" sizes="96x96">
@@ -56,14 +56,16 @@
       </a>
       <nav class="site-nav" aria-label="Primary">
         <a href="#features">Features</a>
-        <a href="#gallery">Screenshots</a>
         <a href="#demo">Demo</a>
+        <a href="#performance">Performance</a>
+        <a href="#gallery">Screenshots</a>
         <a href="#installation">Install</a>
         <a href="#faq">FAQ</a>
+        <a href="#about">About</a>
       </nav>
       <div class="header-actions">
-        <a class="icon-btn" href="https://github.com/Srikanth-Mohankumar/neoview" aria-label="NeoView on GitHub">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.8 1.19 1.83 1.19 3.09 0 4.42-2.69 5.39-5.26 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>
+        <a class="icon-btn" href="https://github.com/Srikanth-Mohankumar/neoview" aria-label="NeoView on GitHub" title="NeoView on GitHub">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" stroke="none" d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.8 1.19 1.83 1.19 3.09 0 4.42-2.69 5.39-5.26 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>
         </a>
         <button type="button" class="icon-btn theme-toggle" aria-label="Switch to dark theme" hidden>
           <svg class="icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg>
@@ -74,220 +76,499 @@
   </header>
 
   <main id="main">
+    <!-- ================================================================ HERO -->
     <section id="top" class="hero" aria-labelledby="hero-title">
       <div class="container hero-inner">
-        <p class="eyebrow">Free and open source &middot; Linux and Windows</p>
-        <h1 id="hero-title">The PDF viewer for checking typeset pages.</h1>
-        <p class="lede">NeoView is for people who review PDFs and LaTeX output: measure any region in points, picas and millimetres, inspect the font under the cursor, mark up what needs fixing, and watch the PDF reload every time it is rebuilt.</p>
+        <p class="eyebrow"><span class="badge">New</span> Version 0.5 &middot; free and open source &middot; Linux and Windows</p>
+        <h1 id="hero-title">The PDF viewer for <span class="nowrap">reviewing typeset pages.</span></h1>
+        <p class="lede">Hover any text to see its font and size. Measure any region in points, picas, millimetres or inches. Mark up what needs fixing, and keep reading while LaTeX or Typst rebuilds the file &mdash; NeoView reloads it in place.</p>
         <div class="cta-row">
           <a class="btn btn-primary" href="https://github.com/Srikanth-Mohankumar/neoview/releases/latest/download/neoview.exe">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
             Download for Windows
           </a>
           <div class="pip-pill">
+            <span class="pip-label">Linux &amp; Windows</span>
             <code>pip install neoview</code>
-            <button type="button" class="copy-btn" data-copy="pip install neoview" aria-label="Copy pip install command">
+            <button type="button" class="copy-btn" data-copy="pip install neoview" aria-label="Copy pip install command" title="Copy">
               <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg>
             </button>
           </div>
+          <a class="btn btn-ghost" href="https://github.com/Srikanth-Mohankumar/neoview">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 19c-4.3 1.4-4.3-2.5-6-3m12 5v-3.5c0-1 .1-1.4-.5-2 2.8-.3 5.5-1.4 5.5-6a4.6 4.6 0 0 0-1.3-3.2 4.2 4.2 0 0 0-.1-3.2s-1.1-.3-3.5 1.3a12.3 12.3 0 0 0-6.2 0C6.5 2.8 5.4 3.1 5.4 3.1a4.2 4.2 0 0 0-.1 3.2A4.6 4.6 0 0 0 4 9.5c0 4.6 2.7 5.7 5.5 6-.6.6-.6 1.2-.5 2V21"/></svg>
+            Source on GitHub
+          </a>
         </div>
-        <p class="cta-note">
-          Standalone <code>neoview.exe</code> from
-          <a href="https://github.com/Srikanth-Mohankumar/neoview/releases/latest">GitHub Releases</a>
-          &middot; <a href="https://pypi.org/project/neoview/">PyPI package</a> (Python 3.10+)
-          &middot; <a href="https://github.com/Srikanth-Mohankumar/neoview">Source on GitHub</a>
-        </p>
+        <p class="cta-note">Standalone <code>neoview.exe</code>, no installer &middot; Python 3.10+ for pip &middot; MIT licence, no account, no telemetry</p>
+        <ul class="audience" aria-label="Who NeoView is for">
+          <li>LaTeX and Typst authors</li>
+          <li>Typesetters</li>
+          <li>Production and QA editors</li>
+          <li>Designers checking print layouts</li>
+          <li>Anyone who reads PDFs all day</li>
+        </ul>
       </div>
       <div class="container">
         <figure class="hero-shot">
           <div class="window-frame">
-            <div class="window-bar" aria-hidden="true"><span></span><span></span><span></span></div>
-            <img data-screen="09-sidebar-outline" src="assets/screens/light-09-sidebar-outline.png" width="1440" height="900" fetchpriority="high" decoding="async"
-                 alt="NeoView with a LaTeX article open: the outline sidebar on the left, a search match highlighted and a measurement rectangle labelled with its width, height and position.">
+            <img data-screen="00-hero" src="assets/screens/light-00-hero.webp" width="1440" height="900" fetchpriority="high" decoding="async"
+                 alt="NeoView with a LaTeX article open: the outline sidebar on the left, search matches for 'measure' highlighted, a measured table with its size badge, and the inspector showing width, height, position and the document's metadata.">
           </div>
+          <figcaption class="visually-hidden">The NeoView 0.5 window.</figcaption>
         </figure>
       </div>
     </section>
 
+    <!-- ================================================================ WHAT'S NEW -->
+    <section class="whatsnew" aria-labelledby="new-title">
+      <div class="container">
+        <h2 id="new-title" class="strip-title">What&rsquo;s new in 0.5</h2>
+        <ul class="new-list">
+          <li><strong>Redesigned window.</strong> One toolbar, a sidebar, an inspector and a welcome screen; light, dark or system theme.</li>
+          <li><strong>Fast on big books.</strong> Pages render in small steps with bounded memory; a 650-page book reads end to end.</li>
+          <li><strong>Page layouts and reading modes.</strong> Single, continuous, two-page and cover; night and sepia.</li>
+          <li><strong>Print, present, unlock.</strong> Printing with page ranges, a full-screen presentation mode, password-protected PDFs.</li>
+          <li><strong>Back and forward.</strong> Every jump can be undone with Alt+Left, in place and at the same zoom.</li>
+          <li><strong>Zoom where you look.</strong> Touchpad pinch and Ctrl+wheel keep the point under the cursor still.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ================================================================ FEATURES -->
     <section id="features" class="section" aria-labelledby="features-title">
       <div class="container">
         <div class="section-head">
           <p class="eyebrow">Features</p>
-          <h2 id="features-title">Everything a review pass needs, in one window.</h2>
-          <p>Grouped by the job you are doing.</p>
+          <h2 id="features-title">One window for the whole review pass.</h2>
+          <p>Reading, measuring, inspecting, marking up and rebuilding usually means four programs. NeoView keeps them in one, organised around the job you are doing.</p>
         </div>
 
-        <div class="feature-groups">
-          <article class="feature-group">
-            <div class="fg-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="10" rx="1.5"/><path d="M7 7v4M11 7v3M15 7v4M19 7v3"/></svg></div>
-            <h3>Measure and inspect</h3>
-            <ul>
-              <li>Drag a rectangle and read <strong>W, H, X and Y live</strong> in points, picas and millimetres.</li>
-              <li>Nudge or resize from the keyboard: arrows move 1&nbsp;pt, <kbd>Shift</kbd> moves 10&nbsp;pt, <kbd>Ctrl</kbd> resizes.</li>
-              <li>Copy measurements to the clipboard with <kbd>Ctrl</kbd>+<kbd>C</kbd>.</li>
-              <li>Hover any text to inspect its <strong>font name, size and style</strong>.</li>
-              <li>Rulers and a configurable <strong>layout grid</strong> (cell size, offset, subdivisions, corner marks).</li>
-              <li>Export a selection as PNG at 150, 300 or 600&nbsp;DPI.</li>
-            </ul>
+        <!-- Inspect & measure -->
+        <div class="job" id="inspect">
+          <h3 class="job-title"><span class="job-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.7 8.7a2.41 2.41 0 0 1 0-3.4l2.6-2.6a2.41 2.41 0 0 1 3.4 0Z"/><path d="m14.5 12.5 2-2M11.5 9.5l2-2M8.5 6.5l2-2M17.5 15.5l2-2"/></svg></span>Inspect and measure</h3>
+
+          <article class="feature">
+            <div class="feature-text">
+              <h4>See the font under the cursor</h4>
+              <p>Switch to the Select tool and hover any text. NeoView outlines the span and the inspector shows its font name, size in points and style &mdash; the quickest way to catch a substituted font, a heading in the wrong weight or body text at 10.95&nbsp;pt where the design says 10.</p>
+              <ul class="ticks">
+                <li>Works on every span: body text, headings, captions, code</li>
+                <li>Bold and italic detected from the font name</li>
+                <li>Document panel lists title, author, producer, PDF version, dates, encryption and file size</li>
+              </ul>
+            </div>
+            <figure class="feature-media">
+              <div class="clip"><video class="loop" muted loop playsinline preload="none" controls width="1200" height="750" data-poster="assets/clips/clip-fonts.webp" aria-label="Hovering a heading, body text, an italic word and a code word; the inspector shows each font, size and style."><source src="assets/clips/clip-fonts.mp4" type="video/mp4"></video></div>
+            </figure>
           </article>
 
-          <article class="feature-group">
-            <div class="fg-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16v4Z"/><path d="M13.5 6.5l4 4"/></svg></div>
-            <h3>Review and annotate</h3>
-            <ul>
-              <li>Highlight, underline and note from a selection, or draw text boxes, rectangles, ellipses, lines, arrows and <strong>freehand</strong> marks on the page.</li>
-              <li>Annotation list with filtering and a properties editor.</li>
-              <li>Your markup is saved beside the PDF in a <code>.neoview.json</code> sidecar; the original file is not modified.</li>
-              <li>Export a PDF copy with the annotations embedded.</li>
-              <li>Annotations already in the PDF are shown read-only.</li>
-              <li>Select and copy text straight from the page.</li>
-            </ul>
+          <article class="feature flip">
+            <div class="feature-text">
+              <h4>Measure in the units of your spec</h4>
+              <p>Drag a rectangle with the Measure tool. Width, height, X and Y appear on the page and in the inspector, in points, picas, millimetres or inches. Fine-tune it from the keyboard and copy the numbers.</p>
+              <ul class="ticks">
+                <li>Resize with handles, move by dragging</li>
+                <li><kbd>Arrow</kbd> moves 1&nbsp;pt, <kbd>Shift</kbd>+<kbd>Arrow</kbd> 10&nbsp;pt; add <kbd>Ctrl</kbd> to resize</li>
+                <li><kbd>Ctrl</kbd>+<kbd>C</kbd> copies the size in pt, pc and mm</li>
+                <li><kbd>Ctrl</kbd>+<kbd>S</kbd> saves the area as a PNG at 150, 300 or 600&nbsp;DPI</li>
+              </ul>
+            </div>
+            <figure class="feature-media">
+              <div class="clip"><video class="loop" muted loop playsinline preload="none" controls width="1200" height="750" data-poster="assets/clips/clip-measure.webp" aria-label="Dragging a measurement rectangle around a table, switching the units to millimetres and picas, then nudging it with the arrow keys."><source src="assets/clips/clip-measure.mp4" type="video/mp4"></video></div>
+            </figure>
           </article>
 
-          <article class="feature-group">
-            <div class="fg-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="1.5"/><path d="M9 4v16M12 9h6M12 13h6"/></svg></div>
-            <h3>Navigate</h3>
-            <ul>
-              <li>Open many PDFs in <strong>tabs</strong>; opening the same file again reuses its tab.</li>
-              <li>Live search panel with next/previous and highlighted matches.</li>
-              <li>Outline, thumbnails, page info and per-document <strong>bookmarks</strong>.</li>
-              <li>Fit width, fit page, actual size, Ctrl+wheel and pinch zoom, rotation and full screen.</li>
-              <li>Keyboard shortcuts for pages, zoom, panels and selection.</li>
-            </ul>
-          </article>
-
-          <article class="feature-group">
-            <div class="fg-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 3v5h5"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 21v-5h-5"/></svg></div>
-            <h3>LaTeX workflow</h3>
-            <ul>
-              <li><strong>Auto-reload</strong> when the file changes on disk, for LaTeX, Typst or any generated PDF.</li>
-              <li>Reloads keep your tabs and place; <kbd>F5</kbd> forces a reload.</li>
-              <li>Last page and zoom are restored per file, and the last open document reopens on the next launch.</li>
-              <li>Launch from a build script: <code>neoview /path/to/document.pdf</code>.</li>
-            </ul>
+          <article class="feature">
+            <div class="feature-text">
+              <h4>Rulers and a layout grid</h4>
+              <p>Turn on rulers along the edges of the view, and lay a grid over every page to check margins, columns and baseline alignment. Set the line spacing, offsets, subdivisions, corner marks and colour.</p>
+              <ul class="ticks">
+                <li>Rulers in points; ticks adapt to the zoom</li>
+                <li>Grid settings are remembered</li>
+              </ul>
+            </div>
+            <figure class="feature-media">
+              <div class="clip"><video class="loop" muted loop playsinline preload="none" controls width="1200" height="750" data-poster="assets/clips/clip-grid.webp" aria-label="Rulers appear around the page, the Layout Grid settings dialog opens, and a magenta grid is drawn over the page."><source src="assets/clips/clip-grid.mp4" type="video/mp4"></video></div>
+            </figure>
           </article>
         </div>
 
-        <div class="shortcuts">
-          <h3>A few shortcuts</h3>
-          <dl>
-            <div><dt><kbd>Ctrl</kbd>+<kbd>F</kbd></dt><dd>Find</dd></div>
-            <div><dt><kbd>W</kbd> / <kbd>F</kbd></dt><dd>Fit width / page</dd></div>
-            <div><dt><kbd>Ctrl</kbd>+<kbd>D</kbd></dt><dd>Add bookmark</dd></div>
-            <div><dt><kbd>Ctrl</kbd>+<kbd>S</kbd></dt><dd>Export selection as PNG</dd></div>
-            <div><dt><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>H</kbd></dt><dd>Highlight selection</dd></div>
-            <div><dt><kbd>Ctrl</kbd>+<kbd>L</kbd> / <kbd>R</kbd></dt><dd>Rotate left / right</dd></div>
-          </dl>
-          <p class="more"><a href="https://github.com/Srikanth-Mohankumar/neoview#keyboard-shortcuts">All keyboard shortcuts</a></p>
+        <!-- Review & annotate -->
+        <div class="job" id="review">
+          <h3 class="job-title"><span class="job-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m9 11-6 6v3h9l3-3"/><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/></svg></span>Review and annotate</h3>
+          <article class="feature flip">
+            <div class="feature-text">
+              <h4>Mark it up without touching the PDF</h4>
+              <p>Eleven annotation types with colour, opacity and stroke width. Every mark is listed in the sidebar, filterable by type, and saved next to the PDF &mdash; so the next build never loses it. When you are done, export a copy with the marks embedded and send it back.</p>
+              <ul class="ticks">
+                <li>Highlight, underline, strikethrough, sticky note, text box</li>
+                <li>Rectangle, ellipse, line, arrow, freehand</li>
+                <li>Edit properties, jump to, or delete from the list</li>
+                <li>Annotations already in the PDF are shown and listed</li>
+              </ul>
+            </div>
+            <figure class="feature-media">
+              <div class="clip"><video class="loop" muted loop playsinline preload="none" controls width="1200" height="750" data-poster="assets/clips/clip-annotate.webp" aria-label="Highlighting a phrase, placing a sticky note and drawing a red box around a paragraph; the annotations panel lists all three."><source src="assets/clips/clip-annotate.mp4" type="video/mp4"></video></div>
+            </figure>
+          </article>
+        </div>
+
+        <!-- Read & navigate -->
+        <div class="job" id="read">
+          <h3 class="job-title"><span class="job-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg></span>Read and navigate</h3>
+
+          <article class="feature">
+            <div class="feature-text">
+              <h4>Find every match, with context</h4>
+              <p>Results appear while you type. The results panel lists each match with its page and the line it sits on; click one to go there. Match case when you need it.</p>
+              <ul class="ticks">
+                <li><kbd>Ctrl</kbd>+<kbd>F</kbd> to search, <kbd>F3</kbd> / <kbd>Shift</kbd>+<kbd>F3</kbd> for next and previous</li>
+                <li>Long documents are searched in batches, so the window stays responsive</li>
+              </ul>
+            </div>
+            <figure class="feature-media">
+              <div class="clip"><video class="loop" muted loop playsinline preload="none" controls width="1200" height="750" data-poster="assets/clips/clip-search.webp" aria-label="Typing 'baseline' into the search field; matches are highlighted and the results panel lists each one with a snippet."><source src="assets/clips/clip-search.mp4" type="video/mp4"></video></div>
+            </figure>
+          </article>
+
+          <article class="feature flip">
+            <div class="feature-text">
+              <h4>Jump anywhere, then come back</h4>
+              <p>Filter the outline and jump to a section, follow a cross-reference, or click a thumbnail. Back and forward return you to the exact spot and zoom you left. Add your own bookmarks with <kbd>Ctrl</kbd>+<kbd>D</kbd>.</p>
+              <ul class="ticks">
+                <li>Sidebar with thumbnails, outline, bookmarks and annotations</li>
+                <li>Internal links followed; web links open in your browser</li>
+                <li>Several documents in tabs</li>
+              </ul>
+            </div>
+            <figure class="feature-media">
+              <div class="clip"><video class="loop" muted loop playsinline preload="none" controls width="1200" height="750" data-poster="assets/clips/clip-navigate.webp" aria-label="Typing into the outline filter, jumping to the matching section, then going back to the first page."><source src="assets/clips/clip-navigate.mp4" type="video/mp4"></video></div>
+            </figure>
+          </article>
+
+          <article class="feature">
+            <div class="feature-text">
+              <h4>Zoom around the point you are looking at</h4>
+              <p>Pinch on a touchpad or use <kbd>Ctrl</kbd>+wheel: the word under the cursor stays where it is. Fit width, fit page, actual size and presets from 50 to 400&nbsp;% are one key or click away.</p>
+            </div>
+            <figure class="feature-media">
+              <div class="clip"><video class="loop" muted loop playsinline preload="none" controls width="1200" height="750" data-poster="assets/clips/clip-zoom.webp" aria-label="Scrolling through the article, then zooming in on a word that stays under the cursor, and back out."><source src="assets/clips/clip-zoom.mp4" type="video/mp4"></video></div>
+            </figure>
+          </article>
+
+          <article class="feature flip">
+            <div class="feature-text">
+              <h4>Read the way you like</h4>
+              <p>Single page, continuous, two pages side by side, or two pages with a cover. Night and sepia reading modes recolour the pages, not your annotations. Present full screen with <kbd>F5</kbd> or print with page ranges and copies.</p>
+              <ul class="ticks">
+                <li>Layout and reading mode are remembered per document</li>
+                <li>Presentation: arrows, Space, Home/End, <kbd>B</kbd> to blank the screen</li>
+                <li>Rotate, full screen, password-protected PDFs</li>
+              </ul>
+            </div>
+            <figure class="feature-media">
+              <div class="clip"><video class="loop" muted loop playsinline preload="none" controls width="1200" height="750" data-poster="assets/clips/clip-modes.webp" aria-label="Two pages side by side, switching from normal to sepia and then night reading mode."><source src="assets/clips/clip-modes.mp4" type="video/mp4"></video></div>
+            </figure>
+          </article>
+        </div>
+
+        <!-- Built for LaTeX -->
+        <div class="job" id="latex">
+          <h3 class="job-title"><span class="job-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg></span>Built for LaTeX and Typst</h3>
+          <article class="feature">
+            <div class="feature-text">
+              <h4>Rebuild, and keep reading</h4>
+              <p>Run <code>latexmk -pvc</code>, <code>typst watch</code> or any build that rewrites the PDF. NeoView notices the new file and reloads it on the same page, at the same zoom and scroll position. The old pages stay on screen until the new ones are drawn, so there is no blank flash, and a half-written file is waited out.</p>
+              <ul class="ticks">
+                <li>Annotations and bookmarks survive the rebuild</li>
+                <li>Page, zoom, layout and reading mode remembered per file</li>
+                <li>The last document reopens where you left it</li>
+                <li>Switch auto-reload off in the inspector; <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd> reloads by hand</li>
+              </ul>
+            </div>
+            <figure class="feature-media">
+              <div class="clip"><video class="loop" muted loop playsinline preload="none" controls width="1200" height="750" data-poster="assets/clips/clip-reload.webp" aria-label="The PDF is rebuilt on disk while open; a revised, highlighted paragraph appears in place on the same page."><source src="assets/clips/clip-reload.mp4" type="video/mp4"></video></div>
+            </figure>
+          </article>
+        </div>
+
+        <!-- Everything else -->
+        <div class="more">
+          <h3>Also in the box</h3>
+          <ul class="chips">
+            <li>Tabs</li><li>Drag and drop</li><li>Recent files</li><li>Welcome screen</li>
+            <li>Thumbnails</li><li>Outline filter</li><li>Bookmarks</li><li>Go to page</li>
+            <li>Text selection and copy</li><li>Export annotated PDF</li><li>Native PDF annotations</li>
+            <li>Password-protected PDFs</li><li>Print ranges and copies</li><li>Presentation mode</li>
+            <li>Rotation</li><li>Full screen</li><li>Performance mode</li><li>Light, dark, system theme</li>
+            <li>Keyboard shortcuts for everything</li>
+          </ul>
         </div>
       </div>
     </section>
 
-    <section id="gallery" class="section section-alt" aria-labelledby="gallery-title">
+    <!-- ================================================================ DEMO -->
+    <section id="demo" class="section section-alt" aria-labelledby="demo-title">
+      <div class="container">
+        <div class="section-head">
+          <p class="eyebrow">Demo</p>
+          <h2 id="demo-title">Seventy seconds, fourteen features.</h2>
+          <p>Recorded from the real application on a LaTeX article. No sound; each chapter is captioned.</p>
+        </div>
+        <div class="demo-layout">
+          <figure class="demo-player">
+            <div class="window-frame">
+              <video id="demo-video" controls playsinline preload="none" width="1440" height="900" poster="assets/neoview-demo-poster.webp">
+                <source src="assets/neoview-demo.mp4" type="video/mp4">
+                <track kind="chapters" src="assets/neoview-demo-chapters.vtt" srclang="en" label="Chapters">
+                <a href="assets/neoview-demo.mp4">Download the demo video (MP4, 3.5 MB)</a>.
+              </video>
+            </div>
+          </figure>
+          <nav class="chapters" aria-label="Demo chapters">
+            <ol>
+              <li><button type="button" data-t="3"><span>0:03</span> Open, recent files, tabs</button></li>
+              <li><button type="button" data-t="7.96"><span>0:08</span> Outline filter, back</button></li>
+              <li><button type="button" data-t="13.8"><span>0:14</span> Scroll and zoom</button></li>
+              <li><button type="button" data-t="20.17"><span>0:20</span> Live search</button></li>
+              <li><button type="button" data-t="25.05"><span>0:25</span> Font inspection</button></li>
+              <li><button type="button" data-t="31.38"><span>0:31</span> Measure, units, nudge</button></li>
+              <li><button type="button" data-t="37.67"><span>0:38</span> Rulers and layout grid</button></li>
+              <li><button type="button" data-t="41.63"><span>0:42</span> Export as PNG</button></li>
+              <li><button type="button" data-t="44.21"><span>0:44</span> Annotations</button></li>
+              <li><button type="button" data-t="50.75"><span>0:51</span> Layouts, sepia, night</button></li>
+              <li><button type="button" data-t="54.67"><span>0:55</span> Presentation</button></li>
+              <li><button type="button" data-t="57.25"><span>0:57</span> Print</button></li>
+              <li><button type="button" data-t="59.84"><span>1:00</span> Auto-reload</button></li>
+              <li><button type="button" data-t="63.46"><span>1:03</span> Dark theme</button></li>
+            </ol>
+          </nav>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================================================================ PERFORMANCE -->
+    <section id="performance" class="section" aria-labelledby="perf-title">
+      <div class="container">
+        <div class="section-head">
+          <p class="eyebrow">Fast on big documents</p>
+          <h2 id="perf-title">A 650-page book, start to finish.</h2>
+          <p>Version 0.5 renders pages in small bands between other work, visible pages first, and keeps rendered pages within a fixed memory budget. Opening returns control almost at once, and zooming no longer stalls the window for half a second.</p>
+        </div>
+        <div class="stats">
+          <div class="stat">
+            <p class="stat-value">427&nbsp;MB</p>
+            <p class="stat-label">peak memory reading all 650 pages of a text book</p>
+            <p class="stat-was">0.4 reached the benchmark&rsquo;s 3&nbsp;GB cap by page 46</p>
+          </div>
+          <div class="stat">
+            <p class="stat-value">718&nbsp;MB</p>
+            <p class="stat-label">peak memory reading all 650 pages with an image on every page</p>
+            <p class="stat-was">0.4 reached the 3&nbsp;GB cap by page 43</p>
+          </div>
+          <div class="stat">
+            <p class="stat-value">0.01&ndash;0.11&nbsp;s</p>
+            <p class="stat-label">from open to a responsive window</p>
+            <p class="stat-was">0.4: 0.61&ndash;1.15&nbsp;s</p>
+          </div>
+          <div class="stat">
+            <p class="stat-value">25&ndash;83&nbsp;ms</p>
+            <p class="stat-label">longest freeze while zooming</p>
+            <p class="stat-was">0.4: 283&ndash;655&nbsp;ms</p>
+          </div>
+        </div>
+        <details class="method">
+          <summary>How these were measured</summary>
+          <p>NeoView&rsquo;s own benchmark (<code>scripts/bench_render.py</code> in the repository) drives the real window on four generated PDFs: 100 pages of text and vector shapes, the same with a large image on every tenth page, and two 650-page books (dense text with 20 internal links per page; the same with a distinct image on every page). Memory figures are the median of 3 runs that read every page at fit width, waiting for each to be sharp; the 0.4 runs were stopped by the harness&rsquo;s 3&nbsp;GB safety limit. Open and zoom figures are medians of 5 runs per document. One machine: Intel Core Ultra 5 225U, Linux 6.17, Python 3.12.3, PyMuPDF 1.28.2, PySide6 6.12.0, Qt offscreen platform. Synthetic documents on one machine &mdash; your numbers will differ. Full table in <a href="https://github.com/Srikanth-Mohankumar/neoview/blob/main/docs/dev/feature-inventory.md#performance-numbers-for-the-website">the feature inventory</a>.</p>
+        </details>
+      </div>
+    </section>
+
+    <!-- ================================================================ SAME ON EVERY OS -->
+    <section class="section section-alt" id="platforms" aria-labelledby="os-title">
+      <div class="container os-grid">
+        <div>
+          <p class="eyebrow">Same on every OS</p>
+          <h2 id="os-title">Looks the same on Linux and Windows.</h2>
+          <p>NeoView bundles its interface font (Inter) and icon set (Lucide), so the window looks the same whatever your desktop provides. Pick light, dark, or follow the system &mdash; the switch happens instantly, no restart.</p>
+          <ul class="ticks">
+            <li>Standalone Windows <code>.exe</code>, or <code>pip install</code> on Linux and Windows</li>
+            <li>Tested in CI on Ubuntu (Python 3.10&ndash;3.12) and Windows</li>
+            <li>No account, no network calls of its own</li>
+          </ul>
+        </div>
+        <figure class="theme-pair">
+          <img src="assets/screens/light-14-thumbnails.webp" width="1440" height="900" loading="lazy" decoding="async" alt="NeoView in the light theme with the thumbnails sidebar.">
+          <img src="assets/screens/dark-14-thumbnails.webp" width="1440" height="900" loading="lazy" decoding="async" alt="The same view in the dark theme.">
+        </figure>
+      </div>
+    </section>
+
+    <!-- ================================================================ GALLERY -->
+    <section id="gallery" class="section" aria-labelledby="gallery-title">
       <div class="container">
         <div class="section-head">
           <p class="eyebrow">Screenshots</p>
-          <h2 id="gallery-title">A look around.</h2>
-          <p>Select a screenshot to open it at full size.</p>
+          <h2 id="gallery-title">A closer look.</h2>
+          <p>Screenshots follow the page theme. Click one to open it full size.</p>
         </div>
-        <div class="gallery-grid" data-gallery>
-          <noscript>
-            <figure class="shot">
-              <a href="assets/img2.png"><img src="assets/img2.png" width="1380" height="940" loading="lazy" decoding="async" alt="A measurement rectangle labelled with its width, height and position, and the inspector showing the font name, size and style."></a>
-              <figcaption>Measurement and font inspection</figcaption>
-            </figure>
-          </noscript>
+        <div class="gallery" data-gallery>
+          <noscript><p>Screenshots need JavaScript; the hero image above shows the main window.</p></noscript>
         </div>
       </div>
     </section>
 
-    <section id="demo" class="section" aria-labelledby="demo-title">
-      <div class="container demo">
+    <!-- ================================================================ SHORTCUTS -->
+    <section id="shortcuts" class="section section-alt" aria-labelledby="keys-title">
+      <div class="container">
         <div class="section-head">
-          <p class="eyebrow">Demo</p>
-          <h2 id="demo-title">Watch a short session.</h2>
-          <p>Opening a LaTeX article, jumping through the outline, zooming, live search, measuring with the inspector, two-page view in night and sepia, thumbnails and the dark theme.</p>
+          <p class="eyebrow">Keyboard</p>
+          <h2 id="keys-title">Your hands stay on the keys.</h2>
+          <p>A few of the shortcuts; the full list is in the <a href="https://github.com/Srikanth-Mohankumar/neoview#keyboard-shortcuts">README</a>.</p>
         </div>
-        <div class="window-frame demo-frame">
-          <video controls playsinline preload="none" poster="assets/screens/light-09-sidebar-outline.png" width="1440" height="900">
-            <source src="assets/neoview-demo.mp4" type="video/mp4">
-            <a href="assets/neoview-demo.mp4">Download the demo video (MP4)</a>.
-          </video>
-        </div>
+        <dl class="keys">
+          <div><dt><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> <kbd>4</kbd></dt><dd>Select, Hand, Measure, Annotate</dd></div>
+          <div><dt><kbd>Ctrl</kbd>+<kbd>F</kbd>, <kbd>F3</kbd></dt><dd>Find, next match</dd></div>
+          <div><dt><kbd>Ctrl</kbd>+<kbd>1</kbd> / <kbd>Ctrl</kbd>+<kbd>2</kbd></dt><dd>Fit width / fit page</dd></div>
+          <div><dt><kbd>Ctrl</kbd>+wheel</dt><dd>Zoom around the cursor</dd></div>
+          <div><dt><kbd>Alt</kbd>+<kbd>&larr;</kbd> / <kbd>&rarr;</kbd></dt><dd>Back / forward</dd></div>
+          <div><dt><kbd>Ctrl</kbd>+<kbd>G</kbd></dt><dd>Go to page</dd></div>
+          <div><dt><kbd>F9</kbd></dt><dd>Sidebar</dd></div>
+          <div><dt><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>I</kbd></dt><dd>Inspector</dd></div>
+          <div><dt><kbd>Shift</kbd>+<kbd>Arrow</kbd></dt><dd>Move the measurement 10&nbsp;pt</dd></div>
+          <div><dt><kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>Ctrl</kbd>+<kbd>S</kbd></dt><dd>Copy measurements / export PNG</dd></div>
+          <div><dt><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>H</kbd></dt><dd>Highlight the selection</dd></div>
+          <div><dt><kbd>Ctrl</kbd>+<kbd>D</kbd></dt><dd>Bookmark this page</dd></div>
+          <div><dt><kbd>Ctrl</kbd>+<kbd>P</kbd></dt><dd>Print</dd></div>
+          <div><dt><kbd>F5</kbd></dt><dd>Presentation</dd></div>
+          <div><dt><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd></dt><dd>Reload</dd></div>
+          <div><dt><kbd>Ctrl</kbd>+<kbd>Tab</kbd></dt><dd>Next tab</dd></div>
+        </dl>
       </div>
     </section>
 
-    <section id="installation" class="section section-alt" aria-labelledby="install-title">
+    <!-- ================================================================ INSTALL -->
+    <section id="installation" class="section" aria-labelledby="install-title">
       <div class="container">
         <div class="section-head">
           <p class="eyebrow">Install</p>
           <h2 id="install-title">Get NeoView.</h2>
-          <p>Use the Windows executable, or install the Python package on Linux or Windows (Python 3.10+; PySide6 and PyMuPDF are installed with it).</p>
+          <p>Free for any use. Pick the way that suits your machine.</p>
         </div>
-
         <div class="install-grid">
           <article class="install-card">
             <h3>Windows</h3>
-            <h4>Standalone executable</h4>
-            <p>No Python needed. Tagged releases include a prebuilt <code>neoview.exe</code>.</p>
-            <p><a class="btn btn-primary btn-sm" href="https://github.com/Srikanth-Mohankumar/neoview/releases/latest/download/neoview.exe">Download neoview.exe</a></p>
-            <h4>Install with pip</h4>
-            <div class="code"><pre><code>py -m pip install neoview
-neoview</code></pre><button type="button" class="copy-btn" aria-label="Copy Windows pip commands"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg></button></div>
-            <h4>Build the executable yourself</h4>
-            <p>From a clone of the repository:</p>
-            <div class="code"><pre><code>py -m pip install .[dev]
-pyinstaller neoview.spec</code></pre><button type="button" class="copy-btn" aria-label="Copy build commands"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg></button></div>
-            <p class="note">Output: <code>dist\neoview.exe</code></p>
+            <p>Download the standalone executable from the latest release and run it. Nothing to install.</p>
+            <a class="btn btn-primary" href="https://github.com/Srikanth-Mohankumar/neoview/releases/latest/download/neoview.exe">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+              Download neoview.exe
+            </a>
+            <p class="small">Or with Python:</p>
+            <div class="code-block"><pre><code>py -m pip install neoview
+neoview</code></pre><button type="button" class="copy-btn" data-copy="py -m pip install neoview" aria-label="Copy Windows pip command" title="Copy"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg></button></div>
           </article>
-
           <article class="install-card">
             <h3>Linux</h3>
-            <h4>Install from PyPI</h4>
-            <div class="code"><pre><code>pip install neoview</code></pre><button type="button" class="copy-btn" aria-label="Copy pip command"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg></button></div>
-            <h4>Run it</h4>
-            <div class="code"><pre><code>neoview
-neoview /path/to/document.pdf</code></pre><button type="button" class="copy-btn" aria-label="Copy run commands"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg></button></div>
-            <p class="note">Or as a module: <code>python -m neoview</code></p>
-            <h4>From source</h4>
-            <p>Clone <a href="https://github.com/Srikanth-Mohankumar/neoview">the repository</a>, then install it:</p>
-            <div class="code"><pre><code>python3 -m pip install .</code></pre><button type="button" class="copy-btn" aria-label="Copy source install command"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg></button></div>
-            <p class="note">Or run <code>./run.sh</code> instead, which sets up a virtual environment and launches NeoView.</p>          </article>
+            <p>Install from PyPI (Python 3.10 or newer), then open a PDF from the terminal or the welcome screen.</p>
+            <div class="code-block"><pre><code>pip install neoview
+neoview /path/to/document.pdf</code></pre><button type="button" class="copy-btn" data-copy="pip install neoview" aria-label="Copy pip install command" title="Copy"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg></button></div>
+            <p class="small">Also runs as <code>python -m neoview</code>.</p>
+          </article>
+          <article class="install-card">
+            <h3>From source</h3>
+            <p>Clone the repository; <code>run.sh</code> creates a virtual environment and starts the app.</p>
+            <div class="code-block"><pre><code>git clone https://github.com/Srikanth-Mohankumar/neoview
+cd neoview
+./run.sh</code></pre><button type="button" class="copy-btn" data-copy="git clone https://github.com/Srikanth-Mohankumar/neoview" aria-label="Copy git clone command" title="Copy"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg></button></div>
+            <p class="small">Developers: <code>python3 -m pip install -e .[dev]</code>.</p>
+          </article>
         </div>
       </div>
     </section>
 
-    <section id="faq" class="section" aria-labelledby="faq-title">
+    <!-- ================================================================ FAQ -->
+    <section id="faq" class="section section-alt" aria-labelledby="faq-title">
       <div class="container narrow">
         <div class="section-head">
           <p class="eyebrow">FAQ</p>
-          <h2 id="faq-title">Questions</h2>
+          <h2 id="faq-title">Questions.</h2>
         </div>
         <div class="faq">
           <details>
-            <summary>Is NeoView free?</summary>
-            <p>Yes. NeoView is open source under the <a href="https://github.com/Srikanth-Mohankumar/neoview/blob/main/LICENSE">MIT License</a>.</p>
+            <summary>Is NeoView really free?</summary>
+            <p>Yes. It is open source under the MIT licence: free to use at work or at home, no account, no trial, no ads. NeoView makes no network connections of its own; web links inside a PDF open in your browser when you click them.</p>
           </details>
           <details>
-            <summary>Does annotating change my PDF?</summary>
-            <p>No. Annotations and bookmarks are stored in a sidecar file next to the PDF (<code>document.pdf.neoview.json</code>). When you want them inside a PDF, <em>Export PDF with Annotations</em> writes a separate copy.</p>
+            <summary>Does NeoView change my PDF?</summary>
+            <p>No. Annotations and bookmarks are saved in a small sidecar file next to the PDF (<code>document.pdf.neoview.json</code>), which is why they survive a rebuild. <em>Export PDF with Annotations</em> writes a separate copy with the marks embedded as standard PDF annotations.</p>
           </details>
           <details>
-            <summary>How does auto-reload work with LaTeX?</summary>
-            <p>NeoView watches the open file. When your LaTeX, Typst or other build rewrites the PDF, the tab reloads on its own, and you can press <kbd>F5</kbd> to reload at any time.</p>
+            <summary>How does auto-reload work with latexmk or Typst?</summary>
+            <p>NeoView watches the open file. When your build tool rewrites it, NeoView reloads it on the same page, at the same zoom and scroll position, and keeps showing the old pages until the new ones are drawn. A file that is empty or still being written is waited out. Auto-reload can be switched off in the inspector; <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd> reloads by hand.</p>
           </details>
           <details>
-            <summary>Which units can I measure in?</summary>
-            <p>Points, picas and millimetres, shown together for width, height and position of the selection.</p>
+            <summary>Which measurement units are supported?</summary>
+            <p>Points, picas, millimetres and inches, chosen in the inspector or under Tools &rsaquo; Measurement Units. The badge on the page shows points; <kbd>Ctrl</kbd>+<kbd>C</kbd> copies the width and height in points, picas and millimetres together.</p>
           </details>
           <details>
-            <summary>Which platforms are supported?</summary>
-            <p>Linux and Windows. On Windows you can use the standalone <code>neoview.exe</code>; on Linux install with <code>pip install neoview</code> (Python 3.10+).</p>
+            <summary>How does font inspection work?</summary>
+            <p>Choose the Select tool (<kbd>1</kbd>) and move the pointer over text. The text span under the pointer is outlined and the inspector&rsquo;s Text section shows its font name as embedded in the PDF, its size in points, and whether it is bold or italic (read from the font name).</p>
           </details>
           <details>
-            <summary>Where do I report a bug or ask for a feature?</summary>
-            <p>Open an issue on <a href="https://github.com/Srikanth-Mohankumar/neoview/issues">GitHub</a>.</p>
+            <summary>Can it handle very long documents?</summary>
+            <p>Yes. Pages render in small steps between other work and only nearby pages keep their full-resolution images, so memory stays bounded. In our benchmark a 650-page book was read end to end at 427&ndash;718&nbsp;MB peak; see <a href="#performance">Performance</a> for the conditions.</p>
           </details>
+          <details>
+            <summary>Does it open password-protected PDFs?</summary>
+            <p>Yes. NeoView asks for the password (three attempts) and keeps it in memory only, so reload, printing and presentation work without asking again. It is never written to disk.</p>
+          </details>
+          <details>
+            <summary>Does it run on macOS?</summary>
+            <p>macOS is not a supported platform: there is no build for it and it is not tested. NeoView is developed and tested on Linux and Windows.</p>
+          </details>
+          <details>
+            <summary>I found a bug or want a feature.</summary>
+            <p>Please open an issue on <a href="https://github.com/Srikanth-Mohankumar/neoview/issues">GitHub</a>. Pull requests are welcome.</p>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================================================================ ABOUT -->
+    <section id="about" class="section" aria-labelledby="about-title">
+      <div class="container about-grid">
+        <div>
+          <p class="eyebrow">About</p>
+          <h2 id="about-title">Why NeoView exists.</h2>
+          <p>Checking a typeset document is a loop: change the source, rebuild, find your place, look closely, measure, mark what is wrong, and do it again. Most PDF readers are built for reading, so every turn of that loop meant reaching for another tool &mdash; a ruler here, a font checker there, a separate program for markup.</p>
+          <p>NeoView started as a small crop-and-measure tool for exactly that job and grew into a full viewer around it. Version 0.5 is a ground-up redesign of the window and the rendering engine, so the precise tools sit inside a viewer that is pleasant to read in all day and stays fast on book-length documents.</p>
+          <p>It is written in Python with Qt for Python (PySide6) and PyMuPDF, and is developed in the open by <a href="https://github.com/Srikanth-Mohankumar">Srikanth Mohankumar</a>.</p>
+        </div>
+        <aside class="about-card" aria-label="Project facts">
+          <dl>
+            <div><dt>Licence</dt><dd><a href="https://github.com/Srikanth-Mohankumar/neoview/blob/main/LICENSE">MIT</a></dd></div>
+            <div><dt>Current version</dt><dd>0.5</dd></div>
+            <div><dt>Platforms</dt><dd>Linux, Windows</dd></div>
+            <div><dt>Source</dt><dd><a href="https://github.com/Srikanth-Mohankumar/neoview">github.com/Srikanth-Mohankumar/neoview</a></dd></div>
+            <div><dt>Package</dt><dd><a href="https://pypi.org/project/neoview/">pypi.org/project/neoview</a></dd></div>
+            <div><dt>Credits</dt><dd>Icons: <a href="https://lucide.dev/">Lucide</a> (ISC licence). Interface font: <a href="https://rsms.me/inter/">Inter</a> (SIL Open Font License 1.1). Built on <a href="https://doc.qt.io/qtforpython-6/">PySide6</a> and <a href="https://pymupdf.readthedocs.io/">PyMuPDF</a>.</dd></div>
+          </dl>
+        </aside>
+      </div>
+    </section>
+
+    <!-- ================================================================ FINAL CTA -->
+    <section class="final-cta" aria-labelledby="cta-title">
+      <div class="container">
+        <h2 id="cta-title">Open your next proof in NeoView.</h2>
+        <div class="cta-row center">
+          <a class="btn btn-primary" href="https://github.com/Srikanth-Mohankumar/neoview/releases/latest/download/neoview.exe">Download for Windows</a>
+          <div class="pip-pill">
+            <code>pip install neoview</code>
+            <button type="button" class="copy-btn" data-copy="pip install neoview" aria-label="Copy pip install command" title="Copy">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg>
+            </button>
+          </div>
         </div>
       </div>
     </section>
@@ -296,17 +577,15 @@ neoview /path/to/document.pdf</code></pre><button type="button" class="copy-btn"
   <footer class="site-footer">
     <div class="container footer-inner">
       <div class="footer-brand">
-        <img src="assets/logo-mark.png" alt="" width="24" height="24">
-        <span>NeoView</span>
+        <img src="assets/logo-mark.png" alt="" width="24" height="24" loading="lazy">
+        <span>NeoView &middot; MIT licence &middot; by <a href="https://github.com/Srikanth-Mohankumar">Srikanth Mohankumar</a></span>
       </div>
       <nav aria-label="Footer">
-        <ul>
-          <li><a href="https://github.com/Srikanth-Mohankumar/neoview">Source</a></li>
-          <li><a href="https://github.com/Srikanth-Mohankumar/neoview/releases">Releases</a></li>
-          <li><a href="https://pypi.org/project/neoview/">PyPI</a></li>
-          <li><a href="https://github.com/Srikanth-Mohankumar/neoview/issues">Issues</a></li>
-          <li><a href="https://github.com/Srikanth-Mohankumar/neoview/blob/main/LICENSE">MIT License</a></li>
-        </ul>
+        <a href="https://github.com/Srikanth-Mohankumar/neoview">GitHub</a>
+        <a href="https://github.com/Srikanth-Mohankumar/neoview/releases">Releases</a>
+        <a href="https://pypi.org/project/neoview/">PyPI</a>
+        <a href="https://github.com/Srikanth-Mohankumar/neoview/issues">Issues</a>
+        <a href="#top">Back to top</a>
       </nav>
     </div>
   </footer>
