@@ -15,89 +15,56 @@
  * Naming convention for new screenshots: assets/screens/light-<NN>-<step>.png and
  * assets/screens/dark-<NN>-<step>.png, e.g. assets/screens/dark-05-measure.png.
  *
- * The entries below still point at the pre-redesign screenshots (assets/img*.png),
- * which have no dark variants.
+ * Screenshots: v0.5 UI, captured with smoke.py --pdf <sample article> --size 1440x900.
  */
 window.NEOVIEW_SCREENS = [
   {
-    id: "01-open",
+    id: "09-sidebar-outline",
     hero: true,
-    light: "assets/img1.png",
-    dark: null,
-    width: 1440, height: 980,
-    caption: "Search, outline and thumbnails",
-    alt: "NeoView with a PDF open: outline and thumbnails on the left, live search results below the page."
+    light: "assets/screens/light-09-sidebar-outline.png",
+    dark: "assets/screens/dark-09-sidebar-outline.png",
+    width: 1440, height: 900,
+    caption: "Outline, search and measurement",
+    alt: "NeoView with a LaTeX article open: the outline sidebar on the left, a search match highlighted and a measurement rectangle labelled with its width, height and position."
   },
   {
-    id: "measure",
-    light: "assets/img2.png",
-    dark: null,
-    width: 1380, height: 940,
-    caption: "Measurement and font inspection",
-    alt: "A measurement rectangle over several lines labelled with its width, height and position, and the inspector showing the font name, size and style."
+    id: "07-inspector",
+    light: "assets/screens/light-07-inspector.png",
+    dark: "assets/screens/dark-07-inspector.png",
+    width: 1440, height: 900,
+    caption: "Inspector",
+    alt: "The inspector panel beside the page showing the measured width, height and position in points, a units selector, and the document's metadata."
   },
   {
-    id: "annotate",
-    light: "assets/img3.png",
-    dark: null,
-    width: 1440, height: 980,
-    caption: "Annotations",
-    alt: "Highlighted lines, an arrow and a text-box note on a page, with the annotation list beside it."
+    id: "08-sidebar-thumbnails",
+    light: "assets/screens/light-08-sidebar-thumbnails.png",
+    dark: "assets/screens/dark-08-sidebar-thumbnails.png",
+    width: 1440, height: 900,
+    caption: "Thumbnails",
+    alt: "Page thumbnails in the sidebar next to the open document, with the current page highlighted."
   },
   {
-    id: "tabs",
-    light: "assets/img4.png",
-    dark: null,
-    width: 1320, height: 920,
-    caption: "Tabs and document info",
-    alt: "A second PDF in its own tab at fit-page zoom, with the document info panel showing file, page, zoom and the auto-reload option."
+    id: "12-annotate",
+    light: "assets/screens/light-12-annotate.png",
+    dark: "assets/screens/dark-12-annotate.png",
+    width: 1440, height: 900,
+    caption: "Annotation tools",
+    alt: "The annotation toolbar with highlight, underline, strike-out, note, text, shapes and freehand tools, colour, opacity and stroke width."
   },
   {
-    id: "bookmarks",
-    light: "assets/img5.png",
-    dark: null,
-    width: 1460, height: 980,
-    caption: "Tabs, bookmarks and search",
-    alt: "Three PDFs in tabs, custom bookmarks under the outline, an annotated page and search results for the word workflow."
+    id: "13-two-page-night",
+    light: "assets/screens/light-13-two-page-night.png",
+    dark: "assets/screens/dark-13-two-page-night.png",
+    width: 1440, height: 900,
+    caption: "Two-page view, night mode",
+    alt: "Two pages side by side in night reading mode: white text on black pages, with a table and a plotted figure."
   },
   {
-    id: "thumbnails",
-    light: "assets/img6.png",
-    dark: null,
-    width: 1360, height: 940,
-    caption: "Thumbnail navigation",
-    alt: "A later page of a five-page PDF reached from the outline, with page thumbnails in the left panel."
-  },
-  {
-    id: "outline",
-    light: "assets/img7.png",
-    dark: null,
-    width: 1360, height: 940,
-    caption: "Filtering the outline",
-    alt: "The outline and bookmarks filtered by the word review, next to an annotated page."
-  },
-  {
-    id: "freehand",
-    light: "assets/img8.png",
-    dark: null,
-    width: 1440, height: 980,
-    caption: "Freehand marks",
-    alt: "Freehand strokes and an ellipse on a zoomed-out page, with the annotation list and Export PDF button in the inspector."
-  },
-  {
-    id: "search",
-    light: "assets/img9.png",
-    dark: null,
-    width: 1440, height: 980,
-    caption: "Searching longer documents",
-    alt: "Search for the word Section showing match 6 of 70, with every match highlighted on the page."
-  },
-  {
-    id: "rotate",
-    light: "assets/img10.png",
-    dark: null,
-    width: 1380, height: 940,
-    caption: "Rotation and performance mode",
-    alt: "A page rotated 90 degrees with its annotations rotated along with it, and performance mode switched on."
+    id: "01-empty",
+    light: "assets/screens/light-01-empty.png",
+    dark: "assets/screens/dark-01-empty.png",
+    width: 1440, height: 900,
+    caption: "Welcome screen",
+    alt: "The empty window with an Open PDF button and a drop hint."
   }
 ];
