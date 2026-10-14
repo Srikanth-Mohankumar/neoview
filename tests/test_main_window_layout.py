@@ -7,7 +7,7 @@ from pathlib import Path
 import fitz
 import pytest
 from PySide6.QtCore import QRectF, Qt
-from PySide6.QtWidgets import QApplication, QToolButton, QWidgetAction
+from PySide6.QtWidgets import QApplication, QMenu, QToolButton, QWidgetAction
 
 from neoview.ui import icons
 from neoview.ui.main_window import MainWindow
@@ -267,9 +267,13 @@ def test_every_bound_icon_is_bundled(qtbot):
 
 
 def _menu(win: MainWindow, title: str):
+    # Look the menu up by title instead of QAction.menu(): on PySide6 6.11 the wrapper that
+    # call returns owns the QMenu, so dropping it deletes the menu out from under the window.
     for action in win.menuBar().actions():
         if action.text().replace("&", "") == title:
-            return action.menu()
+            for menu in win.menuBar().findChildren(QMenu):
+                if menu.menuAction() is action or menu.title() == action.text():
+                    return menu
     raise AssertionError(f"no {title} menu")
 
 
