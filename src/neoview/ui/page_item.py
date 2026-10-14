@@ -2,53 +2,163 @@
 
 from __future__ import annotations
 
+import itertools
+import sys
 from collections import OrderedDict
 
 import fitz
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QImage, QPixmap
-from PySide6.QtWidgets import QGraphicsDropShadowEffect, QGraphicsPixmapItem
+from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPixmap
+from PySide6.QtWidgets import QGraphicsPixmapItem
+
+from neoview.ui.page_modes import apply_color_mode, page_background
+
+_doc_tokens = itertools.count(1)
+
+
+def new_doc_token() -> int:
+    """Return a process-unique token for one loaded document (an open or a reload)."""
+    return next(_doc_tokens)
+
+
+_malloc_trim = None
+
+
+def release_freed_memory() -> None:
+    """Best effort: hand freed heap memory back to the OS after dropping page pixmaps.
+
+    glibc keeps freed multi-megabyte pixmap buffers in the process heap, so RSS stays at its
+    peak after a large document is closed although the memory is free (measured: 602 MB ->
+    104 MB with malloc_trim after reading 300 image pages). Only glibc has malloc_trim; on
+    other platforms this does nothing.
+    """
+    global _malloc_trim
+    if _malloc_trim is None:
+        _malloc_trim = False
+        if sys.platform.startswith("linux"):
+            try:
+                import ctypes
+
+                _malloc_trim = ctypes.CDLL("libc.so.6").malloc_trim
+            except (OSError, AttributeError):
+                _malloc_trim = False
+    if _malloc_trim:
+        try:
+            _malloc_trim(0)
+        except Exception:
+            pass
 
 
 class PageItem(QGraphicsPixmapItem):
-    """A single PDF page rendered at optimized quality."""
+    """A single PDF page.
 
-    BASE_RENDER_SCALE = 2.0
-    TARGET_RENDER_SCALE = 3.0
+    Geometry (``page_rect``, position, scale) is valid from construction; the image is a
+    placeholder until ``apply_render`` installs a real render. Whatever pixmap it holds, the
+    item covers ``page_rect.size() * zoom`` scene units, because
+    ``scale() == (zoom / render_zoom) / render_scale_factor``.
+    """
+
+    # Render resolution relative to device pixels (devicePixelRatio is applied separately).
+    # 1.0 renders exactly the device pixels the page covers on screen.
+    RENDER_HEADROOM = 1.0
+    MIN_RENDER_FACTOR = 0.25
     MAX_RENDER_PIXELS = 16_000_000
-    CACHE_LIMIT = 96
-    _PIXMAP_CACHE: "OrderedDict[tuple, QPixmap]" = OrderedDict()
+    # Byte budget of the pixmap cache shared by all views.
+    CACHE_BUDGET_BYTES = 256 * 1024 * 1024
+    _PIXMAP_CACHE: OrderedDict[tuple, QPixmap] = OrderedDict()
 
-    def __init__(self, page: fitz.Page, scale: float, page_index: int, lazy: bool = True):
+    # Painted drop shadow: (spread, alpha) per layer, in screen pixels. A few translucent
+    # strips cost far less than QGraphicsDropShadowEffect, which re-renders the whole page
+    # into an offscreen buffer on every paint.
+    SHADOW_OFFSET_Y = 3.0
+    SHADOW_LAYERS = ((1.0, 34), (3.0, 20), (6.0, 11), (10.0, 5))
+    SHADOW_MARGIN = 14.0
+
+    def __init__(
+        self,
+        page: fitz.Page,
+        scale: float,
+        page_index: int,
+        lazy: bool = True,
+        doc_token: int = 0,
+        color_mode: str = "normal",
+    ):
         super().__init__()
         self.page_index = page_index
+        # Reading colour mode renders are made for (page_modes.COLOR_MODES); part of the
+        # cache key. rendered_color_mode is the mode of the pixmap currently shown.
+        self.color_mode = color_mode
+        self.rendered_color_mode = color_mode
         self.page_rect = QRectF(0, 0, page.rect.width, page.rect.height)
         self._fitz_page = page
+        self.doc_token = doc_token
         self.render_zoom: float = 0.0  # 0 means "not yet rendered"
-        self.render_scale_factor: float = self.BASE_RENDER_SCALE
+        self.render_scale_factor: float = 1.0
         self.rotation_degrees: int = 0
+        # True while the pixmap is a stand-in: a blank page or an older render shown scaled.
+        self.is_preview = True
+        # True while the pixmap is the blank placeholder.
+        self.is_blank = True
         self.setTransformationMode(Qt.TransformationMode.SmoothTransformation)
-        self._shadow: QGraphicsDropShadowEffect | None = None
         if lazy:
-            # Defer the drop-shadow until first real render — Qt would otherwise
-            # allocate an offscreen buffer per page even for placeholders.
             self._set_placeholder(scale)
         else:
-            self._ensure_shadow()
             self._render(page, scale)
 
-    def _ensure_shadow(self) -> None:
-        if self._shadow is not None:
-            return
-        shadow = QGraphicsDropShadowEffect()
-        shadow.setBlurRadius(24.0)
-        shadow.setOffset(0.0, 4.0)
-        shadow.setColor(QColor(0, 0, 0, 140))
-        self.setGraphicsEffect(shadow)
-        self._shadow = shadow
+    # -- geometry and painting -----------------------------------------------------------
+
+    def setScale(self, scale: float) -> None:  # noqa: N802 - Qt API
+        # boundingRect includes a shadow margin measured in screen pixels, so it changes
+        # with the item scale.
+        self.prepareGeometryChange()
+        super().setScale(scale)
+
+    def _pixel_unit(self) -> float:
+        s = self.scale()
+        return 1.0 / s if s > 0 else 1.0
+
+    def boundingRect(self) -> QRectF:  # noqa: N802 - Qt API
+        unit = self._pixel_unit()
+        m = self.SHADOW_MARGIN * unit
+        return QRectF(self.pixmap().rect()).adjusted(-m, -m, m, m + self.SHADOW_OFFSET_Y * unit)
+
+    def shape(self) -> QPainterPath:
+        path = QPainterPath()
+        path.addRect(QRectF(self.pixmap().rect()))
+        return path
+
+    def contains(self, point: QPointF) -> bool:
+        return QRectF(self.pixmap().rect()).contains(point)
+
+    def paint(self, painter: QPainter, option, widget=None) -> None:
+        pm = self.pixmap()
+        if not pm.isNull():
+            unit = self._pixel_unit()
+            r = QRectF(pm.rect())
+            dy = self.SHADOW_OFFSET_Y * unit
+            painter.save()
+            painter.setPen(Qt.PenStyle.NoPen)
+            for spread, alpha in self.SHADOW_LAYERS:
+                d = spread * unit
+                outer = r.adjusted(-d, -d + dy, d, d + dy)
+                painter.setBrush(QColor(0, 0, 0, alpha))
+                # Four strips around the page; the page itself covers the middle.
+                top = max(outer.top(), r.top())
+                bottom = min(outer.bottom(), r.bottom())
+                if r.top() > outer.top():
+                    painter.drawRect(QRectF(outer.left(), outer.top(), outer.width(),
+                                            r.top() - outer.top()))
+                painter.drawRect(QRectF(outer.left(), r.bottom(), outer.width(),
+                                        outer.bottom() - r.bottom()))
+                painter.drawRect(QRectF(outer.left(), top, r.left() - outer.left(), bottom - top))
+                painter.drawRect(QRectF(r.right(), top, outer.right() - r.right(), bottom - top))
+            painter.restore()
+        super().paint(painter, option, widget)
+
+    # -- placeholders and previews --------------------------------------------------------
 
     def _set_placeholder(self, scale: float) -> None:
-        """Cheap aspect-correct placeholder so opening a long PDF doesn't render every page."""
+        """Cheap aspect-correct blank page so opening a long PDF renders nothing up front."""
         pw_pt = max(1.0, float(self.page_rect.width()))
         ph_pt = max(1.0, float(self.page_rect.height()))
         long_side = max(pw_pt, ph_pt)
@@ -57,30 +167,104 @@ class PageItem(QGraphicsPixmapItem):
         pix_w = max(2, int(round(pw_pt * sf)))
         pix_h = max(2, int(round(ph_pt * sf)))
         pixmap = QPixmap(pix_w, pix_h)
-        pixmap.fill(QColor("#ffffff"))
+        pixmap.fill(page_background(self.color_mode))
         self.setPixmap(pixmap)
+        self.rendered_color_mode = self.color_mode
         # Pick render_zoom/render_scale_factor so _layout_pages math draws this
         # at page_rect.width() * current_zoom pixels on screen.
         self.render_zoom = sf
         self.render_scale_factor = 1.0
+        self.is_preview = True
+        self.is_blank = True
         self.setScale(scale / sf)
 
-    @classmethod
-    def _effective_render_scale(cls, page: fitz.Page, scale: float) -> float:
-        page_rect = getattr(page, "rect", None)
-        width = float(getattr(page_rect, "width", 0.0) or 0.0)
-        height = float(getattr(page_rect, "height", 0.0) or 0.0)
-        scaled_area = max(1.0, width * height * max(scale, 0.25) * max(scale, 0.25))
-        max_scale = (cls.MAX_RENDER_PIXELS / scaled_area) ** 0.5
-        return max(cls.BASE_RENDER_SCALE, min(cls.TARGET_RENDER_SCALE, max_scale))
+    def release(self, scale: float) -> None:
+        """Drop the displayed render (the cache may keep it) and show a blank page."""
+        self._set_placeholder(scale)
+
+    def show_preview(self, pixmap: QPixmap, zoom: float, factor: float, scale: float) -> None:
+        """Show *pixmap*, rendered at *zoom* x *factor*, scaled to the current zoom *scale*."""
+        self.setPixmap(pixmap)
+        self.render_zoom = zoom
+        self.render_scale_factor = factor
+        self.is_preview = True
+        self.is_blank = False
+        self.setScale((scale / zoom) / factor)
+
+    def show_best_cached_preview(self, scale: float) -> bool:
+        """Show the largest cached render of this page, if any, as a scaled preview."""
+        best = None
+        for key, pixmap in self._PIXMAP_CACHE.items():
+            if (key[0] == self.doc_token and key[1] == self.page_index
+                    and key[4] == self.color_mode):
+                if best is None or pixmap.width() > best[2].width():
+                    best = (key[2], key[3], pixmap)
+        if best is None:
+            return False
+        self.show_preview(best[2], best[0], best[1], scale)
+        self.rendered_color_mode = self.color_mode
+        return True
+
+    # -- real renders ---------------------------------------------------------------------
 
     @classmethod
-    def _cache_key(cls, page: fitz.Page, scale: float, render_scale: float, rotation: int = 0) -> tuple:
-        doc = getattr(page, "parent", None)
-        doc_name = getattr(doc, "name", "") or f"doc-{id(doc)}"
-        doc_identity = id(doc)
-        page_num = getattr(page, "number", -1)
-        return (doc_name, doc_identity, page_num, round(scale, 2), round(render_scale, 2), int(rotation) % 360)
+    def render_factor_for(cls, page_rect: QRectF, zoom: float, device_pixel_ratio: float) -> float:
+        """Pixels to render per scene unit: the device pixels, capped by MAX_RENDER_PIXELS."""
+        want = max(1.0, float(device_pixel_ratio)) * cls.RENDER_HEADROOM
+        area = max(1.0, page_rect.width() * page_rect.height()) * zoom * zoom
+        cap = (cls.MAX_RENDER_PIXELS / area) ** 0.5
+        return round(max(cls.MIN_RENDER_FACTOR, min(want, cap)), 3)
+
+    def needs_render(self, zoom: float, factor: float) -> bool:
+        return (
+            self.is_preview
+            or self.rendered_color_mode != self.color_mode
+            or abs(zoom - self.render_zoom) >= 0.01
+            or abs(factor - self.render_scale_factor) >= 0.01
+        )
+
+    def apply_render(self, pixmap: QPixmap, zoom: float, factor: float, scale: float) -> None:
+        """Install a finished render made at *zoom* x *factor*; *scale* is the current zoom.
+
+        *pixmap* must already be in this item's ``color_mode``.
+        """
+        self.setPixmap(pixmap)
+        self.render_zoom = zoom
+        self.render_scale_factor = factor
+        self.rendered_color_mode = self.color_mode
+        self.is_preview = False
+        self.is_blank = False
+        self.setScale((scale / zoom) / factor)
+        self._cache_put(
+            self._cache_key(self.doc_token, self.page_index, zoom, factor, self.color_mode),
+            pixmap,
+        )
+
+    def apply_cached(self, zoom: float, factor: float) -> bool:
+        """Install the cached render for *zoom* x *factor* if there is one."""
+        pixmap = self._cache_get(
+            self._cache_key(self.doc_token, self.page_index, zoom, factor, self.color_mode)
+        )
+        if pixmap is None:
+            return False
+        self.apply_render(pixmap, zoom, factor, zoom)
+        return True
+
+    # -- cache ----------------------------------------------------------------------------
+
+    @staticmethod
+    def _cache_key(
+        doc_token: int, page_index: int, zoom: float, factor: float, color_mode: str = "normal"
+    ) -> tuple:
+        return (doc_token, page_index, round(zoom, 4), round(factor, 3), color_mode)
+
+    @staticmethod
+    def _pixmap_bytes(pixmap: QPixmap) -> int:
+        return pixmap.width() * pixmap.height() * max(1, pixmap.depth()) // 8
+
+    @classmethod
+    def cache_bytes(cls) -> int:
+        return sum(cls._pixmap_bytes(p) for p in cls._PIXMAP_CACHE.values())
 
     @classmethod
     def _cache_get(cls, key: tuple) -> QPixmap | None:
@@ -91,38 +275,37 @@ class PageItem(QGraphicsPixmapItem):
         return pixmap
 
     @classmethod
-    def _cache_put(cls, key: tuple, pixmap: QPixmap):
+    def _cache_put(cls, key: tuple, pixmap: QPixmap) -> None:
         cls._PIXMAP_CACHE[key] = pixmap
         cls._PIXMAP_CACHE.move_to_end(key)
-        while len(cls._PIXMAP_CACHE) > cls.CACHE_LIMIT:
-            cls._PIXMAP_CACHE.popitem(last=False)
+        total = cls.cache_bytes()
+        # Evict least recently used first; never the entry just added.
+        while total > cls.CACHE_BUDGET_BYTES and len(cls._PIXMAP_CACHE) > 1:
+            _key, old = cls._PIXMAP_CACHE.popitem(last=False)
+            total -= cls._pixmap_bytes(old)
 
-    def _render(self, page: fitz.Page, scale: float):
-        self._ensure_shadow()
-        self.render_zoom = scale
-        render_factor = self._effective_render_scale(page, scale)
-        self.render_scale_factor = render_factor
-        key = self._cache_key(page, scale, render_factor, self.rotation_degrees)
-        cached = self._cache_get(key)
-        if cached is not None:
-            self.setPixmap(cached)
-            self.setScale(1.0 / render_factor)
+    @classmethod
+    def purge_cache(cls, doc_token: int) -> None:
+        """Forget every cached render of the document loaded as *doc_token*."""
+        for key in [k for k in cls._PIXMAP_CACHE if k[0] == doc_token]:
+            del cls._PIXMAP_CACHE[key]
+
+    # -- synchronous rendering (non-lazy construction) ------------------------------------
+
+    def _render(self, page: fitz.Page, scale: float, device_pixel_ratio: float = 1.0) -> None:
+        factor = self.render_factor_for(self.page_rect, scale, device_pixel_ratio)
+        if self.apply_cached(scale, factor):
             return
-
-        render_scale = scale * render_factor
-        mat = fitz.Matrix(render_scale, render_scale)
+        mat = fitz.Matrix(scale * factor, scale * factor)
         pix = page.get_pixmap(matrix=mat, alpha=False)
         img = QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format.Format_RGB888)
-        pixmap = QPixmap.fromImage(img.copy())
-        self.setPixmap(pixmap)
-        self.setScale(1.0 / render_factor)
-        self._cache_put(key, pixmap)
+        img = img.copy() if self.color_mode == "normal" else apply_color_mode(img, self.color_mode)
+        self.apply_render(QPixmap.fromImage(img), scale, factor, scale)
 
     def rerender(self, scale: float) -> bool:
-        # Placeholder pages have render_zoom set to the placeholder scale
-        # factor (much less than the real zoom) — the abs() check below
-        # naturally treats them as "needs render".
-        if self.render_zoom > 0 and abs(scale - self.render_zoom) < 0.01:
+        """Render synchronously at *scale* unless that render is already shown."""
+        factor = self.render_factor_for(self.page_rect, scale, 1.0)
+        if not self.needs_render(scale, factor):
             return False
         self._render(self._fitz_page, scale)
         return True

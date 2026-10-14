@@ -5,22 +5,26 @@ from __future__ import annotations
 import html
 import os
 import re
+import time
 from bisect import bisect_right
 from enum import Enum, auto
 from urllib.parse import unquote
 
 import fitz
 import shiboken6
-from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, QTimer, QUrl, Signal
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRectF, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import (
     QBrush,
     QColor,
     QDesktopServices,
+    QFont,
+    QImage,
     QKeyEvent,
     QMouseEvent,
     QPainter,
     QPainterPath,
     QPen,
+    QPixmap,
     QWheelEvent,
 )
 from PySide6.QtWidgets import (
@@ -36,10 +40,15 @@ from PySide6.QtWidgets import (
     QToolTip,
 )
 
+from neoview import theme
 from neoview.models.view_state import AnnotationRecord
 from neoview.ui import icons
 from neoview.ui.annotation_item import AnnotationItem
-from neoview.ui.page_item import PageItem
+from neoview.ui.navigation_history import HistoryEntry, NavigationHistory
+from neoview.ui.page_item import PageItem, new_doc_token, release_freed_memory
+from neoview.ui.page_modes import COLOR_MODES, PAGE_MODES, PageLayout, layout_pages
+from neoview.ui.password import unlock
+from neoview.ui.render_scheduler import RenderRequest, RenderScheduler
 from neoview.ui.selection import SelectionRect
 
 _ALLOWED_URI_SCHEMES = frozenset({"http", "https", "mailto"})
@@ -72,6 +81,10 @@ class PdfView(QGraphicsView):
     annotation_edit_requested = Signal(str)  # emits annotation id (double-click / context menu)
     document_loaded = Signal()
     performance_mode_toggled = Signal(bool)
+    password_required = Signal(str)  # path of an encrypted PDF that needs a (new) password
+    history_changed = Signal(bool, bool)  # (can_go_back, can_go_forward)
+    page_mode_changed = Signal(str)
+    color_mode_changed = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -86,12 +99,6 @@ class PdfView(QGraphicsView):
         self.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        app = QApplication.instance()
-        theme_mode = ""
-        if app is not None:
-            theme_mode = str(app.property("theme_mode") or "").lower()
-        canvas_bg = "#141417" if theme_mode == "dark" else "#eef2f7"
-        self.setBackgroundBrush(QBrush(QColor(canvas_bg)))
         self.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
         self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.SmartViewportUpdate)
         self.verticalScrollBar().setSingleStep(36)
@@ -102,8 +109,22 @@ class PdfView(QGraphicsView):
 
         self._doc: fitz.Document | None = None
         self._doc_path: str | None = None
+        # Password the open document was unlocked with; memory only, never persisted.
+        self._doc_password: str | None = None
         self._pages: list[PageItem] = []
+        # Top of each page's row in scene coordinates (non-decreasing; equal for pages that
+        # share a row in the two-page modes).
         self._page_positions: list[float] = []
+        self._page_mode: str = "continuous"
+        self._color_mode: str = "normal"
+        self._layout: PageLayout | None = None
+        self._page_row: list[int] = []
+        self._single_row = 0  # row shown in "single" mode
+        self._last_page_flip = 0.0
+        # Back/forward history of jumps (links, outline, search, go-to-page).
+        self._history = NavigationHistory(on_change=self.history_changed.emit)
+        self._restoring_history = False
+        self._jump_depth = 0
         self._zoom: float = 1.0
         self._zoom_mode: str = self.ZOOM_MODE_CUSTOM
         self._tool: ToolMode = ToolMode.HAND
@@ -121,6 +142,16 @@ class PdfView(QGraphicsView):
         self._rerender_timer = QTimer(self)
         self._rerender_timer.setSingleShot(True)
         self._rerender_timer.timeout.connect(self._rerender_pages)
+
+        # Pages render band by band from the event loop (see render_scheduler.py). The
+        # generation changes whenever the document changes, so a render finished for an
+        # old document is never shown; the doc token keys this load's pixmaps in the cache.
+        self._render_scheduler = RenderScheduler(self)
+        self._render_scheduler.page_rendered.connect(self._on_page_rendered)
+        self._render_generation = 0
+        self._doc_token = 0
+        self._rendered_pages: set[int] = set()
+        self._last_scroll_value = 0
 
         self._text_selecting = False
         self._text_select_start: QPointF | None = None
@@ -150,7 +181,7 @@ class PdfView(QGraphicsView):
         self._annotate_freehand_points: list[list[float]] = []
         self._annotate_freehand_path_item: QGraphicsPathItem | None = None
 
-        self._page_links: list[list[tuple[QRectF, dict]]] = []
+        self._page_links: list[list[tuple[QRectF, dict]] | None] = []
         self._hover_link: dict | None = None
         self._pressed_link: dict | None = None
         self._pressed_pos: QPointF | None = None
@@ -173,6 +204,7 @@ class PdfView(QGraphicsView):
         self._measure_badge.setObjectName("FloatingMeasureBadge")
         self._measure_badge.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self._measure_badge.hide()
+        self._apply_badge_font()
         self._link_badge = QLabel(self.viewport())
         self._link_badge.setObjectName("LinkBadge")
         self._link_badge.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
@@ -187,6 +219,41 @@ class PdfView(QGraphicsView):
 
         self._apply_viewport_margins()
         self._update_cursor()
+        self.apply_theme_colors()
+
+    # ------------------------------------------------------------------
+    # Theme
+    # ------------------------------------------------------------------
+
+    def canvas_color(self) -> QColor:
+        """Colour of the area around the pages for the current theme and reading mode."""
+        if self._color_mode == "night":
+            # Night pages are near-black: use the dark canvas even in the light theme so
+            # the page edges stay visible and the screen stays dark.
+            return QColor(theme.tokens("dark")["canvas"])
+        return QColor(theme.tokens()["canvas"])
+
+    def apply_theme_colors(self) -> None:
+        """Re-read theme colours (canvas, badge font). Called again on palette changes."""
+        self.setBackgroundBrush(QBrush(self.canvas_color()))
+        self._apply_badge_font()
+        self.viewport().update()
+
+    def _apply_badge_font(self) -> None:
+        # The badge shows changing numbers: use the UI font with tabular (fixed-width)
+        # figures so it looks the same on every OS and the digits do not jitter. The
+        # widget-level rule overrides the stylesheet's monospace family; size and weight
+        # still come from the theme stylesheet.
+        font = QFont(QApplication.font())
+        font.setFeature(QFont.Tag("tnum"), 1)
+        self._measure_badge.setFont(font)
+        family = font.family().replace('"', "")
+        self._measure_badge.setStyleSheet(f'font-family: "{family}";')
+
+    def changeEvent(self, e):  # noqa: N802 - Qt API
+        super().changeEvent(e)
+        if e.type() in (QEvent.Type.PaletteChange, QEvent.Type.StyleChange):
+            self.apply_theme_colors()
 
     @property
     def document(self) -> fitz.Document | None:
@@ -265,15 +332,20 @@ class PdfView(QGraphicsView):
 
     @property
     def current_page(self) -> int:
+        """Zero-based current page; in the two-page modes, the first page of the spread."""
         if not self._page_positions:
             return 0
+        if self._is_paged():
+            return self._row_pages(self._single_row)[0]
         # Pick the page whose midline is closest to (or above) the viewport center.
         scroll_y = self.verticalScrollBar().value() + self.viewport().height() / 2
         idx = bisect_right(self._page_positions, scroll_y) - 1
         if idx < 0:
             return 0
         if idx >= len(self._page_positions):
-            return len(self._page_positions) - 1
+            idx = len(self._page_positions) - 1
+        if self._layout is not None and idx < len(self._page_row):
+            return self._row_pages(self._page_row[idx])[0]
         return idx
 
     @property
@@ -352,17 +424,39 @@ class PdfView(QGraphicsView):
                 self.setCursor(Qt.CursorShape.CrossCursor)
             self.setDragMode(QGraphicsView.DragMode.NoDrag)
 
-    def open_document(self, path: str) -> bool:
+    def document_password(self) -> str | None:
+        """Password the open document was unlocked with (None if it needs none)."""
+        return self._doc_password
+
+    def open_document(self, path: str, password: str | None = None) -> bool:
+        """Open *path*; returns False on failure and keeps the current document.
+
+        An encrypted PDF opened without its password (or with a wrong one) shows no error
+        box: the view emits ``password_required(path)`` and returns False, and the caller
+        prompts and calls ``open_document(path, password)`` again.
+        """
         try:
             doc = fitz.open(path)
+            # Check encryption before anything touches pages: page_count and page access
+            # are meaningless until the document is authenticated.
+            encrypted = bool(doc.needs_pass)
+            if encrypted and not unlock(doc, password or ""):
+                doc.close()
+                self.password_required.emit(path)
+                return False
             if doc.page_count == 0:
+                doc.close()
                 raise ValueError("PDF has no pages")
 
+            # Renders in flight hold pages of the old document: drop them before closing it.
+            self._begin_render_generation()
             if self._doc:
                 self._doc.close()
 
             self._doc = doc
             self._doc_path = os.path.abspath(path)
+            self._doc_password = password if encrypted else None
+            self._history.clear()
             self._clear_selection()
             self._render_all_pages()
             self.document_loaded.emit()
@@ -382,20 +476,31 @@ class PdfView(QGraphicsView):
         new_doc = None
         try:
             new_doc = fitz.open(self._doc_path)
+            if new_doc.needs_pass and not unlock(new_doc, self._doc_password or ""):
+                # Rebuilt with a different password (or newly encrypted): ask again.
+                new_doc.close()
+                new_doc = None
+                self.password_required.emit(self._doc_path)
+                return False
             if new_doc.page_count == 0:
                 new_doc.close()
                 return False
 
-            new_pages = []
-            gap = 20
-            y = gap
+            # Keep what is on screen as a preview so a LaTeX rebuild does not flash blank
+            # pages while the new renders arrive.
+            previews = {}
+            for idx in self._visible_page_indices(overscan=2):
+                old = self._pages[idx]
+                if not old.is_preview:
+                    previews[idx] = (old.pixmap(), old.render_zoom, old.render_scale_factor,
+                                     QRectF(old.page_rect))
 
-            for i in range(new_doc.page_count):
-                page = new_doc.load_page(i)
-                item = PageItem(page, self._zoom, i)
-                item.setPos(0, y)
-                new_pages.append((item, y))
-                y += item.page_rect.height() * self._zoom + gap
+            self._begin_render_generation()
+            new_pages, y = self._build_page_items(new_doc)
+            for idx, (pixmap, rz, rf, old_rect) in previews.items():
+                if idx < len(new_pages) and new_pages[idx][0].page_rect == old_rect:
+                    new_pages[idx][0].show_preview(pixmap, rz, rf, self._zoom)
+                    self._rendered_pages.add(idx)
 
             if self._doc:
                 self._doc.close()
@@ -416,19 +521,7 @@ class PdfView(QGraphicsView):
             self._clear_search_items()
             self._hide_link_badge()
 
-            for item, pos_y in new_pages:
-                self._scene.addItem(item)
-                self._pages.append(item)
-                self._page_positions.append(pos_y)
-
-            if self._pages:
-                max_width = max(p.page_rect.width() for p in self._pages) * self._zoom
-                for p in self._pages:
-                    offset = (max_width - p.page_rect.width() * self._zoom) / 2
-                    p.setPos(offset, p.pos().y())
-
-            max_width = max((p.page_rect.width() for p in self._pages), default=600) * self._zoom
-            self._scene.setSceneRect(0, 0, max_width, y)
+            self._add_page_items(new_pages, y)
 
             self.verticalScrollBar().setValue(scroll_pos)
 
@@ -452,10 +545,13 @@ class PdfView(QGraphicsView):
             return False
 
     def close_document(self):
+        self._begin_render_generation()
         if self._doc:
             self._doc.close()
             self._doc = None
         self._doc_path = None
+        self._doc_password = None
+        self._history.clear()
         self._scene.clear()
         self._pages.clear()
         self._page_positions.clear()
@@ -474,6 +570,15 @@ class PdfView(QGraphicsView):
         self._clear_search_items()
         self._hide_measure_badge()
         self._hide_link_badge()
+        # MuPDF keeps decoded images in a process-wide store that outlives the document, and
+        # glibc keeps freed pixmap buffers in the heap. Measured on the 650-page image book:
+        # RSS after close 718 MB -> 359 MB with the trim alone, -> 106 MB with both. Other
+        # open documents only lose cached image decodes.
+        try:
+            fitz.TOOLS.store_shrink(100)
+        except Exception:
+            pass
+        release_freed_memory()
 
     def _render_all_pages(self, keep_selection: bool = False):
         selected_rect = self.selection_rect if keep_selection else None
@@ -500,27 +605,9 @@ class PdfView(QGraphicsView):
         if not self._doc:
             return
 
-        gap = 20
-        y = gap
-
-        for i in range(self._doc.page_count):
-            page = self._doc.load_page(i)
-            item = PageItem(page, self._zoom, i)
-            item.setPos(0, y)
-            self._scene.addItem(item)
-            self._pages.append(item)
-            self._page_positions.append(y)
-            y += item.page_rect.height() * self._zoom + gap
-
-        if self._pages:
-            max_width = max(p.page_rect.width() for p in self._pages) * self._zoom
-            for p in self._pages:
-                offset = (max_width - p.page_rect.width() * self._zoom) / 2
-                p.setPos(offset, p.pos().y())
-
-        total_height = y
-        max_width = max((p.page_rect.width() for p in self._pages), default=600) * self._zoom
-        self._scene.setSceneRect(0, 0, max_width, total_height)
+        # New items: make sure nothing queued for the old ones can land on them.
+        self._begin_render_generation()
+        self._add_page_items(*self._build_page_items(self._doc))
 
         if selected_rect and 0 <= selected_page < len(self._pages):
             self._create_selection_on_page(selected_page, selected_rect)
@@ -530,34 +617,211 @@ class PdfView(QGraphicsView):
         self._rebuild_search_highlights()
         self._update_measure_badge()
         self._emit_page_info()
-        # Render visible (placeholder) pages now so the user sees real content immediately.
+        # Queue the visible pages now so the user sees real content immediately.
         QTimer.singleShot(0, self._rerender_pages)
 
-    def _layout_pages(self):
+    # ------------------------------------------------------------------
+    # Rendering
+    # ------------------------------------------------------------------
+
+    PAGE_GAP = 20
+    # Pages within this many of the visible ones keep their rendered pixmap; pages further
+    # away fall back to a blank placeholder (their render may stay in the shared cache).
+    KEEP_RENDERED_PAGES = 4
+
+    def _begin_render_generation(self) -> None:
+        """Start a new document generation: cancel renders, forget the old pixmaps."""
+        self._render_scheduler.cancel_all()
+        self._rerender_timer.stop()
+        if self._doc_token:
+            PageItem.purge_cache(self._doc_token)
+        self._render_generation += 1
+        self._doc_token = new_doc_token()
+        self._rendered_pages = set()
+
+    def _build_page_items(self, doc: fitz.Document) -> tuple[list[tuple[PageItem, float]], float]:
+        """Create one placeholder PageItem per page with its final geometry. Renders nothing."""
+        items: list[tuple[PageItem, float]] = []
+        y = float(self.PAGE_GAP)
+        for i in range(doc.page_count):
+            item = PageItem(doc.load_page(i), self._zoom, i, doc_token=self._doc_token,
+                            color_mode=self._color_mode)
+            items.append((item, y))
+            y += item.page_rect.height() * self._zoom + self.PAGE_GAP
+        return items, y
+
+    def _add_page_items(self, items: list[tuple[PageItem, float]], total_height: float) -> None:
+        # Positions come from the page-mode layout; the continuous y from
+        # _build_page_items is the same value and is not needed here.
+        for item, _y in items:
+            self._scene.addItem(item)
+            self._pages.append(item)
+        self._position_pages(rescale=False)
+
+    # ------------------------------------------------------------------
+    # Page modes
+    # ------------------------------------------------------------------
+
+    def page_mode(self) -> str:
+        return self._page_mode
+
+    def set_page_mode(self, mode: str) -> None:
+        """Switch between "single", "continuous", "two-page" and "two-page-cover"."""
+        if mode not in PAGE_MODES:
+            raise ValueError(f"unknown page mode {mode!r}; expected one of {PAGE_MODES}")
+        if mode == self._page_mode:
+            return
+        anchor = self.current_page
+        self._page_mode = mode
+        if self._pages:
+            self._layout_pages()
+            if self._is_paged():
+                self._single_row = self._page_row[anchor]
+                self._position_pages(rescale=False)
+            if self._zoom_mode in (self.ZOOM_MODE_FIT_WIDTH, self.ZOOM_MODE_FIT_PAGE):
+                self._apply_fit_mode(force_if_close=True)
+            self._scroll_to_page(anchor)
+            self._emit_page_info()
+            if not self._performance_mode:
+                self._rerender_timer.start(0)
+        self.page_mode_changed.emit(mode)
+
+    def color_mode(self) -> str:
+        return self._color_mode
+
+    def set_color_mode(self, mode: str) -> None:
+        """Reading colour mode for page content: "normal", "night" or "sepia"."""
+        if mode not in COLOR_MODES:
+            raise ValueError(f"unknown color mode {mode!r}; expected one of {COLOR_MODES}")
+        if mode == self._color_mode:
+            return
+        self._color_mode = mode
+        # Renders queued or in flight are for the old colours: a new generation drops them
+        # (the document, its doc token and the pixmap cache stay).
+        self._render_scheduler.cancel_all()
+        self._render_generation += 1
+        for page in self._pages:
+            page.color_mode = mode
+            if page.is_blank:
+                page.release(self._zoom)  # placeholder in the new paper colour
+        # Rendered pages keep showing the old colours until their re-render arrives;
+        # cached renders in the new mode (switching back) are installed at once.
+        self.apply_theme_colors()
+        if self._pages and not self._performance_mode:
+            self._rerender_timer.stop()
+            self._rerender_pages()
+        self.color_mode_changed.emit(mode)
+
+    def drawForeground(self, painter: QPainter, rect: QRectF) -> None:  # noqa: N802 - Qt API
+        super().drawForeground(painter, rect)
+        if not self._is_paged():
+            return
+        # Single mode: the scene still holds the other pages' overlays (annotations, search
+        # hits). When the viewport is larger than the shown page's scene rect they would
+        # be visible around it, so paint the canvas over everything outside the rect.
+        scene_rect = self.sceneRect()
+        brush = self.backgroundBrush()
+        if rect.top() < scene_rect.top():
+            painter.fillRect(QRectF(rect.left(), rect.top(), rect.width(),
+                                    scene_rect.top() - rect.top()), brush)
+        if rect.bottom() > scene_rect.bottom():
+            painter.fillRect(QRectF(rect.left(), scene_rect.bottom(), rect.width(),
+                                    rect.bottom() - scene_rect.bottom()), brush)
+
+    def _is_paged(self) -> bool:
+        return self._page_mode == "single" and bool(self._pages)
+
+    def _is_two_up(self) -> bool:
+        return self._page_mode in ("two-page", "two-page-cover")
+
+    def _row_pages(self, row: int) -> tuple[int, ...]:
+        if self._layout is None or not self._layout.rows:
+            return (0,)
+        row = min(max(row, 0), len(self._layout.rows) - 1)
+        return self._layout.rows[row]
+
+    def _position_pages(self, rescale: bool) -> None:
+        """Place every page for the current mode and zoom; set the scene rect."""
         if not self._pages:
+            self._layout = None
+            self._page_row = []
             self._page_positions = []
             self._scene.setSceneRect(0, 0, 600, 0)
             return
+        sizes = [(p.page_rect.width(), p.page_rect.height()) for p in self._pages]
+        layout = layout_pages(sizes, 0.0, self._zoom, float(self.PAGE_GAP), self._page_mode)
+        self._layout = layout
+        page_row = [0] * len(self._pages)
+        row_tops: list[float] = []
+        for r, row in enumerate(layout.rows):
+            row_tops.append(min(layout.rects[i].y for i in row))
+            for i in row:
+                page_row[i] = r
+        self._page_row = page_row
+        self._single_row = min(self._single_row, len(layout.rows) - 1)
+        paged = self._is_paged()
+        for i, (p, rect) in enumerate(zip(self._pages, layout.rects)):
+            if rescale:
+                render_zoom = p.render_zoom if p.render_zoom > 0 else self._zoom
+                p.setScale((self._zoom / render_zoom) / p.render_scale_factor)
+            p.setPos(rect.x, rect.y)
+            visible = not paged or page_row[i] == self._single_row
+            if p.isVisible() != visible:
+                p.setVisible(visible)
+        self._page_positions = [row_tops[r] for r in page_row]
+        if paged:
+            bounds = layout.row_bounds(self._single_row)
+            gap = float(self.PAGE_GAP)
+            self._scene.setSceneRect(0, bounds.y - gap, layout.scene_width, bounds.h + 2 * gap)
+        else:
+            self._scene.setSceneRect(0, 0, layout.scene_width, layout.scene_height)
 
-        gap = 20
-        y = gap
+    def _show_single_row(self, row: int) -> None:
+        """In "single" mode, make *row* the shown page (or spread)."""
+        if not self._is_paged() or self._layout is None:
+            return
+        row = min(max(row, 0), len(self._layout.rows) - 1)
+        if row != self._single_row:
+            self._single_row = row
+            self._position_pages(rescale=False)
+            self._emit_page_info()
 
-        positions: list[float] = []
-        for p in self._pages:
-            render_zoom = p.render_zoom if p.render_zoom > 0 else self._zoom
-            render_factor = getattr(p, "render_scale_factor", PageItem.BASE_RENDER_SCALE)
-            p.setScale((self._zoom / render_zoom) / render_factor)
-            p.setPos(0, y)
-            positions.append(y)
-            y += p.page_rect.height() * self._zoom + gap
+    def _render_factor(self, page: PageItem) -> float:
+        return PageItem.render_factor_for(page.page_rect, self._zoom, self.devicePixelRatioF())
 
-        max_width = max(p.page_rect.width() for p in self._pages) * self._zoom
-        for p in self._pages:
-            offset = (max_width - p.page_rect.width() * self._zoom) / 2
-            p.setPos(offset, p.pos().y())
+    def pending_render_count(self) -> int:
+        """Number of page renders queued, in progress, or about to be scheduled.
 
-        self._page_positions = positions
-        self._scene.setSceneRect(0, 0, max_width, y)
+        Zero means every visible page shows a render at the current zoom (or the view is in
+        performance mode and deliberately not rendering). Screenshot and benchmark tools
+        poll this instead of sleeping.
+        """
+        timer_pending = 1 if self._rerender_timer.isActive() else 0
+        return self._render_scheduler.pending_count() + timer_pending
+
+    def _on_page_rendered(
+        self, page_index: int, generation: int, zoom: float, factor: float, image: QImage
+    ) -> None:
+        if generation != self._render_generation or not (0 <= page_index < len(self._pages)):
+            return  # rendered for a document (or page set) that is gone
+        item = self._pages[page_index]
+        stale_zoom = abs(zoom - self._zoom) >= 0.01
+        if stale_zoom and not item.is_preview:
+            return  # the page already shows a real render; a newer one is queued
+        # The scheduler already recoloured the image for the reading mode; set_color_mode
+        # starts a new generation, so an image of the old mode never gets here.
+        item.apply_render(QPixmap.fromImage(image), zoom, factor, self._zoom)
+        self._rendered_pages.add(page_index)
+        if stale_zoom:
+            # Better than a blank page, but still not sharp: ask again at the current zoom.
+            item.is_preview = True
+            if not self._performance_mode and not self._rerender_timer.isActive():
+                self._rerender_timer.start(40)
+
+    def _layout_pages(self):
+        self._position_pages(rescale=True)
+        if not self._pages:
+            return
 
         if self._selection and 0 <= self._selection_page < len(self._pages):
             page = self._pages[self._selection_page]
@@ -587,24 +851,31 @@ class PdfView(QGraphicsView):
         self._update_measure_badge()
 
     def _cache_page_links(self):
-        self._page_links = []
-        for page_item in self._pages:
-            links: list[tuple[QRectF, dict]] = []
-            try:
-                for link in page_item._fitz_page.get_links():
-                    src = link.get("from")
-                    if not src:
-                        continue
-                    rect = QRectF(src.x0, src.y0, src.width, src.height)
-                    if rect.width() <= 0 or rect.height() <= 0:
-                        continue
-                    kind = link.get("kind")
-                    has_internal_target = isinstance(link.get("page"), int) or bool(link.get("to"))
-                    if kind in (fitz.LINK_URI, fitz.LINK_GOTO, fitz.LINK_NAMED) or has_internal_target:
-                        links.append((rect, link))
-            except Exception:
-                pass
-            self._page_links.append(links)
+        # Links are read per page on first hover (_links_for_page): reading every page's
+        # links up front costs time proportional to the page count when opening a book.
+        self._page_links = [None] * len(self._pages)
+
+    def _links_for_page(self, page_idx: int) -> list[tuple[QRectF, dict]]:
+        cached = self._page_links[page_idx]
+        if cached is not None:
+            return cached
+        links: list[tuple[QRectF, dict]] = []
+        try:
+            for link in self._pages[page_idx]._fitz_page.get_links():
+                src = link.get("from")
+                if not src:
+                    continue
+                rect = QRectF(src.x0, src.y0, src.width, src.height)
+                if rect.width() <= 0 or rect.height() <= 0:
+                    continue
+                kind = link.get("kind")
+                has_internal_target = isinstance(link.get("page"), int) or bool(link.get("to"))
+                if kind in (fitz.LINK_URI, fitz.LINK_GOTO, fitz.LINK_NAMED) or has_internal_target:
+                    links.append((rect, link))
+        except Exception:
+            pass
+        self._page_links[page_idx] = links
+        return links
 
     def _visible_page_indices(self, overscan: int = 0) -> list[int]:
         if not self._pages:
@@ -626,6 +897,10 @@ class PdfView(QGraphicsView):
                 continue
             visible.append(idx)
 
+        if self._is_paged():
+            shown = set(self._row_pages(self._single_row))
+            visible = [i for i in visible if i in shown] or sorted(shown)
+
         if not visible:
             current = self.current_page
             if 0 <= current < len(self._pages):
@@ -644,8 +919,8 @@ class PdfView(QGraphicsView):
     def _visible_page_needs_rerender(self) -> bool:
         for idx in self._visible_page_indices():
             page = self._pages[idx]
-            render_zoom = getattr(page, "render_zoom", self._zoom)
-            if abs(render_zoom - self._zoom) >= 0.01:
+            if isinstance(page, PageItem) and page.needs_render(self._zoom,
+                                                                self._render_factor(page)):
                 return True
         return False
 
@@ -658,20 +933,47 @@ class PdfView(QGraphicsView):
         return False
 
     def _rerender_pages(self):
+        """Bring visible pages (then 2 neighbours each side) to the current zoom.
+
+        Cached renders are installed at once; the rest are queued with the render scheduler,
+        visible pages first, nearest the viewport centre first. Pages far from the viewport
+        give their pixmap back so memory stays bounded on long documents.
+        """
         if not self._pages:
             return
 
-        rerendered = False
-        for idx in self._visible_page_indices(overscan=2):
-            page = self._pages[idx]
-            rerender = getattr(page, "rerender", None)
-            if callable(rerender) and rerender(self._zoom):
-                render_factor = getattr(page, "render_scale_factor", PageItem.BASE_RENDER_SCALE)
-                page.setScale(1.0 / render_factor)
-                rerendered = True
+        visible = self._visible_page_indices()
+        if not visible:
+            return
+        wanted = self._visible_page_indices(overscan=2)
+        centre = (visible[0] + visible[-1]) / 2.0
+        visible_set = set(visible)
+        order = sorted(wanted, key=lambda i: (i not in visible_set, abs(i - centre)))
 
-        if rerendered:
-            self.viewport().update()
+        requests: list[RenderRequest] = []
+        for idx in order:
+            page = self._pages[idx]
+            if not isinstance(page, PageItem):
+                continue
+            factor = self._render_factor(page)
+            if not page.needs_render(self._zoom, factor):
+                continue
+            if page.apply_cached(self._zoom, factor):
+                self._rendered_pages.add(idx)
+                continue
+            if page.is_blank and page.show_best_cached_preview(self._zoom):
+                self._rendered_pages.add(idx)
+            requests.append(RenderRequest(idx, page._fitz_page, self._zoom, factor,
+                                          page.color_mode))
+        self._render_scheduler.schedule(requests, self._render_generation)
+
+        lo = max(0, visible[0] - self.KEEP_RENDERED_PAGES)
+        hi = visible[-1] + self.KEEP_RENDERED_PAGES
+        for idx in [i for i in self._rendered_pages if i < lo or i > hi]:
+            self._rendered_pages.discard(idx)
+            if 0 <= idx < len(self._pages) and isinstance(self._pages[idx], PageItem):
+                self._pages[idx].release(self._zoom)
+        self.viewport().update()
 
     def _emit_page_info(self):
         self.page_changed.emit(self.current_page + 1, self.page_count)
@@ -681,8 +983,16 @@ class PdfView(QGraphicsView):
         self._update_measure_badge()
         self._hide_link_badge()
         self.viewport().update()
-        if self._visible_page_needs_rerender():
-            if not self._performance_mode:
+        value = self.verticalScrollBar().value()
+        jump = abs(value - self._last_scroll_value)
+        self._last_scroll_value = value
+        if self._visible_page_needs_rerender() and not self._performance_mode:
+            if jump > self.viewport().height() // 2:
+                # Flick or scrollbar drag: pages fly past, so wait until it slows down
+                # (debounce); rendering them would only stall the scroll.
+                self._rerender_timer.start(40)
+            elif not self._rerender_timer.isActive():
+                # Wheel or keyboard steps: throttle, so pages fill in while scrolling.
                 self._rerender_timer.start(40)
 
     def set_zoom(
@@ -759,19 +1069,33 @@ class PdfView(QGraphicsView):
 
     def _fit_reference_rect(self) -> QRectF | None:
         """Return the page rect used to compute fit zoom. Prefers current page so
-        mixed-page-size documents (covers, landscape inserts) fit correctly."""
+        mixed-page-size documents (covers, landscape inserts) fit correctly. In the
+        two-page modes this is the current spread (a lone page keeps its half)."""
         if not self._pages:
             return None
         idx = self.current_page
         if not (0 <= idx < len(self._pages)):
             idx = 0
+        if self._is_two_up() and self._layout is not None:
+            row = self._row_pages(self._page_row[idx])
+            rects = [self._pages[i].page_rect for i in row]
+            height = max(r.height() for r in rects)
+            if len(rects) == 2:
+                width = rects[0].width() + rects[1].width()
+            else:
+                width = 2 * rects[0].width()
+            return QRectF(0, 0, width, height)
         return self._pages[idx].page_rect
+
+    def _fit_gap(self) -> float:
+        """Unzoomed space between the two pages of a spread, excluded from fit zoom."""
+        return float(self.PAGE_GAP) if self._is_two_up() else 0.0
 
     def fit_width(self):
         page_rect = self._fit_reference_rect()
         if page_rect is None or page_rect.width() <= 0:
             return
-        view_width = max(40, self.viewport().width() - 40)
+        view_width = max(40, self.viewport().width() - 40 - self._fit_gap())
         self.set_zoom(
             view_width / page_rect.width(),
             immediate=True,
@@ -783,7 +1107,7 @@ class PdfView(QGraphicsView):
         page_rect = self._fit_reference_rect()
         if page_rect is None or page_rect.width() <= 0 or page_rect.height() <= 0:
             return
-        view_w = max(40, self.viewport().width() - 40)
+        view_w = max(40, self.viewport().width() - 40 - self._fit_gap())
         view_h = max(40, self.viewport().height() - 40)
         scale_w = view_w / page_rect.width()
         scale_h = view_h / page_rect.height()
@@ -804,20 +1128,107 @@ class PdfView(QGraphicsView):
         return None
 
     def go_to_page(self, page_num: int):
+        """Jump to *page_num* (zero-based); recorded in the back/forward history."""
+        self._record_jump(lambda: self._scroll_to_page(page_num))
+
+    def _scroll_to_page(self, page_num: int, offset: float = 0.0) -> None:
+        """Scroll so *page_num*'s top (plus *offset* scene units) is at the viewport top."""
         if 0 <= page_num < len(self._page_positions):
-            self.verticalScrollBar().setValue(int(self._page_positions[page_num]))
+            if self._is_paged():
+                self._show_single_row(self._page_row[page_num])
+            self.verticalScrollBar().setValue(int(self._page_positions[page_num] + offset))
+
+    def _step_row(self, delta: int) -> bool:
+        """Move by *delta* rows (pages, or spreads in the two-page modes)."""
+        if not self._pages or self._layout is None:
+            return False
+        row = self._page_row[self.current_page] + delta
+        if not 0 <= row < len(self._layout.rows):
+            return False
+        self._scroll_to_page(self._layout.rows[row][0])
+        return True
 
     def next_page(self):
-        self.go_to_page(self.current_page + 1)
+        self._step_row(1)
 
     def prev_page(self):
-        self.go_to_page(self.current_page - 1)
+        self._step_row(-1)
 
     def first_page(self):
         self.go_to_page(0)
 
     def last_page(self):
         self.go_to_page(self.page_count - 1)
+
+    # ------------------------------------------------------------------
+    # Back / forward history
+    # ------------------------------------------------------------------
+
+    def _current_location(self) -> HistoryEntry | None:
+        """Where the viewport top is: page index, offset into that page (points), zoom."""
+        if not self._page_positions:
+            return None
+        top = float(self.verticalScrollBar().value())
+        idx = max(0, bisect_right(self._page_positions, top) - 1)
+        idx = min(idx, len(self._page_positions) - 1)
+        return HistoryEntry(idx, (top - self._page_positions[idx]) / self._zoom, self._zoom)
+
+    def _record_jump(self, jump):
+        """Run *jump* and, if it moved the view, record before/after in the history.
+
+        Nested jumps (go_to_page inside a link jump) and history restores record nothing.
+        """
+        if self._restoring_history or self._jump_depth:
+            return jump()
+        before = self._current_location()
+        self._jump_depth += 1
+        try:
+            result = jump()
+        finally:
+            self._jump_depth -= 1
+        after = self._current_location()
+        if before is not None and after is not None and not before.same_place(after):
+            self._history.push(before)
+            self._history.push(after)
+        return result
+
+    def _restore_location(self, entry: HistoryEntry) -> None:
+        if not self._page_positions:
+            return
+        self._restoring_history = True
+        try:
+            if abs(entry.zoom - self._zoom) >= 1e-3:
+                self.set_zoom(entry.zoom, immediate=True, zoom_mode=self.ZOOM_MODE_CUSTOM)
+            idx = min(max(entry.page_index, 0), len(self._page_positions) - 1)
+            self._scroll_to_page(idx, entry.scroll_y * self._zoom)
+        finally:
+            self._restoring_history = False
+
+    def can_go_back(self) -> bool:
+        return self._history.can_go_back()
+
+    def can_go_forward(self) -> bool:
+        return self._history.can_go_forward()
+
+    def go_back(self) -> bool:
+        """Return to the location before the last jump. False if there is none."""
+        if not self._history.can_go_back():
+            return False
+        entry = self._history.back(current=self._current_location())
+        if entry is None:
+            return False
+        self._restore_location(entry)
+        return True
+
+    def go_forward(self) -> bool:
+        """Redo the jump undone by go_back. False if there is none."""
+        if not self._history.can_go_forward():
+            return False
+        entry = self._history.forward(current=self._current_location())
+        if entry is None:
+            return False
+        self._restore_location(entry)
+        return True
 
     def _clear_selection(self):
         if self._selection:
@@ -914,7 +1325,9 @@ class PdfView(QGraphicsView):
                 item.set_selected_highlight(item.annotation_id == ann_id)
 
     def scroll_to_page_y(self, page_idx: int, y: float):
-        self._scroll_to_destination(page_idx, y, y_is_pdf_coords=False)
+        self._record_jump(
+            lambda: self._scroll_to_destination(page_idx, y, y_is_pdf_coords=False)
+        )
 
     def _annotation_hit_at_scene_pos(self, scene_pos: QPointF) -> str | None:
         for item in self._scene.items(scene_pos):
@@ -1154,6 +1567,9 @@ class PdfView(QGraphicsView):
         return bool(self._text_highlight_items)
 
     def scroll_to_rect(self, page_idx: int, rect: fitz.Rect):
+        self._record_jump(lambda: self._scroll_to_rect(page_idx, rect))
+
+    def _scroll_to_rect(self, page_idx: int, rect: fitz.Rect):
         if 0 <= page_idx < len(self._pages):
             page = self._pages[page_idx]
             y = page.pos().y() + rect.y0 * self._zoom - 40
@@ -1161,6 +1577,8 @@ class PdfView(QGraphicsView):
 
     def _get_page_at(self, scene_pos: QPointF) -> int:
         for i, page in enumerate(self._pages):
+            if not page.isVisible():
+                continue  # single mode: only the shown page can be hit
             rect = QRectF(page.pos(), page.page_rect.size() * self._zoom)
             if rect.contains(scene_pos):
                 return i
@@ -1176,6 +1594,8 @@ class PdfView(QGraphicsView):
         best_idx = 0
         best_dist = float("inf")
         for i, page in enumerate(self._pages):
+            if not page.isVisible():
+                continue
             page_top = page.pos().y()
             page_bottom = page_top + page.page_rect.height() * self._zoom
             if page_top <= y <= page_bottom:
@@ -1367,7 +1787,7 @@ class PdfView(QGraphicsView):
         if page_idx < 0 or page_idx >= len(self._page_links):
             return None
         page_pos = self._scene_to_page(scene_pos, page_idx)
-        for rect, link in self._page_links[page_idx]:
+        for rect, link in self._links_for_page(page_idx):
             if rect.contains(page_pos):
                 return {"page_idx": page_idx, "rect": rect, "link": link}
         return None
@@ -1459,6 +1879,9 @@ class PdfView(QGraphicsView):
     def _activate_link(self, link_info: dict):
         if not link_info:
             return
+        self._record_jump(lambda: self._follow_link(link_info))
+
+    def _follow_link(self, link_info: dict):
         link = link_info["link"]
         self._hide_link_badge()
 
@@ -1906,7 +2329,30 @@ class PdfView(QGraphicsView):
                 )
             e.accept()
             return
+        if self._is_paged() and self._flip_page_at_edge(e):
+            e.accept()
+            return
         super().wheelEvent(e)
+
+    PAGE_FLIP_COOLDOWN_S = 0.3
+
+    def _flip_page_at_edge(self, e: QWheelEvent) -> bool:
+        """Single mode: scrolling past the top/bottom of the page turns the page."""
+        delta = e.angleDelta().y() or e.pixelDelta().y()
+        if delta == 0:
+            return False
+        bar = self.verticalScrollBar()
+        now = time.monotonic()
+        if delta < 0 and bar.value() >= bar.maximum():
+            if now - self._last_page_flip >= self.PAGE_FLIP_COOLDOWN_S and self._step_row(1):
+                self._last_page_flip = now
+            return True
+        if delta > 0 and bar.value() <= bar.minimum():
+            if now - self._last_page_flip >= self.PAGE_FLIP_COOLDOWN_S and self._step_row(-1):
+                self._last_page_flip = now
+                bar.setValue(bar.maximum())  # continue reading from the bottom
+            return True
+        return False
 
     def _zoom_at_viewport_point(self, viewport_pos: QPoint, factor: float) -> None:
         """Multiply zoom by ``factor`` while keeping the content under ``viewport_pos`` fixed."""
@@ -2076,6 +2522,11 @@ class PdfView(QGraphicsView):
                     if total and total > 0:
                         self.set_zoom(self._pinch_start_zoom * total, zoom_mode=self.ZOOM_MODE_CUSTOM)
                 return True
+        dpr_change = getattr(QEvent.Type, "DevicePixelRatioChange", None)
+        if e.type() == QEvent.Type.ScreenChangeInternal or (dpr_change and e.type() == dpr_change):
+            # Moved to a screen with another devicePixelRatio: re-render at its resolution.
+            if self._pages and not self._performance_mode:
+                self._rerender_timer.start(40)
         return super().event(e)
 
     def resizeEvent(self, e):
@@ -2108,14 +2559,14 @@ class PdfView(QGraphicsView):
         if page_rect is None or page_rect.width() <= 0 or page_rect.height() <= 0:
             return
         if self._zoom_mode == self.ZOOM_MODE_FIT_WIDTH:
-            view_width = max(40, self.viewport().width() - 40)
+            view_width = max(40, self.viewport().width() - 40 - self._fit_gap())
             self.set_zoom(
                 view_width / page_rect.width(),
                 zoom_mode=self.ZOOM_MODE_FIT_WIDTH,
                 force_if_close=force_if_close,
             )
         elif self._zoom_mode == self.ZOOM_MODE_FIT_PAGE:
-            view_w = max(40, self.viewport().width() - 40)
+            view_w = max(40, self.viewport().width() - 40 - self._fit_gap())
             view_h = max(40, self.viewport().height() - 40)
             self.set_zoom(
                 min(view_w / page_rect.width(), view_h / page_rect.height()),

@@ -90,7 +90,20 @@ def main() -> int:
     results = []
     shot_no = [0]
 
+    def settle_renders(timeout_s: float = 10.0) -> None:
+        """Pump until the current view has no queued page renders (pages render async)."""
+        view = win.current_view()
+        pending = getattr(view, "pending_render_count", None)
+        if not callable(pending):
+            return
+        end = time.monotonic() + timeout_s
+        while pending() and time.monotonic() < end:
+            app.processEvents()
+            time.sleep(0.005)
+        app.processEvents()
+
     def shot(name: str) -> str:
+        settle_renders()
         shot_no[0] += 1
         path = out / f"{shot_no[0]:02d}-{name}.png"
         win.grab().save(str(path))
