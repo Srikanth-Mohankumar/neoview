@@ -55,7 +55,7 @@ where = ["src"]
 "" = "src"
 
 [tool.setuptools.package-data]
-neoview = ["assets/*.png", "assets/*.ico"]
+neoview = ["assets/*.png", "assets/*.ico", "assets/fonts/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
