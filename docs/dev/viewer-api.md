@@ -123,9 +123,11 @@ from neoview.ui.printing import print_document
 ok = print_document(self, view.doc_path(), view.current_page(), view.document_password())
 ```
 
-Disabled when the tab has no document. `print_document` shows the dialog, returns False when
-cancelled, and raises `PermissionError` only if the password is wrong (cannot happen when it
-comes from the view). Show "Printed N pages"/nothing on the status bar; no message on cancel.
+Disabled when the tab has no document. `print_document` shows the dialog and returns False
+when cancelled. It re-opens the file from disk, so it can raise in normal use: during a LaTeX
+rebuild the PDF may be truncated or missing (fitz errors), or re-encrypted (`PermissionError`).
+Wrap the call in `try/except Exception` and report the error on the status bar or in a
+message box. No message on cancel.
 
 ### Presentation (F5, View > Presentation, toolbar `maximize` icon)
 
@@ -137,7 +139,9 @@ self._presentation = win   # keep a reference while open
 win.present()
 ```
 
-Disabled when the tab has no document. Only one presentation at a time; F5 while one is open
+The constructor also re-opens the file from disk and can raise for the same reasons as
+printing (`PermissionError`, fitz errors, `ValueError` for a PDF with no pages); wrap it the
+same way. Disabled when the tab has no document. Only one presentation at a time; F5 while one is open
 focuses it. Esc inside the window closes it and the viewer follows to the last shown page.
 
 ### Suggested menu/toolbar wiring
