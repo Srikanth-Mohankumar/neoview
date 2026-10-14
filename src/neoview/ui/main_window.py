@@ -12,6 +12,7 @@ from collections import deque
 from uuid import uuid4
 
 import fitz
+import shiboken6
 from PySide6.QtCore import (
     QEvent,
     QFileSystemWatcher,
@@ -34,18 +35,17 @@ from PySide6.QtGui import (
     QIcon,
     QImage,
     QKeySequence,
+    QPainter,
     QPixmap,
     QWindowStateChangeEvent,
 )
 from PySide6.QtWidgets import (
     QApplication,
-    QButtonGroup,
-    QCheckBox,
     QComboBox,
     QDialog,
     QDockWidget,
     QFileDialog,
-    QFrame,
+    QGridLayout,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -57,8 +57,6 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSizePolicy,
-    QStatusBar,
-    QStyle,
     QTabWidget,
     QToolBar,
     QToolButton,
@@ -68,6 +66,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from neoview import theme
 from neoview.models.view_state import AnnotationRecord, BookmarkRecord, SearchMatch, TabContext
 from neoview.persistence.sidecar_store import (
     clamp_sidecar_for_page_count,
@@ -75,62 +74,28 @@ from neoview.persistence.sidecar_store import (
     save_sidecar,
 )
 from neoview.resources import load_app_icon
+from neoview.ui import icons, password, presentation, printing
+from neoview.ui.annotation_io import export_annotated_pdf, load_native_annotations
 from neoview.ui.annotation_toolbar import AnnotationToolbar
-from neoview.ui.dialogs import ExportDialog, LayoutGridDialog
+from neoview.ui.chrome import HIT_TARGET, TOOLBAR_ICON, IconBinder, install_chrome_stylesheet
+from neoview.ui.dialogs import AnnotationPropertiesDialog, ExportDialog, LayoutGridDialog
+from neoview.ui.inspector import InspectorPanel, PanelTitleBar
+from neoview.ui.page_modes import apply_color_mode
 from neoview.ui.pdf_view import PdfView, ToolMode
-from neoview.utils.units import format_size
+from neoview.ui.sidebar import Sidebar
+from neoview.ui.statusbar import ViewerStatusBar
+from neoview.ui.toolbar import (
+    ZOOM_FIT_PAGE,
+    ZOOM_FIT_WIDTH,
+    PageField,
+    SearchField,
+    ToolSegment,
+    ZoomBox,
+)
+from neoview.ui.welcome import WelcomePanel
+from neoview.utils.units import UNIT_LABELS, UNITS, format_length, format_size, normalize_unit
 
 APP_NAME = "NeoView"
-
-
-class CollapsibleSection(QWidget):
-    """Simple expandable/collapsible content section."""
-
-    def __init__(self, title: str, parent=None):
-        super().__init__(parent)
-
-        root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
-
-        self._header = QToolButton(self)
-        self._header.setText(title)
-        self._header.setObjectName("InspectorSectionHeader")
-        self._header.setCheckable(True)
-        self._header.setChecked(True)
-        self._header.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        self._header.setArrowType(Qt.ArrowType.DownArrow)
-        self._header.clicked.connect(self._on_toggled)
-
-        self._content = QWidget()
-        self._content.setObjectName("InspectorSectionContent")
-        self._content_layout = QVBoxLayout(self._content)
-        self._content_layout.setContentsMargins(0, 2, 0, 6)
-        self._content_layout.setSpacing(6)
-
-        root.addWidget(self._header)
-        root.addWidget(self._content)
-
-    @property
-    def content_layout(self) -> QVBoxLayout:
-        return self._content_layout
-
-    def _on_toggled(self, expanded: bool):
-        self._header.setArrowType(Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow)
-        self._content.setVisible(expanded)
-
-
-def _page_may_have_annots(doc: fitz.Document, page_idx: int) -> bool:
-    """Cheap check of a page's /Annots entry without loading the page.
-
-    Returns True when the page might carry annotations (or when the check itself
-    fails, e.g. a non-PDF document), so callers fall back to loading the page.
-    """
-    try:
-        kind, _value = doc.xref_get_key(doc.page_xref(page_idx), "Annots")
-    except Exception:
-        return True
-    return kind != "null"
 
 
 class MainWindow(QMainWindow):
@@ -144,12 +109,7 @@ class MainWindow(QMainWindow):
     SEARCH_SYNC_PAGE_THRESHOLD = 8
     SEARCH_BATCH_PAGES = 2
     SEARCH_BATCH_TIME_BUDGET_MS = 18.0
-
-    # Inspector tab indices — must match the order tabs are added in _setup_docks
-    _INSPECTOR_TAB_MEASURE = 0
-    _INSPECTOR_TAB_FONT = 1
-    _INSPECTOR_TAB_ANNOTATIONS = 2
-    _INSPECTOR_TAB_DOCUMENT = 3
+    THUMB_BOX = QSize(112, 148)  # thumbnail fits in this box, aspect preserved
 
     def __init__(self, pdf_path: str | None = None):
         super().__init__()
@@ -173,6 +133,7 @@ class MainWindow(QMainWindow):
 
         self._zoom_combo_updating = False
         self._search_input_updating = False
+        self._unit = normalize_unit(self._settings.value("view/unit", "pt", type=str))
         self._auto_reload_enabled = self._settings.value("view/auto_reload", True, type=bool)
         self._show_rulers = self._settings.value("view/show_rulers", False, type=bool)
         self._layout_grid = {
@@ -233,6 +194,7 @@ class MainWindow(QMainWindow):
         # refreshes every panel itself afterwards. See _on_view_document_loaded.
         self._open_in_progress = False
         self._last_maximize_at: float = 0.0
+        self._presentation: presentation.PresentationWindow | None = None
 
         self._setup_ui()
         self._restore_persistent_ui()
@@ -261,6 +223,13 @@ class MainWindow(QMainWindow):
         return ctx
 
     def _setup_ui(self):
+        # Icons are tinted for the active theme; the binder re-tints them on a theme switch.
+        self._icons = IconBinder()
+        # Before any icon is bound, so the first tint is already the right one.
+        self._theme_choice = self._startup_theme_choice()
+        install_chrome_stylesheet(QApplication.instance(), theme.current_mode())
+        self.setDockOptions(QMainWindow.DockOption.AnimatedDocks)
+
         self._tabs = QTabWidget(self)
         self._tabs.setObjectName("DocumentTabs")
         self._tabs.setTabsClosable(True)
@@ -270,10 +239,28 @@ class MainWindow(QMainWindow):
         self._tabs.installEventFilter(self)
         self._tabs.currentChanged.connect(self._on_tab_changed)
         self._tabs.tabCloseRequested.connect(self._close_tab_index)
-        self.setCentralWidget(self._tabs)
+        # Document tabs appear only once a second document is open: one document needs no
+        # tab strip (the title bar names it), and the canvas keeps those 30 px.
+        self._tabs.setTabBarAutoHide(True)
+        self._tabs.tabBar().installEventFilter(self)  # middle-click closes a tab
+
+        # The welcome panel shares the tab widget's grid cell and covers it while no
+        # document is open. The tab widget stays laid out underneath, so the first
+        # document opens into a view that already has its real size (fit width needs it).
+        self._welcome = WelcomePanel(self._icons, self)
+        self._welcome.open_requested.connect(self._open_dialog)
+        self._welcome.recent_requested.connect(self._open_file)
+        central = QWidget(self)
+        central.setObjectName("CentralArea")
+        grid = QGridLayout(central)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.addWidget(self._tabs, 0, 0)
+        grid.addWidget(self._welcome, 0, 0)
+        self.setCentralWidget(central)
 
         self._create_tab()
 
+        self._setup_actions()
         self._setup_menus()
         self._setup_toolbar()
         self._setup_annotation_toolbar()
@@ -300,6 +287,17 @@ class MainWindow(QMainWindow):
         view.annotation_created.connect(lambda rec, v=view: self._on_view_annotation_created(v, rec))
         view.annotation_deleted.connect(lambda ann_id, v=view: self._on_view_annotation_deleted(v, ann_id))
         view.annotation_edit_requested.connect(lambda ann_id, v=view: self._on_view_annotation_edit_requested(v, ann_id))
+        # Phase B viewer API (docs/dev/viewer-api.md): connect only what this PdfView has.
+        for name in ("page_mode_changed", "color_mode_changed", "history_changed"):
+            signal = getattr(view, name, None)
+            if signal is not None:
+                signal.connect(lambda *_args, v=view: self._on_view_capability_changed(v))
+        color_signal = getattr(view, "color_mode_changed", None)
+        if color_signal is not None:
+            color_signal.connect(lambda _mode, v=view: self._on_view_color_mode_changed(v))
+        password_signal = getattr(view, "password_required", None)
+        if password_signal is not None:
+            password_signal.connect(lambda path, v=view: self._on_view_password_required(v, path))
 
         timer = QTimer(self)
         timer.setSingleShot(True)
@@ -343,16 +341,14 @@ class MainWindow(QMainWindow):
             return
 
         self._load_search_from_context()
+        # _refresh_document_info rebuilds the outline, thumbnails and annotation list
+        # (or clears them for an empty tab); calling them here again did it twice.
         self._refresh_document_info()
-        self._populate_outline()
-        self._populate_thumbnails()
-        self._populate_annotation_list()
         self._update_status()
 
-        if hasattr(self, "_perf_action"):
-            if isinstance(view, PdfView):
-                view.set_performance_mode(self._perf_action.isChecked())
-            self._update_perf_status()
+        if isinstance(view, PdfView):
+            view.set_performance_mode(self._perf_action.isChecked())
+        self._update_perf_status()
 
     def _close_tab_index(self, index: int):
         widget = self._tabs.widget(index)
@@ -428,340 +424,477 @@ class MainWindow(QMainWindow):
         self._tabs.setTabText(idx, title)
         self._tabs.setTabToolTip(idx, ctx.file_path or "")
 
-    def _setup_menus(self):
-        file_m = self.menuBar().addMenu("&File")
-        self._open_action = self._action("&Open...", self._open_dialog, QKeySequence.StandardKey.Open)
-        file_m.addAction(self._open_action)
+    # --------------------------- Actions, menus, toolbar ---------------------------
+    def _action(
+        self,
+        text: str,
+        slot,
+        shortcut=None,
+        *,
+        icon: str | None = None,
+        tip: str | None = None,
+        name: str | None = None,
+        checkable: bool = False,
+    ) -> QAction:
+        """Create a window-level action; the tooltip names its shortcut, e.g. "Zoom in (Ctrl++)"."""
+        action = QAction(text, self)
+        action.triggered.connect(slot)
+        if shortcut:
+            if isinstance(shortcut, (list, tuple)):
+                action.setShortcuts([QKeySequence(s) for s in shortcut])
+            else:
+                action.setShortcut(shortcut)
+        if icon:
+            self._icons.bind(action, icon)
+        if name:
+            action.setObjectName(name)
+        action.setCheckable(checkable)
+        label = tip or text.replace("&", "").removesuffix("...")
+        keys = action.shortcut().toString(QKeySequence.SequenceFormat.NativeText)
+        action.setToolTip(f"{label} ({keys})" if keys else label)
+        # Window-level so shortcuts work for actions that live only in the toolbar or
+        # the overflow menu.
+        self.addAction(action)
+        return action
 
-        self._recent_menu = file_m.addMenu("Open &Recent")
-        self._rebuild_recent_menu()
+    def _setup_actions(self):
+        view = self.current_view
 
-        self._close_tab_action = self._action("Close &Tab", self._close_current_tab, "Ctrl+W")
-        file_m.addAction(self._close_tab_action)
+        # File
+        self._open_action = self._action(
+            "&Open...", self._open_dialog, QKeySequence.StandardKey.Open, icon="folder-open", tip="Open"
+        )
+        self._close_tab_action = self._action("&Close", self._close_current_tab, "Ctrl+W", tip="Close document")
+        self._reload_action = self._action("&Reload", self._force_reload, "Ctrl+Shift+R", icon="refresh-cw")
+        self._export_action = self._action(
+            "&Export Selection as PNG...", self._export, QKeySequence.StandardKey.Save, icon="image-down",
+            tip="Export measured area as PNG",
+        )
+        self._export_annot_action = self._action(
+            "Export PDF with &Annotations...", self._export_pdf_with_annotations, icon="file-down"
+        )
+        self._quit_action = self._action("&Quit", self.close, QKeySequence.StandardKey.Quit)
+        self._print_action = self._action(
+            "&Print...", self._print_document, QKeySequence.StandardKey.Print, icon="printer",
+            name="action_print", tip="Print",
+        )
 
-        self._reload_action = self._action("&Reload", self._force_reload, "F5")
-        file_m.addAction(self._reload_action)
-        file_m.addSeparator()
+        # Edit
+        self._copy_action = self._action(
+            "&Copy Measurements", self._copy, QKeySequence.StandardKey.Copy, icon="copy"
+        )
+        self._find_action = self._action("&Find...", self._show_find, "Ctrl+F", icon="search", tip="Find")
+        self._find_next_action = self._action("Find &Next", self._find_next, "F3", tip="Next match")
+        self._find_prev_action = self._action(
+            "Find &Previous", self._find_prev, "Shift+F3", tip="Previous match"
+        )
+        self._clear_selection_action = self._action("C&lear Selection", self._on_escape, "Escape")
 
-        self._export_action = self._action("&Export Selection...", self._export, QKeySequence.StandardKey.Save)
-        file_m.addAction(self._export_action)
-        file_m.addSeparator()
-        file_m.addAction(self._action("E&xit", self.close, QKeySequence.StandardKey.Quit))
+        # View: panels
+        self._sidebar_action = self._action(
+            "&Sidebar", self._toggle_sidebar, "F9", icon="panel-left", checkable=True, tip="Sidebar"
+        )
+        self._thumbs_panel_action = self._action(
+            "&Thumbnails", lambda: self._toggle_sidebar_page("thumbnails"), "Ctrl+Shift+T", icon="layout-grid"
+        )
+        self._outline_panel_action = self._action(
+            "&Outline", lambda: self._toggle_sidebar_page("outline"), "Ctrl+Shift+O", icon="list-tree"
+        )
+        self._bookmarks_panel_action = self._action(
+            "&Bookmarks", lambda: self._toggle_sidebar_page("bookmarks"), "Ctrl+Shift+B", icon="bookmark"
+        )
+        self._annotations_panel_action = self._action(
+            "&Annotations", lambda: self._toggle_sidebar_page("annotations"), "Ctrl+Shift+A",
+            icon="message-square-text",
+        )
+        self._search_panel_action = self._action(
+            "Search &Results", self._toggle_search_dock, "Ctrl+Shift+F", icon="list", checkable=True
+        )
+        self._inspector_action = self._action(
+            "&Inspector", self._toggle_info_dock, "Ctrl+Shift+I", icon="panel-right", checkable=True
+        )
 
-        edit_m = self.menuBar().addMenu("&Edit")
-        self._copy_action = self._action("&Copy Measurements", self._copy, QKeySequence.StandardKey.Copy)
-        edit_m.addAction(self._copy_action)
-        self._find_action = self._action("&Find...", self._show_find, "Ctrl+F")
-        edit_m.addAction(self._find_action)
-        edit_m.addAction(self._action("C&lear Selection", lambda: self.current_view().clear_all_selection(), "Escape"))
-
-        view_m = self.menuBar().addMenu("&View")
+        # View: zoom
         self._zoom_in_action = self._action(
-            "Zoom &In", lambda: self.current_view().zoom_by(1.25), QKeySequence.StandardKey.ZoomIn
+            "Zoom &In", lambda: view().zoom_by(1.25), ["Ctrl++", "Ctrl+="], icon="zoom-in"
         )
-        self._zoom_out_action = self._action(
-            "Zoom &Out", lambda: self.current_view().zoom_by(0.8), QKeySequence.StandardKey.ZoomOut
+        self._zoom_out_action = self._action("Zoom &Out", lambda: view().zoom_by(0.8), "Ctrl+-", icon="zoom-out")
+        self._actual_size_action = self._action(
+            "&Actual Size", lambda: view().actual_size(), "Ctrl+0", icon="scan"
         )
-        self._fit_width_action = self._action("Fit &Width", lambda: self.current_view().fit_width(), "W")
-        self._fit_page_action = self._action("Fit &Page", lambda: self.current_view().fit_page(), "F")
-        self._actual_size_action = self._action("&Actual Size", lambda: self.current_view().actual_size(), "Ctrl+1")
+        self._fit_width_action = self._action(
+            "Fit &Width", lambda: view().fit_width(), ["Ctrl+1", "W"], icon="move-horizontal"
+        )
+        self._fit_page_action = self._action(
+            "Fit &Page", lambda: view().fit_page(), ["Ctrl+2", "F"], icon="expand"
+        )
 
-        view_m.addAction(self._zoom_in_action)
-        view_m.addAction(self._zoom_out_action)
-        view_m.addSeparator()
-        view_m.addAction(self._fit_width_action)
-        view_m.addAction(self._fit_page_action)
-        view_m.addAction(self._actual_size_action)
-        view_m.addSeparator()
-        view_m.addAction(self._action("Rotate &Left", lambda: self.current_view().rotate_by(-90), "Ctrl+L"))
-        view_m.addAction(self._action("Rotate &Right", lambda: self.current_view().rotate_by(90), "Ctrl+R"))
-        view_m.addAction(self._action("Reset &Rotation", lambda: self.current_view().set_rotation(0), "Ctrl+0"))
-        view_m.addSeparator()
-        self._fullscreen_action = self._action("&Toggle Full Screen", self._toggle_fullscreen, "F11")
-        view_m.addAction(self._fullscreen_action)
-        view_m.addAction(self._action("Reset Window &Layout", self._reset_window_layout))
-        view_m.addSeparator()
-        self._perf_action = QAction("Performance Mode", self)
-        self._perf_action.setCheckable(True)
-        self._perf_action.setStatusTip("Pause rendering during zoom/scroll — reduces CPU on large PDFs")
-        self._perf_action.triggered.connect(self._on_performance_mode_toggled)
-        view_m.addAction(self._perf_action)
-        self._rulers_action = QAction("Show Rulers", self)
-        self._rulers_action.setCheckable(True)
+        # View: rotation, overlays, window
+        self._rotate_left_action = self._action(
+            "Rotate &Left", lambda: view().rotate_by(-90), "Ctrl+L", icon="rotate-ccw"
+        )
+        self._rotate_right_action = self._action(
+            "Rotate &Right", lambda: view().rotate_by(90), "Ctrl+R", icon="rotate-cw"
+        )
+        self._reset_rotation_action = self._action("Reset R&otation", lambda: view().set_rotation(0))
+        self._rulers_action = self._action("Show &Rulers", self._toggle_rulers, icon="ruler", checkable=True)
         self._rulers_action.setChecked(self._show_rulers)
-        self._rulers_action.triggered.connect(self._toggle_rulers)
-        view_m.addAction(self._rulers_action)
-        self._layout_grid_action = QAction("Show Layout Grid", self)
-        self._layout_grid_action.setCheckable(True)
-        self._layout_grid_action.setChecked(bool(self._layout_grid.get("enabled", False)))
-        self._layout_grid_action.triggered.connect(self._toggle_layout_grid)
-        view_m.addAction(self._layout_grid_action)
-        self._layout_grid_settings_action = self._action("Layout Grid Settings...", self._show_layout_grid_dialog)
-        view_m.addAction(self._layout_grid_settings_action)
-
-        go_m = self.menuBar().addMenu("&Go")
-        go_m.addAction(self._action("&Previous Page", lambda: self.current_view().prev_page(), "PgUp"))
-        go_m.addAction(self._action("&Next Page", lambda: self.current_view().next_page(), "PgDown"))
-        go_m.addAction(self._action("&First Page", lambda: self.current_view().first_page(), "Home"))
-        go_m.addAction(self._action("&Last Page", lambda: self.current_view().last_page(), "End"))
-        go_m.addSeparator()
-        self._next_tab_action = self._action("Next Ta&b", self._switch_to_next_tab)
-        self._next_tab_action.setShortcuts(
-            [
-                QKeySequence("Ctrl+Tab"),
-                QKeySequence("Ctrl+PgDown"),
-            ]
+        self._layout_grid_action = self._action(
+            "Show Layout &Grid", self._toggle_layout_grid, icon="layout-grid", checkable=True
         )
-        self._prev_tab_action = self._action("Previous T&ab", self._switch_to_previous_tab)
-        self._prev_tab_action.setShortcuts(
-            [
-                QKeySequence("Ctrl+Shift+Tab"),
-                QKeySequence("Ctrl+PgUp"),
-            ]
+        self._layout_grid_action.setChecked(bool(self._layout_grid.get("enabled", False)))
+        self._layout_grid_settings_action = self._action("Layout Grid Settings...", self._show_layout_grid_dialog)
+        self._perf_action = self._action("Performance Mode", self._on_performance_mode_toggled, checkable=True)
+        self._perf_action.setStatusTip("Pause rendering during zoom/scroll - reduces CPU on large PDFs")
+        self._fullscreen_action = self._action("&Full Screen", self._toggle_fullscreen, "F11", icon="fullscreen")
+        self._presentation_action = self._action(
+            "&Presentation", self._start_presentation, "F5", icon="presentation", name="action_presentation"
+        )
+
+        # View: page layout and reading colours (Phase B PdfView API; disabled until present)
+        self._page_mode_group = QActionGroup(self)
+        self._page_mode_group.setExclusionPolicy(QActionGroup.ExclusionPolicy.ExclusiveOptional)
+        self._page_mode_actions: dict[str, QAction] = {}
+        for mode, label, glyph in (
+            ("single", "&Single Page", "file"),
+            ("continuous", "&Continuous", "rectangle-vertical"),
+            ("two-page", "&Two Pages", "columns-2"),
+            ("two-page-cover", "Two Pages with &Cover", "book-open"),
+        ):
+            act = self._action(
+                label, lambda _checked=False, m=mode: self._set_page_mode(m), icon=glyph,
+                name=f"action_page_mode_{mode.replace('-', '_')}", checkable=True,
+            )
+            self._page_mode_group.addAction(act)
+            self._page_mode_actions[mode] = act
+        self._color_mode_group = QActionGroup(self)
+        self._color_mode_group.setExclusionPolicy(QActionGroup.ExclusionPolicy.ExclusiveOptional)
+        self._color_mode_actions: dict[str, QAction] = {}
+        for mode, label in (("normal", "&Normal"), ("night", "N&ight"), ("sepia", "&Sepia")):
+            act = self._action(
+                label, lambda _checked=False, m=mode: self._set_color_mode(m),
+                name=f"action_color_mode_{mode}", checkable=True,
+            )
+            self._color_mode_group.addAction(act)
+            self._color_mode_actions[mode] = act
+        self._reset_layout_action = self._action("Reset Window &Layout", self._reset_window_layout)
+
+        # Go
+        self._prev_page_action = self._action(
+            "&Previous Page", lambda: view().prev_page(), "PgUp", icon="chevron-up"
+        )
+        self._next_page_action = self._action(
+            "&Next Page", lambda: view().next_page(), "PgDown", icon="chevron-down"
+        )
+        self._first_page_action = self._action(
+            "&First Page", lambda: view().first_page(), "Home", icon="chevron-first"
+        )
+        self._last_page_action = self._action("&Last Page", lambda: view().last_page(), "End", icon="chevron-last")
+        self._goto_page_action = self._action("&Go to Page...", self._focus_page_field, "Ctrl+G")
+        self._back_action = self._action(
+            "&Back", self._go_back, "Alt+Left", icon="arrow-left", name="action_go_back"
+        )
+        self._forward_action = self._action(
+            "&Forward", self._go_forward, "Alt+Right", icon="arrow-right", name="action_go_forward"
+        )
+        self._next_tab_action = self._action("Next Ta&b", self._switch_to_next_tab, ["Ctrl+Tab", "Ctrl+PgDown"])
+        self._prev_tab_action = self._action(
+            "Previous T&ab", self._switch_to_previous_tab, ["Ctrl+Shift+Tab", "Ctrl+PgUp"]
         )
         self._next_tab_action.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut)
         self._prev_tab_action.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut)
-        self.addAction(self._next_tab_action)
-        self.addAction(self._prev_tab_action)
-        go_m.addAction(self._next_tab_action)
-        go_m.addAction(self._prev_tab_action)
+        self._add_bookmark_action = self._action(
+            "Add &Bookmark...", self._add_bookmark, "Ctrl+D", icon="bookmark-plus", tip="Bookmark this page"
+        )
 
-        self._add_bookmark_action = self._action("Add &Bookmark", self._add_bookmark, "Ctrl+D")
-        go_m.addSeparator()
-        go_m.addAction(self._add_bookmark_action)
-
-        tools_m = self.menuBar().addMenu("&Tools")
+        # Tools
         self._tool_group = QActionGroup(self)
         self._tool_group.setExclusive(True)
-
-        self._select_action = self._action("&Select", lambda: self._set_tool(ToolMode.SELECT), "1")
-        self._select_action.setCheckable(True)
-        self._tool_group.addAction(self._select_action)
-        tools_m.addAction(self._select_action)
-
-        self._hand_action = self._action("&Hand", lambda: self._set_tool(ToolMode.HAND), "2")
-        self._hand_action.setCheckable(True)
+        self._select_action = self._action(
+            "&Select", lambda: self._on_tool_action(ToolMode.SELECT), "1", icon="mouse-pointer-2",
+            checkable=True, tip="Select text",
+        )
+        self._hand_action = self._action(
+            "&Hand", lambda: self._on_tool_action(ToolMode.HAND), "2", icon="hand", checkable=True,
+            tip="Hand (pan)",
+        )
+        self._measure_action = self._action(
+            "&Measure", lambda: self._on_tool_action(ToolMode.MEASURE), "3", icon="ruler-dimension-line",
+            checkable=True,
+        )
+        self._annotate_action = self._action(
+            "&Annotate", lambda: self._on_tool_action(ToolMode.ANNOTATE), "4", icon="pen-line",
+            checkable=True,
+        )
+        for act in (self._select_action, self._hand_action, self._measure_action, self._annotate_action):
+            self._tool_group.addAction(act)
         self._hand_action.setChecked(True)
-        self._tool_group.addAction(self._hand_action)
-        tools_m.addAction(self._hand_action)
 
-        self._measure_action = self._action("&Measure", lambda: self._set_tool(ToolMode.MEASURE), "3")
-        self._measure_action.setCheckable(True)
-        self._tool_group.addAction(self._measure_action)
-        tools_m.addAction(self._measure_action)
+        self._annot_highlight_action = self._action(
+            "Add &Highlight (selection)", self._add_highlight, "Ctrl+Shift+H", icon="highlighter"
+        )
+        self._annot_underline_action = self._action(
+            "Add &Underline (selection)", self._add_underline, "Ctrl+Shift+U", icon="underline"
+        )
+        self._annot_note_action = self._action(
+            "Add &Note (selection)", self._add_note, "Ctrl+Shift+N", icon="sticky-note"
+        )
 
-        self._annotate_action = self._action("&Annotate", lambda: self._set_tool(ToolMode.ANNOTATE), "4")
-        self._annotate_action.setCheckable(True)
-        self._tool_group.addAction(self._annotate_action)
-        tools_m.addAction(self._annotate_action)
+        self._unit_group = QActionGroup(self)
+        self._unit_group.setExclusive(True)
+        self._unit_actions: dict[str, QAction] = {}
+        for unit in UNITS:
+            act = self._action(
+                UNIT_LABELS[unit], lambda _checked=False, u=unit: self._set_unit(u),
+                name=f"action_unit_{unit}", checkable=True,
+            )
+            act.setData(unit)
+            act.setChecked(unit == self._unit)
+            self._unit_group.addAction(act)
+            self._unit_actions[unit] = act
 
+        self._about_action = self._action(f"&About {APP_NAME}", self._show_about, icon="info")
+
+        self._theme_group = QActionGroup(self)
+        self._theme_group.setExclusive(True)
+        self._theme_actions: dict[str, QAction] = {}
+        for choice, label, glyph in (
+            ("light", "&Light", "sun"), ("dark", "&Dark", "moon"), ("system", "&System", "sun-moon"),
+        ):
+            act = self._action(
+                label, lambda _checked=False, c=choice: self._set_theme(c), icon=glyph,
+                name=f"action_theme_{choice}", checkable=True, tip=f"{label.replace('&', '')} theme",
+            )
+            act.setChecked(choice == self._theme_choice)
+            self._theme_group.addAction(act)
+            self._theme_actions[choice] = act
+
+        # Actions that need an open document; see _update_action_states.
+        self._doc_actions = [
+            self._close_tab_action, self._reload_action, self._export_action, self._export_annot_action,
+            self._copy_action, self._find_next_action, self._find_prev_action,
+            self._zoom_in_action, self._zoom_out_action, self._actual_size_action, self._fit_width_action,
+            self._fit_page_action, self._rotate_left_action, self._rotate_right_action,
+            self._reset_rotation_action, self._prev_page_action, self._next_page_action,
+            self._first_page_action, self._last_page_action, self._goto_page_action,
+            self._add_bookmark_action, self._annot_highlight_action, self._annot_underline_action,
+            self._annot_note_action, self._select_action, self._hand_action, self._measure_action,
+            self._annotate_action,
+        ]
+
+    def _setup_menus(self):
+        bar = self.menuBar()
+
+        file_m = bar.addMenu("&File")
+        file_m.addAction(self._open_action)
+        self._recent_menu = file_m.addMenu("Open &Recent")
+        self._rebuild_recent_menu()
+        file_m.addAction(self._close_tab_action)
+        file_m.addAction(self._reload_action)
+        file_m.addSeparator()
+        file_m.addAction(self._print_action)
+        file_m.addAction(self._export_action)
+        file_m.addAction(self._export_annot_action)
+        file_m.addSeparator()
+        file_m.addAction(self._quit_action)
+        self._file_menu = file_m
+
+        edit_m = bar.addMenu("&Edit")
+        edit_m.addAction(self._copy_action)
+        edit_m.addAction(self._clear_selection_action)
+        edit_m.addSeparator()
+        edit_m.addAction(self._find_action)
+        edit_m.addAction(self._find_next_action)
+        edit_m.addAction(self._find_prev_action)
+        self._edit_menu = edit_m
+
+        view_m = bar.addMenu("&View")
+        view_m.addAction(self._sidebar_action)
+        panels_m = view_m.addMenu("Sidebar &Panel")
+        for act in (
+            self._thumbs_panel_action, self._outline_panel_action,
+            self._bookmarks_panel_action, self._annotations_panel_action,
+        ):
+            panels_m.addAction(act)
+        view_m.addAction(self._inspector_action)
+        view_m.addAction(self._search_panel_action)
+        view_m.addSeparator()
+        zoom_m = view_m.addMenu("&Zoom")
+        for act in (self._zoom_in_action, self._zoom_out_action):
+            zoom_m.addAction(act)
+        zoom_m.addSeparator()
+        for act in (self._actual_size_action, self._fit_width_action, self._fit_page_action):
+            zoom_m.addAction(act)
+        self._page_layout_menu = view_m.addMenu("Page &Layout")
+        for act in self._page_mode_actions.values():
+            self._page_layout_menu.addAction(act)
+        self._reading_mode_menu = view_m.addMenu("Reading &Mode")
+        for act in self._color_mode_actions.values():
+            self._reading_mode_menu.addAction(act)
+        rotate_m = view_m.addMenu("R&otate")
+        for act in (self._rotate_left_action, self._rotate_right_action, self._reset_rotation_action):
+            rotate_m.addAction(act)
+        view_m.addSeparator()
+        view_m.addAction(self._rulers_action)
+        view_m.addAction(self._layout_grid_action)
+        view_m.addAction(self._layout_grid_settings_action)
+        view_m.addAction(self._perf_action)
+        view_m.addSeparator()
+        view_m.addAction(self._fullscreen_action)
+        view_m.addAction(self._presentation_action)
+        view_m.addSeparator()
+        self._theme_menu = view_m.addMenu("T&heme")
+        for act in self._theme_actions.values():
+            self._theme_menu.addAction(act)
+        view_m.addAction(self._reset_layout_action)
+        self._view_menu = view_m
+
+        go_m = bar.addMenu("&Go")
+        for act in (self._first_page_action, self._prev_page_action, self._next_page_action, self._last_page_action):
+            go_m.addAction(act)
+        go_m.addAction(self._goto_page_action)
+        go_m.addSeparator()
+        go_m.addAction(self._back_action)
+        go_m.addAction(self._forward_action)
+        go_m.addSeparator()
+        go_m.addAction(self._add_bookmark_action)
+        go_m.addSeparator()
+        go_m.addAction(self._next_tab_action)
+        go_m.addAction(self._prev_tab_action)
+        self._go_menu = go_m
+
+        tools_m = bar.addMenu("&Tools")
+        for act in (self._select_action, self._hand_action, self._measure_action, self._annotate_action):
+            tools_m.addAction(act)
         tools_m.addSeparator()
-        self._annot_highlight_action = self._action("Add &Highlight (selection)", self._add_highlight, "Ctrl+Shift+H")
-        self._annot_underline_action = self._action("Add &Underline (selection)", self._add_underline, "Ctrl+Shift+U")
-        self._annot_note_action = self._action("Add &Note (selection)", self._add_note, "Ctrl+Shift+N")
-        tools_m.addAction(self._annot_highlight_action)
-        tools_m.addAction(self._annot_underline_action)
-        tools_m.addAction(self._annot_note_action)
-
+        for act in (self._annot_highlight_action, self._annot_underline_action, self._annot_note_action):
+            tools_m.addAction(act)
         tools_m.addSeparator()
-        self._export_annot_action = self._action("Export PDF with &Annotations", self._export_pdf_with_annotations)
-        tools_m.addAction(self._export_annot_action)
+        units_m = tools_m.addMenu("Measurement &Units")
+        for act in self._unit_actions.values():
+            units_m.addAction(act)
+        self._tools_menu = tools_m
 
-        tools_m.addSeparator()
-        tools_m.addAction(self._action("&Search Panel", self._toggle_search_dock, "Ctrl+Shift+F"))
-        tools_m.addAction(self._action("&Navigation Panel", self._toggle_outline_dock, "Ctrl+Shift+O"))
-        tools_m.addAction(self._action("&Thumbnails Panel", self._toggle_thumbs_dock, "Ctrl+Shift+T"))
-        tools_m.addAction(self._action("&Page Info Panel", self._toggle_info_dock, "Ctrl+Shift+I"))
-
-        self._open_action.setIcon(self._icon("document-open", QStyle.StandardPixmap.SP_DialogOpenButton))
-        self._zoom_out_action.setIcon(self._icon("zoom-out", QStyle.StandardPixmap.SP_ArrowDown))
-        self._zoom_in_action.setIcon(self._icon("zoom-in", QStyle.StandardPixmap.SP_ArrowUp))
-        self._fit_width_action.setIcon(self._icon("zoom-fit-width", QStyle.StandardPixmap.SP_TitleBarMaxButton))
-        self._fit_page_action.setIcon(self._icon("zoom-fit-best", QStyle.StandardPixmap.SP_DesktopIcon))
-        self._actual_size_action.setIcon(self._icon("zoom-original", QStyle.StandardPixmap.SP_ComputerIcon))
-        self._select_action.setIcon(self._icon("cursor-arrow", QStyle.StandardPixmap.SP_ArrowRight))
-        self._hand_action.setIcon(self._hand_icon())
-        self._measure_action.setIcon(self._icon("draw-rectangle", QStyle.StandardPixmap.SP_DialogApplyButton))
-        self._copy_action.setIcon(self._icon("edit-copy", QStyle.StandardPixmap.SP_FileIcon))
-        self._export_action.setIcon(self._icon("document-save", QStyle.StandardPixmap.SP_DialogSaveButton))
-        self._annot_highlight_action.setIcon(self._icon("format-text-highlight", QStyle.StandardPixmap.SP_DialogApplyButton))
-        self._annot_underline_action.setIcon(self._icon("format-text-underline", QStyle.StandardPixmap.SP_LineEditClearButton))
-        self._annot_note_action.setIcon(self._icon("insert-text", QStyle.StandardPixmap.SP_MessageBoxInformation))
-
-        self._open_action.setToolTip("Open PDF (Ctrl+O)")
-        self._zoom_out_action.setToolTip("Zoom out")
-        self._zoom_in_action.setToolTip("Zoom in")
-        self._fit_width_action.setToolTip("Fit width (W)")
-        self._actual_size_action.setToolTip("Actual size (Ctrl+1)")
-        self._select_action.setToolTip("Select tool (1)")
-        self._hand_action.setToolTip("Hand tool (2)")
-        self._measure_action.setToolTip("Measure tool (3)")
-        self._copy_action.setToolTip("Copy measurements (Ctrl+C)")
-        self._export_action.setToolTip("Export selection")
+        help_m = bar.addMenu("&Help")
+        help_m.addAction(self._about_action)
+        self._help_menu = help_m
 
     def _setup_toolbar(self):
-        tb = QToolBar("Main")
+        tb = QToolBar("Main toolbar", self)
         tb.setObjectName("MainToolbar")
         tb.setMovable(False)
+        tb.setFloatable(False)
+        tb.setContextMenuPolicy(Qt.ContextMenuPolicy.PreventContextMenu)
         tb.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
-        tb.setIconSize(QSize(18, 18))
+        tb.setIconSize(QSize(TOOLBAR_ICON, TOOLBAR_ICON))
         self.addToolBar(tb)
+        self._main_toolbar = tb
 
+        tb.addAction(self._sidebar_action)
+        tb.addSeparator()
         tb.addAction(self._open_action)
-
-        self._recent_btn = QToolButton(self)
-        self._recent_btn.setIcon(self._icon("document-open-recent", QStyle.StandardPixmap.SP_FileDialogDetailedView))
-        self._recent_btn.setToolTip("Open recent file")
-        self._recent_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        self._recent_btn.setMenu(self._recent_menu)
-        tb.addWidget(self._recent_btn)
+        tb.addAction(self._print_action)
         tb.addSeparator()
 
-        # -- Page navigation --
-        self._page_nav_combo = QComboBox(self)
-        self._page_nav_combo.setEditable(True)
-        self._page_nav_combo.setMinimumWidth(70)
-        self._page_nav_combo.setMaximumWidth(90)
-        self._page_nav_combo.setToolTip("Go to page (press Enter)")
-        # Commit on Enter or focus-out — typing "23" should not first jump to page 2.
-        page_line = self._page_nav_combo.lineEdit()
-        if page_line is not None:
-            page_line.returnPressed.connect(
-                lambda: self._on_page_nav_changed(self._page_nav_combo.currentText())
-            )
-            page_line.editingFinished.connect(
-                lambda: self._on_page_nav_changed(self._page_nav_combo.currentText())
-            )
-        tb.addWidget(self._page_nav_combo)
-
-        self._page_total_lbl = QLabel(" / 0 ")
-        self._page_total_lbl.setStyleSheet("color: #888; font-size: 11px; padding: 0 4px;")
-        tb.addWidget(self._page_total_lbl)
+        # -- Page navigation: [^] [ n ] / N [v]
+        tb.addAction(self._prev_page_action)
+        self._page_field = PageField(self)
+        self._page_input = self._page_field.edit
+        self._page_total_lbl = self._page_field.total_label
+        # Commit on Enter or focus-out - typing "23" must not first jump to page 2.
+        self._page_input.returnPressed.connect(lambda: self._on_page_nav_changed(self._page_input.text()))
+        self._page_input.editingFinished.connect(self._on_page_field_editing_finished)
+        tb.addWidget(self._page_field)
+        tb.addAction(self._next_page_action)
         tb.addSeparator()
 
-        # -- Zoom controls --
+        # -- Zoom: [-] [125% v] [+]
         tb.addAction(self._zoom_out_action)
-
-        self._zoom_combo = QComboBox(self)
-        self._zoom_combo.setEditable(True)
-        self._zoom_combo.setMinimumWidth(90)
-        self._zoom_combo.setMaximumWidth(130)
-        self._zoom_combo.addItems(["50%", "75%", "100%", "125%", "150%", "200%", "300%", "400%", "600%", "800%", "1000%"])
-        self._zoom_combo.setCurrentText("100%")
-        # Apply only on commit (Enter / focus-out / preset pick) — not on every keystroke.
-        self._zoom_combo.activated.connect(
-            lambda _idx: self._on_zoom_combo_changed(self._zoom_combo.currentText())
-        )
+        self._zoom_combo = ZoomBox(self)
+        # Apply only on commit (Enter / focus-out / preset pick) - not on every keystroke.
+        self._zoom_combo.activated.connect(lambda _idx: self._on_zoom_combo_changed(self._zoom_combo.currentText()))
         zoom_line = self._zoom_combo.lineEdit()
         if zoom_line is not None:
-            zoom_line.returnPressed.connect(
-                lambda: self._on_zoom_combo_changed(self._zoom_combo.currentText())
-            )
-            zoom_line.editingFinished.connect(
-                lambda: self._on_zoom_combo_changed(self._zoom_combo.currentText())
-            )
+            zoom_line.returnPressed.connect(lambda: self._on_zoom_combo_changed(self._zoom_combo.currentText()))
+            zoom_line.editingFinished.connect(lambda: self._on_zoom_combo_changed(self._zoom_combo.currentText()))
         tb.addWidget(self._zoom_combo)
-
         tb.addAction(self._zoom_in_action)
-        tb.addAction(self._fit_width_action)
-        tb.addAction(self._fit_page_action)
-        tb.addAction(self._actual_size_action)
         tb.addSeparator()
 
-        # -- Tool group --
-        self._toolbar_select_action = QAction(self._icon("cursor-arrow", QStyle.StandardPixmap.SP_ArrowRight), "Select", self)
-        self._toolbar_select_action.setToolTip("Select tool (1)")
-        self._toolbar_select_action.setCheckable(True)
-        self._toolbar_select_action.triggered.connect(lambda: self._set_tool(ToolMode.SELECT))
-
-        self._toolbar_hand_action = QAction(
-            self._hand_icon(),
-            "Hand",
-            self,
+        # -- Tools: one segmented control
+        self._tool_segment = ToolSegment(
+            [self._select_action, self._hand_action, self._measure_action, self._annotate_action], self
         )
-        self._toolbar_hand_action.setToolTip("Hand tool (2)")
-        self._toolbar_hand_action.setCheckable(True)
-        self._toolbar_hand_action.triggered.connect(lambda: self._set_tool(ToolMode.HAND))
+        tb.addWidget(self._tool_segment)
 
-        self._toolbar_measure_action = QAction(
-            self._icon("draw-rectangle", QStyle.StandardPixmap.SP_DialogApplyButton),
-            "Measure",
-            self,
-        )
-        self._toolbar_measure_action.setToolTip("Measure tool (3)")
-        self._toolbar_measure_action.setCheckable(True)
-        self._toolbar_measure_action.triggered.connect(lambda: self._set_tool(ToolMode.MEASURE))
-
-        self._toolbar_tool_group = QActionGroup(self)
-        self._toolbar_tool_group.setExclusive(True)
-        self._toolbar_tool_group.addAction(self._toolbar_select_action)
-        self._toolbar_tool_group.addAction(self._toolbar_hand_action)
-        self._toolbar_tool_group.addAction(self._toolbar_measure_action)
-
-        tb.addAction(self._toolbar_select_action)
-        tb.addAction(self._toolbar_hand_action)
-        tb.addAction(self._toolbar_measure_action)
-
-        self._toolbar_annotate_action = QAction(
-            self._icon("draw-brush", QStyle.StandardPixmap.SP_FileDialogDetailedView),
-            "Annotate",
-            self,
-        )
-        self._toolbar_annotate_action.setToolTip("Annotate tool (4)")
-        self._toolbar_annotate_action.setCheckable(True)
-        self._toolbar_annotate_action.triggered.connect(lambda: self._set_tool(ToolMode.ANNOTATE))
-        self._toolbar_tool_group.addAction(self._toolbar_annotate_action)
-        tb.addAction(self._toolbar_annotate_action)
-        tb.addSeparator()
-
-        # -- Actions --
-        self._toolbar_export_action = QAction(self._icon("document-save", QStyle.StandardPixmap.SP_DialogSaveButton), "Export", self)
-        self._toolbar_export_action.setToolTip("Export selection")
-        self._toolbar_export_action.triggered.connect(self._export)
-        tb.addAction(self._toolbar_export_action)
-
-        self._toolbar_copy_action = QAction(self._icon("edit-copy", QStyle.StandardPixmap.SP_FileIcon), "Copy Measurements", self)
-        self._toolbar_copy_action.setToolTip("Copy measurements (Ctrl+C)")
-        self._toolbar_copy_action.triggered.connect(self._copy)
-        tb.addAction(self._toolbar_copy_action)
-        tb.addSeparator()
-
-        # -- Panel toggle buttons (right side) --
-        spacer = QWidget()
+        spacer = QWidget(self)
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         tb.addWidget(spacer)
 
-        self._tb_search_btn = QPushButton("Search")
-        self._tb_search_btn.setObjectName("PanelToggleBtn")
-        self._tb_search_btn.setCheckable(True)
-        self._tb_search_btn.setToolTip("Toggle search panel (Ctrl+Shift+F)")
-        self._tb_search_btn.clicked.connect(self._toggle_search_dock)
-        tb.addWidget(self._tb_search_btn)
+        # -- Inline search
+        self._search_field = SearchField(self._icons, self)
+        self._search_input = self._search_field.edit
+        self._search_case_chk = self._search_field.case_button
+        self._search_prev_btn = self._search_field.prev_button
+        self._search_next_btn = self._search_field.next_button
+        self._search_count_lbl = self._search_field.count_label
+        self._search_input.textChanged.connect(self._on_search_text_changed)
+        self._search_input.returnPressed.connect(self._find_next)
+        self._search_field.previous_requested.connect(self._find_prev)
+        self._search_case_chk.toggled.connect(self._on_search_options_changed)
+        self._search_prev_btn.clicked.connect(self._find_prev)
+        self._search_next_btn.clicked.connect(self._find_next)
+        self._search_field.results_button.clicked.connect(self._toggle_search_dock)
+        self._search_field.focus_changed.connect(self._on_search_focus_changed)
+        self._find_engaged = False
+        tb.addWidget(self._search_field)
 
-        self._tb_nav_btn = QPushButton("Outline")
-        self._tb_nav_btn.setObjectName("PanelToggleBtn")
-        self._tb_nav_btn.setCheckable(True)
-        self._tb_nav_btn.setToolTip("Toggle outline panel (Ctrl+Shift+O)")
-        self._tb_nav_btn.clicked.connect(self._toggle_outline_dock)
-        tb.addWidget(self._tb_nav_btn)
+        tb.addAction(self._inspector_action)
 
-        self._tb_thumb_btn = QPushButton("Thumbs")
-        self._tb_thumb_btn.setObjectName("PanelToggleBtn")
-        self._tb_thumb_btn.setCheckable(True)
-        self._tb_thumb_btn.setToolTip("Toggle thumbnails panel (Ctrl+Shift+T)")
-        self._tb_thumb_btn.clicked.connect(self._toggle_thumbs_dock)
-        tb.addWidget(self._tb_thumb_btn)
+        # -- Overflow: less common actions
+        self._overflow_menu = QMenu("More", self)
+        self._overflow_menu.setObjectName("OverflowMenu")
+        self._build_overflow_menu()
+        self._overflow_btn = QToolButton(self)
+        self._overflow_btn.setObjectName("OverflowButton")
+        self._icons.bind(self._overflow_btn, "ellipsis")
+        self._overflow_btn.setToolTip("More actions")
+        self._overflow_btn.setAccessibleName("More actions")
+        self._overflow_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self._overflow_btn.setMenu(self._overflow_menu)
+        tb.addWidget(self._overflow_btn)
 
-        self._tb_info_btn = QPushButton("Inspector")
-        self._tb_info_btn.setObjectName("PanelToggleBtn")
-        self._tb_info_btn.setCheckable(True)
-        self._tb_info_btn.setChecked(True)
-        self._tb_info_btn.setToolTip("Toggle inspector panel (Ctrl+Shift+I)")
-        self._tb_info_btn.clicked.connect(self._toggle_info_dock)
-        tb.addWidget(self._tb_info_btn)
+        # 32 px hit targets regardless of style or stylesheet.
+        for action in tb.actions():
+            button = tb.widgetForAction(action)
+            if isinstance(button, QToolButton):
+                button.setMinimumSize(HIT_TARGET, HIT_TARGET)
+        self._overflow_btn.setMinimumSize(HIT_TARGET, HIT_TARGET)
+
+    def _build_overflow_menu(self):
+        m = self._overflow_menu
+        m.clear()
+        m.addMenu(self._recent_menu)
+        m.addAction(self._reload_action)
+        m.addSeparator()
+        m.addMenu(self._page_layout_menu)
+        m.addMenu(self._reading_mode_menu)
+        m.addAction(self._rotate_left_action)
+        m.addAction(self._rotate_right_action)
+        m.addSeparator()
+        m.addAction(self._add_bookmark_action)
+        m.addAction(self._export_action)
+        m.addSeparator()
+        m.addAction(self._rulers_action)
+        m.addAction(self._layout_grid_action)
+        m.addAction(self._fullscreen_action)
+        m.addAction(self._presentation_action)
+        m.addSeparator()
+        m.addMenu(self._theme_menu)
 
     def _setup_annotation_toolbar(self):
-        """Create and add the dedicated annotation toolbar (shown below main toolbar)."""
+        """Create the contextual annotation toolbar (shown below the main toolbar)."""
+        self.addToolBarBreak()
         self._ann_toolbar = AnnotationToolbar(self)
         self.addToolBar(self._ann_toolbar)
         self._ann_toolbar.setVisible(False)  # only visible when ANNOTATE tool is active
@@ -772,354 +905,300 @@ class MainWindow(QMainWindow):
         self._ann_toolbar.border_width_changed.connect(self._on_ann_toolbar_width_changed)
 
     def _setup_statusbar(self):
-        self._status = QStatusBar()
+        self._status = ViewerStatusBar(self)
         self.setStatusBar(self._status)
+        self._file_lbl = self._status.file_label
+        self._page_count_lbl = self._status.page_label
+        self._zoom_lbl = self._status.zoom_label
+        self._perf_label = self._status.perf_label
+        self._measure_lbl = self._status.measure_label
 
-        self._status_dot = QLabel("")
-        self._status_dot.setObjectName("StatusDot")
+    # --------------------------- Panels ---------------------------
+    def _hinted(self, widget: QWidget, hint: str, top: QWidget | None = None) -> tuple[QWidget, QLabel]:
+        """Wrap ``widget`` with an optional ``top`` control and an empty-state hint label."""
+        box = QWidget(self)
+        layout = QVBoxLayout(box)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        if top is not None:
+            holder = QWidget(box)
+            holder_layout = QVBoxLayout(holder)
+            holder_layout.setContentsMargins(8, 8, 8, 6)
+            holder_layout.addWidget(top)
+            layout.addWidget(holder)
+        label = QLabel(hint, box)
+        label.setObjectName("EmptyHint")
+        label.setWordWrap(True)
+        label.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
+        label.hide()
+        layout.addWidget(widget, 1)
+        layout.addWidget(label)
+        layout.addStretch(0)
+        return box, label
 
-        self._file_lbl = QLabel("No file")
-        self._page_count_lbl = QLabel("Pages: 0")
-        self._zoom_lbl = QLabel("--")
-
-        self._status.addWidget(self._status_dot)
-        self._status.addWidget(self._file_lbl)
-
-        # Spacer to push remaining items right
-        status_spacer = QWidget()
-        status_spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        self._status.addWidget(status_spacer)
-
-        self._status.addWidget(self._page_count_lbl)
-        self._perf_label = QLabel("")
-        self._status.addPermanentWidget(self._perf_label)
-        self._status.addPermanentWidget(self._zoom_lbl)
+    @staticmethod
+    def _show_hint(widget: QWidget, hint: QLabel, empty: bool) -> None:
+        hint.setVisible(empty)
+        widget.setVisible(not empty)
 
     def _setup_docks(self):
-        self._search_dock = QDockWidget("Search", self)
-        self._search_dock.setObjectName("SearchDock")
-        self._search_dock.setAllowedAreas(
-            Qt.DockWidgetArea.LeftDockWidgetArea
-            | Qt.DockWidgetArea.RightDockWidgetArea
-            | Qt.DockWidgetArea.BottomDockWidgetArea
-        )
-        search_widget = QWidget()
-        search_layout = QVBoxLayout(search_widget)
-        search_layout.setContentsMargins(8, 8, 8, 8)
-        search_layout.setSpacing(6)
+        self._setup_sidebar()
+        self._setup_inspector()
+        self._setup_search_dock()
 
-        search_top = QHBoxLayout()
-        search_top.setContentsMargins(0, 0, 0, 0)
-        search_top.setSpacing(4)
+    def _setup_sidebar(self):
+        self._sidebar = Sidebar(self._icons, self)
 
-        self._search_input = QLineEdit()
-        self._search_input.setPlaceholderText("Find text...")
-        self._search_input.textChanged.connect(self._on_search_text_changed)
-
-        self._search_case_chk = QCheckBox("Case")
-        self._search_case_chk.toggled.connect(self._on_search_options_changed)
-
-        self._search_prev_btn = QPushButton("Prev")
-        self._search_next_btn = QPushButton("Next")
-        self._search_close_btn = QPushButton("Close")
-        self._search_close_btn.setProperty("secondary", True)
-        self._search_count_lbl = QLabel("")
-
-        search_top.addWidget(self._search_input, 1)
-        search_top.addWidget(self._search_case_chk)
-        search_top.addWidget(self._search_prev_btn)
-        search_top.addWidget(self._search_next_btn)
-        search_top.addWidget(self._search_close_btn)
-        search_top.addWidget(self._search_count_lbl)
-
-        self._search_results_list = QListWidget()
-        self._search_results_list.itemActivated.connect(self._jump_to_search_item)
-        self._search_results_list.itemClicked.connect(self._jump_to_search_item)
-
-        search_layout.addLayout(search_top)
-        search_layout.addWidget(self._search_results_list)
-
-        self._search_dock.setWidget(search_widget)
-        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self._search_dock)
-        self._search_dock.hide()
-
-        self._search_prev_btn.clicked.connect(self._find_prev)
-        self._search_next_btn.clicked.connect(self._find_next)
-        self._search_close_btn.clicked.connect(lambda: self._search_dock.setVisible(False))
-        self._search_input.returnPressed.connect(self._find_next)
-
-        self._outline_dock = QDockWidget("Navigation", self)
-        self._outline_dock.setObjectName("OutlineDock")
-        self._outline_dock.setAllowedAreas(
-            Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
-        )
-
-        nav_widget = QWidget()
-        nav_layout = QVBoxLayout(nav_widget)
-        nav_layout.setContentsMargins(8, 8, 8, 8)
-        nav_layout.setSpacing(6)
-
-        self._outline_filter = QLineEdit()
-        self._outline_filter.setPlaceholderText("Filter TOC / bookmarks")
-        self._outline_filter.textChanged.connect(self._populate_outline)
-
-        self._outline_tree = QTreeWidget()
-        self._outline_tree.setHeaderHidden(True)
-        self._outline_tree.itemActivated.connect(self._jump_to_outline_item)
-        self._outline_tree.itemClicked.connect(self._jump_to_outline_item)
-        self._outline_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self._outline_tree.customContextMenuRequested.connect(self._on_outline_context_menu)
-
-        nav_layout.addWidget(self._outline_filter)
-        nav_layout.addWidget(self._outline_tree)
-
-        self._outline_dock.setWidget(nav_widget)
-        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self._outline_dock)
-        self._outline_dock.hide()
-
-        self._thumbs_dock = QDockWidget("Thumbnails", self)
-        self._thumbs_dock.setObjectName("ThumbnailsDock")
-        self._thumbs_dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea)
+        # Thumbnails
         self._thumbs_list = QListWidget()
-        self._thumbs_list.setIconSize(QSize(120, 160))
+        self._thumbs_list.setObjectName("ThumbnailList")
+        self._thumbs_list.setIconSize(self.THUMB_BOX)
         self._thumbs_list.setResizeMode(QListWidget.ResizeMode.Adjust)
         self._thumbs_list.setViewMode(QListWidget.ViewMode.IconMode)
         self._thumbs_list.setMovement(QListWidget.Movement.Static)
+        # A fixed grid cell: the first item's (placeholder) icon must not decide the cell size.
+        self._thumbs_list.setGridSize(QSize(self.THUMB_BOX.width() + 24, self.THUMB_BOX.height() + 30))
+        self._thumbs_list.setWordWrap(False)
         # Every cell is the same fixed icon box, so let the view skip per-item size
         # queries; without this, laying out a 5000-page list took ~0.6 s.
         self._thumbs_list.setUniformItemSizes(True)
-        self._thumbs_dock.setWidget(self._thumbs_list)
-        self._thumbs_dock.setMinimumWidth(180)
-        self._thumbs_dock.setMaximumWidth(520)
-        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self._thumbs_dock)
-        self.splitDockWidget(self._outline_dock, self._thumbs_dock, Qt.Orientation.Vertical)
-        self._thumbs_dock.hide()
         self._thumbs_list.itemActivated.connect(self._jump_to_thumb)
+        self._thumbs_list.itemClicked.connect(self._jump_to_thumb)
         self._thumbs_list.verticalScrollBar().valueChanged.connect(self._schedule_thumbnail_render)
-        self._thumbs_dock.visibilityChanged.connect(self._on_thumbs_visibility_changed)
-
-        self._info_dock = QDockWidget("Inspector", self)
-        self._info_dock.setObjectName("InspectorDock")
-        self._info_dock.setAllowedAreas(
-            Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
+        self._sidebar.add_page(
+            "thumbnails", "layout-grid", "Thumbnails", self._thumbs_list, "Thumbnails (Ctrl+Shift+T)"
         )
 
-        inspector_widget = QWidget()
-        inspector_widget.setObjectName("InspectorPanel")
-        inspector_widget.setMinimumWidth(220)
-        inspector_widget.setMaximumWidth(420)
+        # Outline (document table of contents)
+        self._outline_filter = QLineEdit()
+        self._outline_filter.setPlaceholderText("Filter outline")
+        self._outline_filter.setClearButtonEnabled(True)
+        self._outline_filter.textChanged.connect(self._populate_outline)
+        self._outline_tree = QTreeWidget()
+        self._outline_tree.setObjectName("OutlineTree")
+        self._outline_tree.setHeaderHidden(True)
+        self._outline_tree.setRootIsDecorated(False)
+        self._outline_tree.setUniformRowHeights(True)
+        self._outline_tree.itemActivated.connect(self._jump_to_outline_item)
+        self._outline_tree.itemClicked.connect(self._jump_to_outline_item)
+        outline_page, self._outline_hint = self._hinted(
+            self._outline_tree, "This document has no outline.", top=self._outline_filter
+        )
+        self._sidebar.add_page("outline", "list-tree", "Outline", outline_page, "Outline (Ctrl+Shift+O)")
 
-        inspector_layout = QVBoxLayout(inspector_widget)
-        inspector_layout.setContentsMargins(0, 0, 0, 0)
-        inspector_layout.setSpacing(0)
+        # Bookmarks (user bookmarks from the sidecar)
+        self._bookmarks_list = QListWidget()
+        self._bookmarks_list.setObjectName("BookmarksList")
+        self._bookmarks_list.itemActivated.connect(self._jump_to_bookmark_item)
+        self._bookmarks_list.itemClicked.connect(self._jump_to_bookmark_item)
+        self._bookmarks_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._bookmarks_list.customContextMenuRequested.connect(self._on_bookmarks_context_menu)
+        bookmarks_page, self._bookmarks_hint = self._hinted(
+            self._bookmarks_list, "No bookmarks yet.\nPress Ctrl+D to bookmark the current page."
+        )
+        add_bookmark_btn = QToolButton(self)
+        add_bookmark_btn.setDefaultAction(self._add_bookmark_action)
+        add_bookmark_btn.setAutoRaise(True)
+        add_bookmark_btn.setIconSize(QSize(16, 16))
+        self._sidebar.add_page(
+            "bookmarks", "bookmark", "Bookmarks", bookmarks_page, "Bookmarks (Ctrl+Shift+B)",
+            actions=add_bookmark_btn,
+        )
 
-        # --- Tab widget for context-sensitive panels ---
-        self._inspector_tabs = QTabWidget()
-        self._inspector_tabs.setObjectName("InspectorTabs")
-        self._inspector_tabs.setDocumentMode(False)
-        inspector_layout.addWidget(self._inspector_tabs)
-
-        # ── Tab 0: Measure ──────────────────────────────────────
-        measure_tab = QWidget()
-        m_root = QVBoxLayout(measure_tab)
-        m_root.setContentsMargins(10, 10, 10, 10)
-        m_root.setSpacing(8)
-
-        meas_header = QLabel("Dimensions")
-        meas_header.setObjectName("InfoLabel")
-        meas_header.setStyleSheet("font-weight:600; font-size:11px; margin-bottom:4px;")
-        m_root.addWidget(meas_header)
-
-        self._measure_w = self._kv_value("W")
-        self._measure_h = self._kv_value("H")
-        self._measure_x = self._kv_value("X")
-        self._measure_y = self._kv_value("Y")
-        m_root.addWidget(self._measure_w)
-        m_root.addWidget(self._measure_h)
-        m_root.addWidget(self._measure_x)
-        m_root.addWidget(self._measure_y)
-
-        m_root.addWidget(self._divider())
-
-        tool_label = QLabel("Active Tool")
-        tool_label.setObjectName("InfoLabel")
-        m_root.addWidget(tool_label)
-
-        tool_row = QHBoxLayout()
-        tool_row.setContentsMargins(0, 4, 0, 0)
-        tool_row.setSpacing(4)
-        self._panel_tool_group = QButtonGroup(self)
-        self._panel_tool_group.setExclusive(True)
-        self._panel_select_btn = QPushButton("Select")
-        self._panel_hand_btn = QPushButton("Hand")
-        self._panel_measure_btn = QPushButton("Measure")
-        self._panel_annotate_btn = QPushButton("Annotate")
-        for btn, mode in (
-            (self._panel_select_btn, ToolMode.SELECT),
-            (self._panel_hand_btn, ToolMode.HAND),
-            (self._panel_measure_btn, ToolMode.MEASURE),
-            (self._panel_annotate_btn, ToolMode.ANNOTATE),
-        ):
-            btn.setCheckable(True)
-            btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            btn.setMinimumWidth(0)
-            btn.clicked.connect(lambda _checked=False, m=mode: self._set_tool(m))
-            self._panel_tool_group.addButton(btn)
-            tool_row.addWidget(btn)
-        self._panel_select_btn.setToolTip("Select tool (1)")
-        self._panel_hand_btn.setToolTip("Hand tool (2)")
-        self._panel_measure_btn.setToolTip("Measure tool (3)")
-        self._panel_annotate_btn.setToolTip("Annotate tool (4)")
-        m_root.addLayout(tool_row)
-        m_root.addStretch()
-
-        self._inspector_tabs.addTab(measure_tab, "Measure")
-
-        # ── Tab 1: Font ─────────────────────────────────────────
-        font_tab = QWidget()
-        f_root = QVBoxLayout(font_tab)
-        f_root.setContentsMargins(10, 10, 10, 10)
-        f_root.setSpacing(8)
-
-        font_header = QLabel("Text / Font Info")
-        font_header.setObjectName("InfoLabel")
-        font_header.setStyleSheet("font-weight:600; font-size:11px; margin-bottom:4px;")
-        f_root.addWidget(font_header)
-
-        font_hint = QLabel("Hover over text in the PDF\nto inspect its font properties.")
-        font_hint.setObjectName("InfoLabel")
-        font_hint.setWordWrap(True)
-        font_hint.setStyleSheet("font-size:11px; margin-bottom:6px;")
-        f_root.addWidget(font_hint)
-
-        self._font_name = self._info_row(f_root, "Name", "--")
-        self._font_size = self._info_row(f_root, "Size", "--")
-        self._font_style = self._info_row(f_root, "Style", "--")
-        f_root.addStretch()
-
-        self._inspector_tabs.addTab(font_tab, "Font")
-
-        # ── Tab 2: Annotations ──────────────────────────────────
-        ann_tab = QWidget()
-        a_root = QVBoxLayout(ann_tab)
-        a_root.setContentsMargins(8, 8, 8, 8)
-        a_root.setSpacing(6)
-
-        ann_top = QHBoxLayout()
-        ann_top.setSpacing(4)
-        ann_top.setContentsMargins(0, 0, 0, 0)
-        ann_label = QLabel("Filter:")
-        ann_label.setObjectName("InfoLabel")
-        ann_top.addWidget(ann_label)
+        # Annotations
         self._annotation_filter = QComboBox()
         self._annotation_filter.addItems([
             "All", "Highlight", "Underline", "Strikethrough", "Note",
             "Text-box", "Rectangle", "Ellipse", "Line", "Arrow", "Freehand",
         ])
+        self._annotation_filter.setToolTip("Show only one kind of annotation")
         self._annotation_filter.currentIndexChanged.connect(self._populate_annotation_list)
-        ann_top.addWidget(self._annotation_filter, 1)
-        a_root.addLayout(ann_top)
-
         self._annotation_list = QListWidget()
         self._annotation_list.setObjectName("annotation_list")
-        self._annotation_list.setAlternatingRowColors(True)
-        self._annotation_list.setSpacing(2)
         self._annotation_list.itemActivated.connect(self._jump_to_annotation_item)
         self._annotation_list.itemClicked.connect(self._jump_to_annotation_item)
-        a_root.addWidget(self._annotation_list, 1)
-
+        annotations_box, self._annotations_hint = self._hinted(
+            self._annotation_list,
+            "No annotations.\nUse the Annotate tool (4), or measure an area and press Ctrl+Shift+H.",
+            top=self._annotation_filter,
+        )
         self._annotation_edit_btn = QPushButton("Properties")
         self._annotation_delete_btn = QPushButton("Delete")
-        self._annotation_export_btn = QPushButton("Export PDF")
+        self._annotation_export_btn = QPushButton("Export PDF...")
         self._annotation_edit_btn.setToolTip("Edit annotation properties")
         self._annotation_delete_btn.setToolTip("Delete selected annotation (Delete key)")
-        self._annotation_export_btn.setToolTip("Save PDF with annotations embedded")
+        self._annotation_export_btn.setToolTip("Save a copy of the PDF with annotations embedded")
+        for btn in (self._annotation_edit_btn, self._annotation_delete_btn, self._annotation_export_btn):
+            btn.setProperty("secondary", True)
         self._annotation_edit_btn.clicked.connect(self._edit_selected_annotation)
         self._annotation_delete_btn.clicked.connect(self._delete_selected_annotation)
         self._annotation_export_btn.clicked.connect(self._export_pdf_with_annotations)
+        ann_buttons = QHBoxLayout()
+        ann_buttons.setContentsMargins(8, 6, 8, 8)
+        ann_buttons.setSpacing(4)
+        ann_buttons.addWidget(self._annotation_edit_btn)
+        ann_buttons.addWidget(self._annotation_delete_btn)
+        ann_buttons.addStretch(1)
+        ann_buttons.addWidget(self._annotation_export_btn)
+        annotations_box.layout().addLayout(ann_buttons)
+        self._sidebar.add_page(
+            "annotations", "message-square-text", "Annotations", annotations_box, "Annotations (Ctrl+Shift+A)"
+        )
 
-        ann_btn_row = QHBoxLayout()
-        ann_btn_row.setContentsMargins(0, 0, 0, 0)
-        ann_btn_row.setSpacing(4)
-        ann_btn_row.addWidget(self._annotation_edit_btn)
-        ann_btn_row.addWidget(self._annotation_delete_btn)
-        a_root.addLayout(ann_btn_row)
-        a_root.addWidget(self._annotation_export_btn)
+        self._sidebar_dock = QDockWidget("Sidebar", self)
+        self._sidebar_dock.setObjectName("SidebarDock")
+        self._sidebar_dock.setTitleBarWidget(QWidget(self._sidebar_dock))
+        self._sidebar_dock.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
+        self._sidebar_dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea)
+        self._sidebar_dock.setWidget(self._sidebar)
+        self._sidebar_dock.setMinimumWidth(200)
+        self._sidebar_dock.setMaximumWidth(520)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self._sidebar_dock)
+        self._sidebar_dock.hide()
+        self._sidebar_dock.visibilityChanged.connect(self._on_sidebar_visibility_changed)
+        self._sidebar.current_changed.connect(self._on_sidebar_page_changed)
 
-        self._inspector_tabs.addTab(ann_tab, "Annotations")
-
-        # ── Tab 3: Document ─────────────────────────────────────
-        doc_tab = QWidget()
-        d_root = QVBoxLayout(doc_tab)
-        d_root.setContentsMargins(10, 10, 10, 10)
-        d_root.setSpacing(8)
-
-        doc_header = QLabel("Document Info")
-        doc_header.setObjectName("InfoLabel")
-        doc_header.setStyleSheet("font-weight:600; font-size:11px; margin-bottom:4px;")
-        d_root.addWidget(doc_header)
-
-        self._doc_name = self._info_row(d_root, "File", "No file")
-        self._doc_page = self._info_row(d_root, "Page", "0 / 0")
-        self._doc_zoom = self._info_row(d_root, "Zoom", "100%")
-        self._doc_format = self._info_row(d_root, "Format", "--")
-        self._doc_engine = self._info_row(d_root, "Produced By", "--")
-        self._doc_creator = self._info_row(d_root, "Created By", "--")
-        self._doc_title = self._info_row(d_root, "Title", "--")
-        self._doc_author = self._info_row(d_root, "Author", "--")
-        self._doc_subject = self._info_row(d_root, "Subject", "--")
-        self._doc_keywords = self._info_row(d_root, "Keywords", "--")
-        self._doc_created = self._info_row(d_root, "Created", "--")
-        self._doc_modified = self._info_row(d_root, "Modified", "--")
-        self._doc_encryption = self._info_row(d_root, "Encryption", "--")
-        self._doc_file_size = self._info_row(d_root, "File Size", "--")
-
-        d_root.addWidget(self._divider())
-
-        self._reload_toggle = QCheckBox("Auto reload")
-        self._reload_toggle.setChecked(True)
+    def _setup_inspector(self):
+        self._inspector = InspectorPanel(self._icons, self)
+        panel = self._inspector
+        self._measure_w = panel.measure_w
+        self._measure_h = panel.measure_h
+        self._measure_x = panel.measure_x
+        self._measure_y = panel.measure_y
+        self._font_name = panel.font_name
+        self._font_size = panel.font_size
+        self._font_style = panel.font_style
+        self._doc_name = panel.doc_name
+        self._doc_page = panel.doc_page
+        self._doc_zoom = panel.doc_zoom
+        self._doc_format = panel.doc_format
+        self._doc_engine = panel.doc_engine
+        self._doc_creator = panel.doc_creator
+        self._doc_title = panel.doc_title
+        self._doc_author = panel.doc_author
+        self._doc_subject = panel.doc_subject
+        self._doc_keywords = panel.doc_keywords
+        self._doc_created = panel.doc_created
+        self._doc_modified = panel.doc_modified
+        self._doc_encryption = panel.doc_encryption
+        self._doc_file_size = panel.doc_file_size
+        self._reload_toggle = panel.reload_toggle
         self._reload_toggle.toggled.connect(self._toggle_auto_reload)
-        d_root.addWidget(self._reload_toggle)
-        d_root.addStretch()
+        panel.copy_button.clicked.connect(self._copy)
+        panel.units_combo.currentIndexChanged.connect(
+            lambda _i: self._set_unit(str(panel.units_combo.currentData()))
+        )
 
-        self._inspector_tabs.addTab(doc_tab, "Document")
-
-        self._info_dock.setWidget(inspector_widget)
+        self._info_dock = QDockWidget("Inspector", self)
+        self._info_dock.setObjectName("InspectorDock")
+        self._info_dock.setTitleBarWidget(QWidget(self._info_dock))
+        self._info_dock.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
+        self._info_dock.setAllowedAreas(Qt.DockWidgetArea.RightDockWidgetArea)
+        container = QWidget(self._info_dock)
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(panel.title_bar)
+        layout.addWidget(panel, 1)
+        panel.title_bar.close_requested.connect(lambda: self._set_inspector_visible(False))
+        self._info_dock.setWidget(container)
+        self._info_dock.setMinimumWidth(240)
+        self._info_dock.setMaximumWidth(440)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._info_dock)
-        self._info_dock.setMinimumWidth(220)
-        self._info_dock.setMaximumWidth(420)
+        self._info_dock.hide()
+        self._info_dock.visibilityChanged.connect(
+            lambda _v: self._inspector_action.setChecked(not self._info_dock.isHidden())
+        )
 
-    # --------------------------- Dock toggles ---------------------------
-    def _toggle_search_dock(self):
-        visible = not self._search_dock.isVisible()
+    def _setup_search_dock(self):
+        self._search_dock = QDockWidget("Search Results", self)
+        self._search_dock.setObjectName("SearchDock")
+        self._search_dock.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
+        self._search_dock.setAllowedAreas(Qt.DockWidgetArea.BottomDockWidgetArea)
+        self._search_title = PanelTitleBar("Search Results", self._icons, self._search_dock)
+        self._search_title.close_requested.connect(lambda: self._set_search_panel_visible(False))
+        self._search_dock.setTitleBarWidget(self._search_title)
+
+        self._search_results_list = QListWidget()
+        self._search_results_list.setObjectName("SearchResultsList")
+        self._search_results_list.itemActivated.connect(self._jump_to_search_item)
+        self._search_results_list.itemClicked.connect(self._jump_to_search_item)
+        search_panel = QWidget()
+        search_panel.setObjectName("SearchPanel")
+        search_layout = QVBoxLayout(search_panel)
+        search_layout.setContentsMargins(0, 0, 0, 0)
+        search_layout.addWidget(self._search_results_list)
+        self._search_dock.setWidget(search_panel)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self._search_dock)
+        self._search_dock.hide()
+        self._search_dock_sized = False
+        self._search_dock.visibilityChanged.connect(lambda _v: self._sync_search_panel_buttons())
+
+    # --------------------------- Panel toggles ---------------------------
+    def _sync_search_panel_buttons(self):
+        visible = not self._search_dock.isHidden()
+        for widget in (self._search_panel_action, self._search_field.results_button):
+            widget.blockSignals(True)
+            widget.setChecked(visible)
+            widget.blockSignals(False)
+
+    def _set_search_panel_visible(self, visible: bool):
+        first_show = visible and self._search_dock.isHidden() and not self._search_dock_sized
         self._search_dock.setVisible(visible)
+        if first_show:
+            # A results list needs a few rows, not half the window.
+            self._search_dock_sized = True
+            self.resizeDocks([self._search_dock], [170], Qt.Orientation.Vertical)
         self._settings.setValue("window/show_search", visible)
-        if hasattr(self, "_tb_search_btn"):
-            self._tb_search_btn.setChecked(visible)
+        self._sync_search_panel_buttons()
+
+    def _toggle_search_dock(self):
+        visible = self._search_dock.isHidden()
+        self._set_search_panel_visible(visible)
         if visible:
             self._search_input.setFocus()
             self._search_input.selectAll()
 
+    def _set_sidebar_visible(self, visible: bool):
+        self._sidebar_dock.setVisible(visible)
+        self._settings.setValue("window/show_sidebar", visible)
+        self._sidebar_action.setChecked(visible)
+
+    def _toggle_sidebar(self):
+        self._set_sidebar_visible(self._sidebar_dock.isHidden())
+
+    def _show_sidebar_page(self, key: str):
+        self._sidebar.set_current(key)
+        self._set_sidebar_visible(True)
+
+    def _toggle_sidebar_page(self, key: str):
+        if not self._sidebar_dock.isHidden() and self._sidebar.current_key() == key:
+            self._set_sidebar_visible(False)
+        else:
+            self._show_sidebar_page(key)
+
+    # Old names kept for callers and muscle memory (Ctrl+Shift+O / Ctrl+Shift+T).
     def _toggle_outline_dock(self):
-        visible = not self._outline_dock.isVisible()
-        self._outline_dock.setVisible(visible)
-        self._settings.setValue("window/show_outline", visible)
-        if hasattr(self, "_tb_nav_btn"):
-            self._tb_nav_btn.setChecked(visible)
+        self._toggle_sidebar_page("outline")
 
     def _toggle_thumbs_dock(self):
-        visible = not self._thumbs_dock.isVisible()
-        self._thumbs_dock.setVisible(visible)
-        self._settings.setValue("window/show_thumbnails", visible)
-        if hasattr(self, "_tb_thumb_btn"):
-            self._tb_thumb_btn.setChecked(visible)
+        self._toggle_sidebar_page("thumbnails")
 
-    def _toggle_info_dock(self):
-        visible = not self._info_dock.isVisible()
+    def _on_sidebar_visibility_changed(self, _visible: bool):
+        self._sidebar_action.setChecked(not self._sidebar_dock.isHidden())
+        self._on_thumbs_visibility_changed(self._thumbs_list.isVisible())
+
+    def _on_sidebar_page_changed(self, key: str):
+        self._settings.setValue("window/sidebar_page", key)
+        self._on_thumbs_visibility_changed(self._thumbs_list.isVisible())
+
+    def _set_inspector_visible(self, visible: bool):
         self._info_dock.setVisible(visible)
         self._settings.setValue("window/show_inspector", visible)
-        if hasattr(self, "_tb_info_btn"):
-            self._tb_info_btn.setChecked(visible)
+        self._inspector_action.setChecked(visible)
+
+    def _toggle_info_dock(self):
+        self._set_inspector_visible(self._info_dock.isHidden())
 
     # --------------------------- Settings ---------------------------
     def _load_json_setting(self, key: str, default):
@@ -1153,18 +1232,29 @@ class MainWindow(QMainWindow):
             restored_state = self.restoreState(state)
         if state and not restored_state:
             self._settings.remove("window/state")
+        # A restored state carries the user's own panel sizes.
+        self._search_dock_sized = restored_state
         if not restored_state:
+            show_sidebar = self._settings.value("window/show_sidebar", None)
+            if show_sidebar is None:
+                # Settings from before the sidebar existed: the outline and thumbnail
+                # docks it replaces.
+                show_sidebar = self._settings.value("window/show_outline", False, type=bool) or self._settings.value(
+                    "window/show_thumbnails", False, type=bool
+                )
+            self._sidebar_dock.setVisible(str(show_sidebar).lower() in ("true", "1"))
             self._search_dock.setVisible(self._settings.value("window/show_search", False, type=bool))
-            self._outline_dock.setVisible(self._settings.value("window/show_outline", False, type=bool))
-            self._thumbs_dock.setVisible(self._settings.value("window/show_thumbnails", False, type=bool))
-            self._info_dock.setVisible(self._settings.value("window/show_inspector", True, type=bool))
+            self._info_dock.setVisible(self._settings.value("window/show_inspector", False, type=bool))
+        # The annotation toolbar's visibility follows the tool, not the saved state.
+        self._ann_toolbar.setVisible(False)
 
-        # Sync panel toggle buttons with dock visibility
-        if hasattr(self, "_tb_search_btn"):
-            self._tb_search_btn.setChecked(self._search_dock.isVisible())
-            self._tb_nav_btn.setChecked(self._outline_dock.isVisible())
-            self._tb_thumb_btn.setChecked(self._thumbs_dock.isVisible())
-            self._tb_info_btn.setChecked(self._info_dock.isVisible())
+        page = self._settings.value("window/sidebar_page", "", type=str)
+        if page in self._sidebar.keys():
+            self._sidebar.set_current(page)
+
+        self._sidebar_action.setChecked(not self._sidebar_dock.isHidden())
+        self._inspector_action.setChecked(not self._info_dock.isHidden())
+        self._sync_search_panel_buttons()
 
         start_state = self._settings.value("window/start_state", "normal", type=str)
         if start_state == "fullscreen":
@@ -1178,14 +1268,13 @@ class MainWindow(QMainWindow):
         self._reload_toggle.blockSignals(True)
         self._reload_toggle.setChecked(self._auto_reload_enabled)
         self._reload_toggle.blockSignals(False)
-        if hasattr(self, "_rulers_action"):
-            self._rulers_action.blockSignals(True)
-            self._rulers_action.setChecked(self._show_rulers)
-            self._rulers_action.blockSignals(False)
-        if hasattr(self, "_layout_grid_action"):
-            self._layout_grid_action.blockSignals(True)
-            self._layout_grid_action.setChecked(bool(self._layout_grid.get("enabled", False)))
-            self._layout_grid_action.blockSignals(False)
+        self._rulers_action.blockSignals(True)
+        self._rulers_action.setChecked(self._show_rulers)
+        self._rulers_action.blockSignals(False)
+        self._layout_grid_action.blockSignals(True)
+        self._layout_grid_action.setChecked(bool(self._layout_grid.get("enabled", False)))
+        self._layout_grid_action.blockSignals(False)
+        self._set_unit(self._unit)
 
         saved_tool = self._settings.value("view/tool", ToolMode.HAND.name, type=str)
         if saved_tool in ToolMode.__members__:
@@ -1200,12 +1289,13 @@ class MainWindow(QMainWindow):
             self._settings.setValue("window/start_state", "maximized")
         else:
             self._settings.setValue("window/start_state", "normal")
-        self._settings.setValue("window/show_search", self._search_dock.isVisible())
-        self._settings.setValue("window/show_outline", self._outline_dock.isVisible())
-        self._settings.setValue("window/show_thumbnails", self._thumbs_dock.isVisible())
-        self._settings.setValue("window/show_inspector", self._info_dock.isVisible())
+        self._settings.setValue("window/show_search", not self._search_dock.isHidden())
+        self._settings.setValue("window/show_sidebar", not self._sidebar_dock.isHidden())
+        self._settings.setValue("window/sidebar_page", self._sidebar.current_key())
+        self._settings.setValue("window/show_inspector", not self._info_dock.isHidden())
         self._settings.setValue("view/auto_reload", self._auto_reload_enabled)
         self._settings.setValue("view/show_rulers", self._show_rulers)
+        self._settings.setValue("view/unit", self._unit)
         self._save_layout_grid_settings()
         self._settings.setValue("view/tool", self.current_view().tool.name)
 
@@ -1219,10 +1309,9 @@ class MainWindow(QMainWindow):
 
     def _toggle_layout_grid(self, checked: bool):
         self._layout_grid["enabled"] = bool(checked)
-        if hasattr(self, "_layout_grid_action"):
-            self._layout_grid_action.blockSignals(True)
-            self._layout_grid_action.setChecked(bool(checked))
-            self._layout_grid_action.blockSignals(False)
+        self._layout_grid_action.blockSignals(True)
+        self._layout_grid_action.setChecked(bool(checked))
+        self._layout_grid_action.blockSignals(False)
         self._apply_layout_grid_to_views()
         self._save_layout_grid_settings()
 
@@ -1231,10 +1320,9 @@ class MainWindow(QMainWindow):
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         self._layout_grid = dialog.grid_config
-        if hasattr(self, "_layout_grid_action"):
-            self._layout_grid_action.blockSignals(True)
-            self._layout_grid_action.setChecked(bool(self._layout_grid.get("enabled", False)))
-            self._layout_grid_action.blockSignals(False)
+        self._layout_grid_action.blockSignals(True)
+        self._layout_grid_action.setChecked(bool(self._layout_grid.get("enabled", False)))
+        self._layout_grid_action.blockSignals(False)
         self._apply_layout_grid_to_views()
         self._save_layout_grid_settings()
 
@@ -1323,24 +1411,13 @@ class MainWindow(QMainWindow):
         self.resize(1280, 900)
         self._center_window()
 
-        self._search_dock.setVisible(False)
-        self._outline_dock.setVisible(False)
-        self._thumbs_dock.setVisible(False)
-        self._info_dock.setVisible(True)
-
-        if hasattr(self, "_tb_search_btn"):
-            self._tb_search_btn.setChecked(False)
-            self._tb_nav_btn.setChecked(False)
-            self._tb_thumb_btn.setChecked(False)
-            self._tb_info_btn.setChecked(True)
+        self._set_search_panel_visible(False)
+        self._set_sidebar_visible(False)
+        self._set_inspector_visible(False)
 
         self._settings.remove("window/geometry")
         self._settings.remove("window/state")
         self._settings.setValue("window/start_state", "normal")
-        self._settings.setValue("window/show_search", False)
-        self._settings.setValue("window/show_outline", False)
-        self._settings.setValue("window/show_thumbnails", False)
-        self._settings.setValue("window/show_inspector", True)
         self._status.showMessage("Window layout reset", 1500)
 
     def changeEvent(self, event):
@@ -1377,11 +1454,17 @@ class MainWindow(QMainWindow):
             return
 
         path = os.path.abspath(ctx.file_path)
-        self._document_sessions[path] = {
+        state: dict[str, object] = {
             "page": int(view.current_page),
             "zoom": float(view.zoom),
             "zoom_mode": view.zoom_mode,
         }
+        # Page layout and reading colours are per document view state (viewer-api.md).
+        for key in ("page_mode", "color_mode"):
+            getter = getattr(view, key, None)
+            if callable(getter):
+                state[key] = str(getter())
+        self._document_sessions[path] = state
 
     def _save_current_document_session(self):
         self._save_document_session_for_view(self.current_view())
@@ -1416,6 +1499,14 @@ class MainWindow(QMainWindow):
             page = int(state.get("page", 0))
         except (TypeError, ValueError):
             return False
+
+        for key, setter_name in (("page_mode", "set_page_mode"), ("color_mode", "set_color_mode")):
+            setter = getattr(view, setter_name, None)
+            if key in state and callable(setter):
+                try:
+                    setter(str(state[key]))
+                except ValueError:
+                    pass
 
         zoom_mode = str(state.get("zoom_mode", PdfView.ZOOM_MODE_CUSTOM))
         if zoom_mode == PdfView.ZOOM_MODE_FIT_WIDTH:
@@ -1453,6 +1544,7 @@ class MainWindow(QMainWindow):
         self._recent_files = self._recent_files[:10]
         self._settings.setValue("recent_files", self._recent_files)
         self._rebuild_recent_menu()
+        self._welcome.set_recent_files(self._recent_files)
 
     # --------------------------- File/document ---------------------------
     def _open_dialog(self):
@@ -1486,7 +1578,10 @@ class MainWindow(QMainWindow):
         self.setUpdatesEnabled(False)
         self._open_in_progress = True
         try:
-            if not target.open_document(norm_path):
+            opened = target.open_document(norm_path)
+            if not opened and self._view_can_unlock(target) and self._needs_password(norm_path):
+                opened = self._unlock_and_open(target, norm_path)
+            if not opened:
                 if create_new_tab:
                     idx = self._tabs.indexOf(target)
                     if idx >= 0:
@@ -1577,6 +1672,15 @@ class MainWindow(QMainWindow):
         self._handle_drop_event(e)
 
     def eventFilter(self, obj, e):
+        if (
+            obj is self._tabs.tabBar()
+            and e.type() == QEvent.Type.MouseButtonRelease
+            and e.button() == Qt.MouseButton.MiddleButton
+        ):
+            index = self._tabs.tabBar().tabAt(e.position().toPoint())
+            if index >= 0:
+                self._close_tab_index(index)
+                return True
         is_drop_target = obj is self._tabs
         if not is_drop_target and isinstance(obj, PdfView):
             is_drop_target = True
@@ -1612,12 +1716,12 @@ class MainWindow(QMainWindow):
             self._doc_modified.setText("--")
             self._doc_encryption.setText("--")
             self._doc_file_size.setText("--")
-            self._page_count_lbl.setText("Pages: 0")
-            self._page_total_lbl.setText(" / 0 ")
-            self._page_nav_combo.blockSignals(True)
-            self._page_nav_combo.clear()
-            self._page_nav_combo.blockSignals(False)
+            self._page_field.set_pages(0, 0)
+            self._status.set_page(0, 0)
             self._outline_tree.clear()
+            self._outline_sync_index = None
+            self._show_hint(self._outline_tree, self._outline_hint, True)
+            self._populate_bookmarks()
             self._thumbs_list.clear()
             self._clear_thumbnail_queue()
             self._update_measurements_panel(None)
@@ -1642,13 +1746,8 @@ class MainWindow(QMainWindow):
         self._doc_modified.setText(self._format_pdf_date(metadata.get("modDate")))
         self._doc_encryption.setText(self._metadata_text(metadata.get("encryption"), empty="None"))
         self._doc_file_size.setText(self._format_file_size(source_path))
-        self._page_count_lbl.setText(f"Pages: {doc.page_count}")
-        self._page_total_lbl.setText(f" / {doc.page_count} ")
-        self._page_nav_combo.blockSignals(True)
-        self._page_nav_combo.clear()
-        self._page_nav_combo.addItems([str(i + 1) for i in range(doc.page_count)])
-        self._page_nav_combo.setCurrentText(str(view.current_page + 1))
-        self._page_nav_combo.blockSignals(False)
+        self._page_field.set_pages(view.current_page + 1, doc.page_count)
+        self._status.set_page(view.current_page + 1, doc.page_count)
         self.setWindowTitle(f"{APP_NAME} - {name}")
 
         self._populate_outline()
@@ -1657,36 +1756,37 @@ class MainWindow(QMainWindow):
 
     # --------------------------- Navigation / TOC / bookmarks ---------------------------
     def _populate_outline(self):
+        """Rebuild the outline (TOC) tree and the bookmarks list for the current tab."""
         self._outline_tree.clear()
 
         view = self.current_view()
-        ctx = self.current_context()
         doc = view.document
 
+        # One invisible root holds the flat, indented TOC; the tree shows its children.
         root_toc = QTreeWidgetItem(["Document TOC"])
         root_toc.setData(0, self.ROLE_KIND, "toc_root")
-        root_bookmarks = QTreeWidgetItem(["My Bookmarks"])
-        root_bookmarks.setData(0, self.ROLE_KIND, "bookmark_root")
-
         self._outline_tree.addTopLevelItem(root_toc)
-        self._outline_tree.addTopLevelItem(root_bookmarks)
         root_toc.setExpanded(True)
-        root_bookmarks.setExpanded(True)
 
         filt = self._outline_filter.text().strip().lower()
 
         toc_entries: list[tuple[int, int, QTreeWidgetItem]] = []
+        has_toc = False
         if doc:
             for level, title, page in doc.get_toc(simple=True):
+                has_toc = True
                 page_idx = max(0, page - 1)
                 if filt and filt not in title.lower() and filt not in str(page):
                     continue
-                display = f"{'  ' * max(0, level - 1)}{title}"
+                display = f"{'    ' * max(0, level - 1)}{title}"
                 item = QTreeWidgetItem([display])
                 item.setData(0, self.ROLE_KIND, "toc")
                 item.setData(0, self.ROLE_PAGE, page_idx)
+                item.setToolTip(0, f"{title.strip()} - page {page}")
                 root_toc.addChild(item)
                 toc_entries.append((page_idx, len(toc_entries), item))
+        self._outline_tree.setRootIndex(self._outline_tree.indexFromItem(root_toc))
+        self._show_hint(self._outline_tree, self._outline_hint, not has_toc)
 
         # Sorted by (page, outline order): bisecting for the last page <= current
         # lands on the same item the old linear scan picked (later entry wins ties).
@@ -1697,16 +1797,19 @@ class MainWindow(QMainWindow):
             [entry[2] for entry in toc_entries],
         )
 
-        for bookmark in ctx.sidecar_state.bookmarks:
-            if filt and filt not in bookmark.title.lower() and filt not in str(bookmark.page + 1):
-                continue
-            item = QTreeWidgetItem([f"{bookmark.title} (p{bookmark.page + 1})"])
-            item.setData(0, self.ROLE_KIND, "bookmark")
-            item.setData(0, self.ROLE_PAGE, bookmark.page)
-            item.setData(0, self.ROLE_BOOKMARK_ID, bookmark.id)
-            root_bookmarks.addChild(item)
-
+        self._populate_bookmarks()
         self._sync_outline_current_page(view.current_page)
+
+    def _populate_bookmarks(self):
+        self._bookmarks_list.clear()
+        ctx = self.current_context()
+        for bookmark in ctx.sidecar_state.bookmarks:
+            item = QListWidgetItem(f"{bookmark.title}  (p{bookmark.page + 1})")
+            item.setData(self.ROLE_KIND, "bookmark")
+            item.setData(self.ROLE_PAGE, bookmark.page)
+            item.setData(self.ROLE_BOOKMARK_ID, bookmark.id)
+            self._bookmarks_list.addItem(item)
+        self._show_hint(self._bookmarks_list, self._bookmarks_hint, self._bookmarks_list.count() == 0)
 
     def _sync_outline_current_page(self, page_idx: int):
         nearest_item = None
@@ -1764,21 +1867,26 @@ class MainWindow(QMainWindow):
             if bookmark:
                 view.scroll_to_page_y(bookmark.page, bookmark.y)
 
-    def _on_outline_context_menu(self, pos: QPoint):
-        item = self._outline_tree.itemAt(pos)
+    def _jump_to_bookmark_item(self, item):
+        if not isinstance(item, QListWidgetItem):
+            return
+        bookmark_id = item.data(self.ROLE_BOOKMARK_ID)
+        bookmark = self._find_bookmark_by_id(str(bookmark_id)) if bookmark_id else None
+        if bookmark:
+            self.current_view().scroll_to_page_y(bookmark.page, bookmark.y)
+
+    def _on_bookmarks_context_menu(self, pos: QPoint):
+        item = self._bookmarks_list.itemAt(pos)
         if item is None:
             return
-        if item.data(0, self.ROLE_KIND) != "bookmark":
-            return
-
-        bookmark_id = item.data(0, self.ROLE_BOOKMARK_ID)
+        bookmark_id = item.data(self.ROLE_BOOKMARK_ID)
         if not bookmark_id:
             return
 
         menu = QMenu(self)
         rename_action = menu.addAction("Rename Bookmark")
         delete_action = menu.addAction("Delete Bookmark")
-        chosen = menu.exec(self._outline_tree.viewport().mapToGlobal(pos))
+        chosen = menu.exec(self._bookmarks_list.viewport().mapToGlobal(pos))
         if chosen is rename_action:
             self._rename_bookmark(str(bookmark_id))
         elif chosen is delete_action:
@@ -1815,7 +1923,7 @@ class MainWindow(QMainWindow):
         bookmark = BookmarkRecord(id=uuid4().hex, title=title, page=page_idx, y=float(y_value))
         ctx.sidecar_state.bookmarks.append(bookmark)
         self._mark_sidecar_dirty(view)
-        self._populate_outline()
+        self._populate_bookmarks()
         self._status.showMessage("Bookmark added", 1500)
 
     def _rename_bookmark(self, bookmark_id: str):
@@ -1832,7 +1940,7 @@ class MainWindow(QMainWindow):
 
         bookmark.title = title
         self._mark_sidecar_dirty(self.current_view())
-        self._populate_outline()
+        self._populate_bookmarks()
 
     def _delete_bookmark(self, bookmark_id: str):
         ctx = self.current_context()
@@ -1840,7 +1948,7 @@ class MainWindow(QMainWindow):
         ctx.sidecar_state.bookmarks = [b for b in ctx.sidecar_state.bookmarks if b.id != bookmark_id]
         if len(ctx.sidecar_state.bookmarks) != before:
             self._mark_sidecar_dirty(self.current_view())
-            self._populate_outline()
+            self._populate_bookmarks()
             self._status.showMessage("Bookmark deleted", 1200)
 
     # --------------------------- Sidecar save/load ---------------------------
@@ -1868,7 +1976,33 @@ class MainWindow(QMainWindow):
         return self._search_input.text().strip()
 
     def _show_find(self):
-        self._toggle_search_dock()
+        """Ctrl+F: focus the toolbar search field and show the results panel.
+
+        Pressed again while the field already has focus, it hides the panel again, so
+        Ctrl+F still toggles the panel the way it did before search moved to the toolbar.
+        """
+        if not self._search_dock.isHidden() and (self._search_input.hasFocus() or self._find_engaged):
+            self._find_engaged = False
+            self._set_search_panel_visible(False)
+            self.current_view().setFocus()
+            return
+        self._set_search_panel_visible(True)
+        self._find_engaged = True
+        self._search_input.setFocus()
+        self._search_input.selectAll()
+
+    def _on_search_focus_changed(self, focused: bool):
+        # Leaving the field (clicking the page, a result, ...) ends the Ctrl+F "session":
+        # the next Ctrl+F focuses the field again instead of closing the panel.
+        if not focused:
+            self._find_engaged = False
+
+    def _on_escape(self):
+        """Escape: leave the search field if it has focus, else clear the selection."""
+        if self._search_input.hasFocus() or self._page_input.hasFocus():
+            self.current_view().setFocus()
+            return
+        self.current_view().clear_all_selection()
 
     def _on_search_text_changed(self, text: str):
         if self._search_input_updating:
@@ -1907,6 +2041,11 @@ class MainWindow(QMainWindow):
         self.current_view().set_search_highlights([])
         self._search_results_list.clear()
         self._search_count_lbl.setText("")
+        self._search_title.title.setText("Search Results")
+        if self._search_input.text():
+            self._search_input_updating = True
+            self._search_input.clear()
+            self._search_input_updating = False
 
     def _update_search_count_label(self, ctx: TabContext | None = None):
         ctx = ctx or self.current_context()
@@ -2096,6 +2235,10 @@ class MainWindow(QMainWindow):
 
         if 0 <= ctx.search_index < self._search_results_list.count():
             self._search_results_list.setCurrentRow(ctx.search_index)
+        count = len(ctx.search_results)
+        self._search_title.title.setText(
+            f"Search Results - {count} match{'es' if count != 1 else ''}" if ctx.search_query else "Search Results"
+        )
 
     def _jump_to_search_item(self, item: QListWidgetItem):
         if item is None:
@@ -2220,6 +2363,9 @@ class MainWindow(QMainWindow):
             item.setToolTip(tip)
             self._annotation_list.addItem(item)
 
+        empty = not (ctx.sidecar_state.annotations or ctx.native_annotations)
+        self._show_hint(self._annotation_list, self._annotations_hint, empty)
+
         # Do not call view.set_annotations() here — that triggers a full scene
         # rebuild on every filter change.  set_annotations() is called only when
         # annotation data actually changes (load, create, delete, edit).
@@ -2263,9 +2409,9 @@ class MainWindow(QMainWindow):
             if str(item.data(Qt.ItemDataRole.UserRole)) == ann_id:
                 self._annotation_list.setCurrentItem(item)
                 break
-        # Auto-switch inspector to Annotations tab
-        if hasattr(self, "_inspector_tabs"):
-            self._inspector_tabs.setCurrentIndex(self._INSPECTOR_TAB_ANNOTATIONS)
+        # Bring the list into view when the sidebar is open; never pop panels open.
+        if not self._sidebar_dock.isHidden():
+            self._sidebar.set_current("annotations")
 
     def _edit_selected_annotation(self):
         ann_id = self._selected_annotation_id()
@@ -2281,90 +2427,10 @@ class MainWindow(QMainWindow):
 
     def _open_annotation_properties_dialog(self, ann: AnnotationRecord):
         """Open the annotation properties / edit dialog."""
-        from PySide6.QtWidgets import (
-            QColorDialog,
-            QDialog,
-            QDialogButtonBox,
-            QDoubleSpinBox,
-            QFormLayout,
-            QSlider,
-            QTextEdit,
-        )
-
-        dlg = QDialog(self)
-        dlg.setWindowTitle(f"Annotation Properties ({ann.type})")
-        dlg.setMinimumWidth(380)
-        form = QFormLayout(dlg)
-
-        # Text / contents (for types that support it)
-        text_edit = None
-        if ann.type in ("note", "text-box"):
-            text_edit = QTextEdit()
-            text_edit.setPlainText(ann.contents)
-            text_edit.setFixedHeight(90)
-            form.addRow("Text:", text_edit)
-
-        # Color
-        color_btn = QPushButton()
-        color_btn.setFixedSize(60, 24)
-        cur_color = QColor(ann.color or "#f7c948")
-
-        def _update_color_btn(c: QColor):
-            pix = QPixmap(40, 16)
-            pix.fill(c)
-            color_btn.setIcon(QIcon(pix))
-            color_btn.setText(c.name())
-        _update_color_btn(cur_color)
-
-        chosen_color = [cur_color]
-
-        def _pick_color():
-            c = QColorDialog.getColor(chosen_color[0], dlg, "Annotation Color")
-            if c.isValid():
-                chosen_color[0] = c
-                _update_color_btn(c)
-        color_btn.clicked.connect(_pick_color)
-        form.addRow("Color:", color_btn)
-
-        # Opacity
-        opacity_slider = QSlider(Qt.Orientation.Horizontal)
-        opacity_slider.setRange(5, 100)
-        opacity_slider.setValue(int(ann.opacity * 100))
-        opacity_label = QLabel(f"{int(ann.opacity * 100)}%")
-        opacity_slider.valueChanged.connect(lambda v: opacity_label.setText(f"{v}%"))
-        opacity_row = QHBoxLayout()
-        opacity_row.addWidget(opacity_slider)
-        opacity_row.addWidget(opacity_label)
-        opacity_container = QWidget()
-        opacity_container.setLayout(opacity_row)
-        form.addRow("Opacity:", opacity_container)
-
-        # Border width (for shapes, freehand, line, arrow)
-        if ann.type in ("rectangle", "ellipse", "line", "arrow", "freehand", "text-box"):
-            width_spin = QDoubleSpinBox()
-            width_spin.setRange(0.5, 20.0)
-            width_spin.setSingleStep(0.5)
-            width_spin.setDecimals(1)
-            width_spin.setValue(ann.border_width)
-            form.addRow("Stroke width:", width_spin)
-        else:
-            width_spin = None
-
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        buttons.accepted.connect(dlg.accept)
-        buttons.rejected.connect(dlg.reject)
-        form.addRow(buttons)
-
+        dlg = AnnotationPropertiesDialog(ann, self)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
-
-        ann.color = chosen_color[0].name()
-        ann.opacity = opacity_slider.value() / 100.0
-        if text_edit is not None:
-            ann.contents = text_edit.toPlainText()
-        if width_spin is not None:
-            ann.border_width = width_spin.value()
-        ann.updated_at = ""
+        dlg.apply_to(ann)
         self._mark_sidecar_dirty(self.current_view())
         self._populate_annotation_list()
 
@@ -2520,85 +2586,7 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            import fitz as _fitz
-            doc = _fitz.open(src)
-            for ann_rec in ctx.sidecar_state.annotations:
-                if not (0 <= ann_rec.page < doc.page_count):
-                    continue
-                page = doc[ann_rec.page]
-                x, y, w, h = ann_rec.rect
-                rect = _fitz.Rect(x, y, x + w, y + h)
-                color_obj = QColor(ann_rec.color or "#f7c948")
-                rgb = (color_obj.redF(), color_obj.greenF(), color_obj.blueF())
-
-                # Resolve border/stroke color
-                if ann_rec.border_color:
-                    bc_obj = QColor(ann_rec.border_color)
-                    stroke_rgb = (bc_obj.redF(), bc_obj.greenF(), bc_obj.blueF())
-                else:
-                    stroke_rgb = rgb
-
-                t = ann_rec.type
-                if t == "highlight":
-                    a = page.add_highlight_annot(rect)
-                elif t == "underline":
-                    a = page.add_underline_annot(rect)
-                elif t == "strikethrough":
-                    a = page.add_strikeout_annot(rect)
-                elif t in ("note",):
-                    a = page.add_text_annot(_fitz.Point(x, y), ann_rec.contents or "")
-                elif t == "text-box":
-                    a = page.add_freetext_annot(rect, ann_rec.contents or "", fontsize=ann_rec.font_size, text_color=rgb)
-                elif t == "rectangle":
-                    a = page.add_rect_annot(rect)
-                elif t == "ellipse":
-                    a = page.add_circle_annot(rect)
-                elif t == "line":
-                    a = page.add_line_annot(_fitz.Point(x, y), _fitz.Point(x + w, y + h))
-                elif t == "arrow":
-                    a = page.add_line_annot(_fitz.Point(x, y), _fitz.Point(x + w, y + h))
-                elif t == "freehand" and ann_rec.points:
-                    pts = [(p[0], p[1]) for p in ann_rec.points]
-                    a = page.add_ink_annot([pts])
-                else:
-                    continue
-
-                try:
-                    # Apply colors per annotation type
-                    if t in ("highlight", "underline", "strikethrough"):
-                        # Text markup: only color matters (no stroke/fill distinction)
-                        a.set_colors(stroke=rgb)
-                    elif t in ("rectangle", "ellipse"):
-                        # Shapes: stroke = border_color, fill = color
-                        a.set_colors(stroke=stroke_rgb, fill=rgb)
-                    elif t in ("line", "arrow", "freehand"):
-                        # Lines/paths: stroke only
-                        a.set_colors(stroke=stroke_rgb)
-                    elif t == "note":
-                        a.set_colors(fill=rgb)
-                    elif t == "text-box":
-                        pass  # colors set via add_freetext_annot params
-                    else:
-                        a.set_colors(stroke=rgb, fill=rgb)
-
-                    a.set_opacity(ann_rec.opacity)
-
-                    # Apply border width for shapes, lines, and freehand
-                    if t in ("rectangle", "ellipse", "line", "arrow", "freehand"):
-                        a.set_border(width=ann_rec.border_width)
-
-                    # Arrow line ending
-                    if t == "arrow":
-                        a.set_line_ends(_fitz.PDF_ANNOT_LE_NONE, _fitz.PDF_ANNOT_LE_CLOSED_ARROW)
-
-                    if ann_rec.contents and t not in ("note", "text-box", "freehand"):
-                        a.set_info(content=ann_rec.contents)
-                    a.update()
-                except Exception:
-                    pass
-
-            doc.save(out_path, garbage=4, deflate=True)
-            doc.close()
+            export_annotated_pdf(src, ctx.sidecar_state.annotations, out_path)
             self._status.showMessage(f"Saved annotated PDF to {os.path.basename(out_path)}", 3000)
         except Exception as exc:
             QMessageBox.critical(self, "Export Failed", f"Could not export annotations:\n{exc}")
@@ -2615,27 +2603,53 @@ class MainWindow(QMainWindow):
             return
 
         source_path = ctx.file_path or view.doc_path
-        self._thumb_source_key = os.path.abspath(source_path) if source_path else f"doc-{id(doc)}"
+        source_key = os.path.abspath(source_path) if source_path else f"doc-{id(doc)}"
+        # Thumbnails follow the view's reading colours, so the mode is part of the cache key.
+        self._thumb_source_key = f"{source_key}|{self._view_color_mode(view)}"
         self._thumb_icon_cache = {k: v for k, v in self._thumb_icon_cache.items() if k[0] == self._thumb_source_key}
 
         # The panel is hidden by default. Building one list item per page (and
         # rendering thumbnails for the current page on every scroll tick) for a
         # panel nobody sees is wasted O(pages) work on open; build it when the
         # panel is shown instead (_on_thumbs_visibility_changed).
-        if not self._thumbs_dock.isVisible():
+        if not self._thumbs_list.isVisible():
             return
 
+        placeholder = self._thumb_placeholder(doc)
         for i in range(doc.page_count):
             item = QListWidgetItem(f"{i + 1}")
             cached = self._thumb_icon_cache.get((self._thumb_source_key, i))
-            if cached is not None:
-                item.setIcon(cached)
-            else:
-                item.setIcon(self._icon("image-x-generic", QStyle.StandardPixmap.SP_FileIcon))
+            item.setIcon(cached if cached is not None else placeholder)
             item.setData(Qt.ItemDataRole.UserRole, i)
             self._thumbs_list.addItem(item)
+        if 0 <= view.current_page < doc.page_count:
+            self._thumbs_list.blockSignals(True)
+            self._thumbs_list.setCurrentRow(view.current_page)
+            self._thumbs_list.blockSignals(False)
 
         self._schedule_thumbnail_render()
+
+    def _thumb_size(self, width: float, height: float) -> tuple[float, int, int]:
+        """Scale and pixel size that fit a ``width`` x ``height`` pt page into THUMB_BOX."""
+        box = self.THUMB_BOX
+        scale = min(box.width() / max(width, 1.0), box.height() / max(height, 1.0))
+        return scale, max(1, round(width * scale)), max(1, round(height * scale))
+
+    def _thumb_placeholder(self, doc) -> QIcon:
+        """A blank page outline in the first page's proportions, shown until rendered."""
+        try:
+            rect = doc.load_page(0).rect
+            _scale, w, h = self._thumb_size(rect.width, rect.height)
+        except Exception:
+            w, h = self.THUMB_BOX.width(), self.THUMB_BOX.height()
+        t = theme.tokens()
+        pix = QPixmap(w, h)
+        pix.fill(QColor(t["surface"]))
+        painter = QPainter(pix)
+        painter.setPen(QColor(t["border_strong"]))
+        painter.drawRect(0, 0, w - 1, h - 1)
+        painter.end()
+        return QIcon(pix)
 
     def _on_thumbs_visibility_changed(self, visible: bool):
         doc = self.current_view().document
@@ -2711,7 +2725,9 @@ class MainWindow(QMainWindow):
             if icon is None:
                 try:
                     page = doc.load_page(page_idx)
-                    pix = page.get_pixmap(matrix=fitz.Matrix(0.15, 0.15), alpha=False)
+                    scale, _w, _h = self._thumb_size(page.rect.width, page.rect.height)
+                    dpr = max(1.0, float(self._thumbs_list.devicePixelRatioF()))
+                    pix = page.get_pixmap(matrix=fitz.Matrix(scale * dpr, scale * dpr), alpha=False)
                     image = QImage(
                         pix.samples,
                         pix.width,
@@ -2719,10 +2735,19 @@ class MainWindow(QMainWindow):
                         pix.stride,
                         QImage.Format.Format_RGB888,
                     ).copy()
-                    icon = QIcon(QPixmap.fromImage(image))
+                    color_mode = self._view_color_mode(view)
+                    if color_mode != "normal":
+                        image = apply_color_mode(image, color_mode)
+                    painter = QPainter(image)
+                    painter.setPen(QColor(theme.tokens()["border_strong"]))
+                    painter.drawRect(0, 0, image.width() - 1, image.height() - 1)
+                    painter.end()
+                    pixmap = QPixmap.fromImage(image)
+                    pixmap.setDevicePixelRatio(dpr)
+                    icon = QIcon(pixmap)
                     self._thumb_icon_cache[cache_key] = icon
                 except Exception:
-                    icon = self._icon("image-x-generic", QStyle.StandardPixmap.SP_FileIcon)
+                    icon = icons.icon("image")
 
             item = self._thumbs_list.item(page_idx)
             if item is not None:
@@ -2765,23 +2790,31 @@ class MainWindow(QMainWindow):
         if not view.document or not (1 <= page <= view.page_count):
             return
         if view.current_page + 1 == page:
-            return  # already there — no-op the duplicate fire.
+            return  # already there - no-op the duplicate fire.
         self._page_nav_in_progress = True
         try:
             view.go_to_page(page - 1)
         finally:
             self._page_nav_in_progress = False
+        self._page_input.setText(str(view.current_page + 1))
+
+    def _on_page_field_editing_finished(self):
+        self._on_page_nav_changed(self._page_input.text())
+        # Focus-out with junk or an out-of-range number shows the real page again.
+        view = self.current_view()
+        self._page_field.set_pages(view.current_page + 1 if view.document else 0, view.page_count)
+
+    def _focus_page_field(self):
+        self._page_input.setFocus()
+        self._page_input.selectAll()
 
     def _on_view_page_changed(self, view: PdfView, current: int, total: int):
         if not self._is_current_view(view):
             return
 
         self._doc_page.setText(f"{current} / {total}")
-        self._page_count_lbl.setText(f"Pages: {total}")
-        self._page_total_lbl.setText(f" / {total} ")
-        self._page_nav_combo.blockSignals(True)
-        self._page_nav_combo.setCurrentText(str(current))
-        self._page_nav_combo.blockSignals(False)
+        self._page_field.set_pages(current, total)
+        self._status.set_page(current, total)
 
         if total == self._thumbs_list.count() and total > 0:
             idx = current - 1
@@ -2830,12 +2863,6 @@ class MainWindow(QMainWindow):
         self._font_size.setText(size_text)
         self._font_style.setText(style_text)
 
-        # Auto-switch inspector to Font tab when hovering text (SELECT tool only)
-        if hasattr(self, "_inspector_tabs"):
-            view = self.current_view()
-            if view.tool == ToolMode.SELECT:
-                self._inspector_tabs.setCurrentIndex(self._INSPECTOR_TAB_FONT)
-
     def _on_view_text_selected(self, view: PdfView, text: str):
         if not self._is_current_view(view):
             return
@@ -2847,68 +2874,7 @@ class MainWindow(QMainWindow):
 
     def _load_native_pdf_annotations(self, view: PdfView, ctx) -> None:
         """Read annotations embedded in the PDF (e.g. created by Acrobat) and store as native_annotations."""
-        import fitz as _fitz
-
-        _FITZ_TYPE_MAP = {
-            _fitz.PDF_ANNOT_HIGHLIGHT: "highlight",
-            _fitz.PDF_ANNOT_UNDERLINE: "underline",
-            _fitz.PDF_ANNOT_SQUIGGLY: "underline",
-            _fitz.PDF_ANNOT_STRIKE_OUT: "strikethrough",
-            _fitz.PDF_ANNOT_TEXT: "note",
-            _fitz.PDF_ANNOT_FREE_TEXT: "text-box",
-            _fitz.PDF_ANNOT_SQUARE: "rectangle",
-            _fitz.PDF_ANNOT_CIRCLE: "ellipse",
-            _fitz.PDF_ANNOT_LINE: "line",
-            _fitz.PDF_ANNOT_INK: "freehand",
-            _fitz.PDF_ANNOT_POLYGON: "rectangle",
-            _fitz.PDF_ANNOT_POLY_LINE: "line",
-            _fitz.PDF_ANNOT_STAMP: "rectangle",
-        }
-
-        native = []
-        doc = view.document
-        if not doc:
-            ctx.native_annotations = native
-            return
-
-        try:
-            for page_idx in range(doc.page_count):
-                # Loading every page just to ask for its annotations cost ~0.1 ms
-                # per page (0.55 s on a 4963-page PDF, on the GUI thread, during
-                # open). The page dictionary's /Annots key answers "has none"
-                # without building a Page, so only annotated pages get loaded.
-                if not _page_may_have_annots(doc, page_idx):
-                    continue
-                page = doc[page_idx]
-                for ann in page.annots():
-                    ann_type = ann.type[0]
-                    mapped = _FITZ_TYPE_MAP.get(ann_type)
-                    if mapped is None:
-                        continue
-                    r = ann.rect
-                    color_tuple = ann.colors.get("stroke") or ann.colors.get("fill") or (1.0, 0.8, 0.0)
-                    hex_color = "#{:02x}{:02x}{:02x}".format(
-                        int(color_tuple[0] * 255),
-                        int(color_tuple[1] * 255),
-                        int(color_tuple[2] * 255),
-                    )
-                    info = ann.info
-                    contents = info.get("content", "") or ""
-                    native.append(
-                        AnnotationRecord(
-                            id=f"native-{page_idx}-{len(native)}",
-                            type=mapped,
-                            page=page_idx,
-                            rect=(r.x0, r.y0, r.width, r.height),
-                            color=hex_color,
-                            opacity=ann.opacity if ann.opacity is not None else 0.4,
-                            contents=contents,
-                        )
-                    )
-        except Exception:
-            pass
-
-        ctx.native_annotations = native
+        ctx.native_annotations = load_native_annotations(view.document)
 
     def _on_view_document_loaded(self, view: PdfView):
         if self._reload_in_progress:
@@ -2925,9 +2891,8 @@ class MainWindow(QMainWindow):
             all_annotations = ctx.sidecar_state.annotations + ctx.native_annotations
             view.set_annotations(all_annotations)
         if self._is_current_view(view):
+            # Also rebuilds the outline, thumbnails and annotation list.
             self._refresh_document_info()
-            self._populate_outline()
-            self._populate_annotation_list()
 
     # --------------------------- Reload / watch ---------------------------
     def _stop_watch(self):
@@ -3087,44 +3052,44 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             QMessageBox.critical(self, "Error", str(exc))
 
-    def _set_tool(self, tool: ToolMode):
-        view = self.current_view()
-        view.tool = tool
+    def _on_tool_action(self, tool: ToolMode):
+        """A tool picked from the toolbar, menu or keyboard (not restored from settings)."""
+        self._set_tool(tool)
+        if tool == ToolMode.MEASURE:
+            # Measuring is what the Inspector is for: open it on its first use.
+            self._set_inspector_visible(True)
+            self._inspector.measure_section.set_expanded(True)
 
+    def _sync_tool_actions(self, tool: ToolMode):
         self._select_action.setChecked(tool == ToolMode.SELECT)
         self._hand_action.setChecked(tool == ToolMode.HAND)
         self._measure_action.setChecked(tool == ToolMode.MEASURE)
         self._annotate_action.setChecked(tool == ToolMode.ANNOTATE)
-        self._toolbar_select_action.setChecked(tool == ToolMode.SELECT)
-        self._toolbar_hand_action.setChecked(tool == ToolMode.HAND)
-        self._toolbar_measure_action.setChecked(tool == ToolMode.MEASURE)
-        self._toolbar_annotate_action.setChecked(tool == ToolMode.ANNOTATE)
 
-        self._panel_select_btn.setChecked(tool == ToolMode.SELECT)
-        self._panel_hand_btn.setChecked(tool == ToolMode.HAND)
-        self._panel_measure_btn.setChecked(tool == ToolMode.MEASURE)
-        self._panel_annotate_btn.setChecked(tool == ToolMode.ANNOTATE)
+    def _set_tool(self, tool: ToolMode):
+        view = self.current_view()
+        view.tool = tool
+        self._sync_tool_actions(tool)
 
-        # Show/hide annotation toolbar
+        # The annotation toolbar is contextual: only while annotating.
         self._ann_toolbar.setVisible(tool == ToolMode.ANNOTATE)
-
-        # Auto-switch inspector tab to context-relevant panel
-        if hasattr(self, "_inspector_tabs"):
-            if tool == ToolMode.MEASURE:
-                self._inspector_tabs.setCurrentIndex(self._INSPECTOR_TAB_MEASURE)
-            elif tool == ToolMode.ANNOTATE:
-                self._inspector_tabs.setCurrentIndex(self._INSPECTOR_TAB_ANNOTATIONS)
-            elif tool in (ToolMode.SELECT, ToolMode.HAND):
-                # Only switch away from measure/annotate tabs; stay if already on font/doc
-                cur = self._inspector_tabs.currentIndex()
-                if cur in (self._INSPECTOR_TAB_MEASURE, self._INSPECTOR_TAB_ANNOTATIONS):
-                    self._inspector_tabs.setCurrentIndex(self._INSPECTOR_TAB_FONT)
+        if tool == ToolMode.ANNOTATE and not self._sidebar_dock.isHidden():
+            self._sidebar.set_current("annotations")
 
         self._settings.setValue("view/tool", tool.name)
         self._update_status()
 
     def _on_zoom_combo_changed(self, text: str):
         if self._zoom_combo_updating:
+            return
+        view = self.current_view()
+        if text == ZOOM_FIT_WIDTH:
+            view.fit_width()
+            self._sync_zoom_combo()
+            return
+        if text == ZOOM_FIT_PAGE:
+            view.fit_page()
+            self._sync_zoom_combo()
             return
         raw = text.strip().replace("%", "")
         if not raw:
@@ -3158,66 +3123,320 @@ class MainWindow(QMainWindow):
             self._stop_watch()
 
     # --------------------------- Status/update ---------------------------
+    def _set_unit(self, unit: str):
+        unit = normalize_unit(unit)
+        self._unit = unit
+        self._settings.setValue("view/unit", unit)
+        combo = self._inspector.units_combo
+        idx = combo.findData(unit)
+        if idx >= 0 and idx != combo.currentIndex():
+            combo.blockSignals(True)
+            combo.setCurrentIndex(idx)
+            combo.blockSignals(False)
+        for act in getattr(self, "_unit_actions", {}).values():
+            act.setChecked(act.data() == unit)
+        self._update_measurements_panel(self.current_view().selection_rect)
+
     def _update_measurements_panel(self, sel: QRectF | None):
         if not sel:
-            self._measure_w.setText("W  --")
-            self._measure_h.setText("H  --")
-            self._measure_x.setText("X  --")
-            self._measure_y.setText("Y  --")
+            for label in (self._measure_w, self._measure_h, self._measure_x, self._measure_y):
+                label.setText("--")
+            self._status.set_measurement("")
+            self._inspector.measure_hint.setVisible(True)
             return
-        self._measure_w.setText(f"W  {sel.width():.1f} pt")
-        self._measure_h.setText(f"H  {sel.height():.1f} pt")
-        self._measure_x.setText(f"X  {sel.x():.1f} pt")
-        self._measure_y.setText(f"Y  {sel.y():.1f} pt")
+        unit = self._unit
+        self._measure_w.setText(format_length(sel.width(), unit))
+        self._measure_h.setText(format_length(sel.height(), unit))
+        self._measure_x.setText(format_length(sel.x(), unit))
+        self._measure_y.setText(format_length(sel.y(), unit))
+        self._status.set_measurement(f"{format_length(sel.width(), unit)} x {format_length(sel.height(), unit)}")
+        self._inspector.measure_hint.setVisible(False)
+
+    def _update_action_states(self, has_doc: bool):
+        for action in self._doc_actions:
+            action.setEnabled(has_doc)
+        self._zoom_combo.setEnabled(has_doc)
+        self._search_field.setEnabled(has_doc)
+        for widget in (self._annotation_filter, self._annotation_edit_btn, self._annotation_delete_btn,
+                       self._annotation_export_btn, self._outline_filter):
+            widget.setEnabled(has_doc)
+        self._update_capability_actions()
+
+    # --------------------------- Viewer capabilities ---------------------------
+    @staticmethod
+    def _view_supports(view, *names: str) -> bool:
+        return all(callable(getattr(view, name, None)) for name in names)
+
+    def _view_password(self, view: PdfView) -> str | None:
+        getter = getattr(view, "document_password", None)
+        return getter() if callable(getter) else None
+
+    def _update_capability_actions(self):
+        """Enable print/presentation and the Phase B actions for what the current view supports.
+
+        Page layout, reading mode and back/forward call PdfView methods that land in Phase B
+        (docs/dev/viewer-api.md). Until a view has them, their actions stay disabled.
+        """
+        view = self.current_view()
+        has_doc = view.document is not None
+        self._print_action.setEnabled(has_doc)
+        self._presentation_action.setEnabled(has_doc)
+
+        can_page = has_doc and self._view_supports(view, "set_page_mode", "page_mode")
+        page_mode = view.page_mode() if can_page else None
+        for mode, act in self._page_mode_actions.items():
+            act.setEnabled(can_page)
+            act.setChecked(mode == page_mode)
+        self._page_layout_menu.setEnabled(can_page)
+
+        can_color = has_doc and self._view_supports(view, "set_color_mode", "color_mode")
+        color_mode = view.color_mode() if can_color else None
+        for mode, act in self._color_mode_actions.items():
+            act.setEnabled(can_color)
+            act.setChecked(mode == color_mode)
+        self._reading_mode_menu.setEnabled(can_color)
+
+        can_history = has_doc and self._view_supports(view, "go_back", "go_forward", "can_go_back", "can_go_forward")
+        self._back_action.setEnabled(bool(can_history and view.can_go_back()))
+        self._forward_action.setEnabled(bool(can_history and view.can_go_forward()))
+
+    def _view_color_mode(self, view: PdfView) -> str:
+        getter = getattr(view, "color_mode", None)
+        return str(getter()) if callable(getter) else "normal"
+
+    def _on_view_color_mode_changed(self, view: PdfView):
+        # Re-render the thumbnails in the new reading colours (cached per mode).
+        if self._is_current_view(view):
+            self._populate_thumbnails()
+
+    def _on_view_capability_changed(self, view: PdfView):
+        if self._is_current_view(view):
+            self._update_capability_actions()
+        self._schedule_session_save()
+
+    def _set_page_mode(self, mode: str):
+        view = self.current_view()
+        if view.document is not None and self._view_supports(view, "set_page_mode"):
+            try:
+                view.set_page_mode(mode)
+            except ValueError as exc:
+                self._status.showMessage(str(exc), 3000)
+            self._schedule_session_save()
+        self._update_capability_actions()
+
+    def _set_color_mode(self, mode: str):
+        view = self.current_view()
+        if view.document is not None and self._view_supports(view, "set_color_mode"):
+            try:
+                view.set_color_mode(mode)
+            except ValueError as exc:
+                self._status.showMessage(str(exc), 3000)
+            self._schedule_session_save()
+        self._update_capability_actions()
+
+    def _go_back(self):
+        view = self.current_view()
+        if view.document is not None and self._view_supports(view, "go_back"):
+            view.go_back()
+        self._update_capability_actions()
+
+    def _go_forward(self):
+        view = self.current_view()
+        if view.document is not None and self._view_supports(view, "go_forward"):
+            view.go_forward()
+        self._update_capability_actions()
+
+    def _print_document(self):
+        view = self.current_view()
+        path = view.doc_path
+        if view.document is None or not path:
+            self._status.showMessage("Open a PDF first", 1500)
+            return
+        try:
+            printing.print_document(self, path, view.current_page, self._view_password(view))
+        except Exception as exc:
+            # The file is re-read from disk and may be mid-rebuild (LaTeX) or re-encrypted.
+            self._status.showMessage(f"Could not print {os.path.basename(path)}: {exc}", 6000)
+
+    def _start_presentation(self):
+        existing = self._presentation
+        if existing is not None and shiboken6.isValid(existing) and existing.isVisible():
+            existing.raise_()
+            existing.activateWindow()
+            return
+        view = self.current_view()
+        path = view.doc_path
+        if view.document is None or not path:
+            self._status.showMessage("Open a PDF first", 1500)
+            return
+        try:
+            win = presentation.PresentationWindow(path, view.current_page, self._view_password(view))
+        except Exception as exc:
+            self._status.showMessage(f"Could not start the presentation: {exc}", 6000)
+            return
+        win.closed.connect(lambda page, v=view: self._on_presentation_closed(v, page))
+        self._presentation = win
+        win.present()
+
+    def _on_presentation_closed(self, view: PdfView, page: int):
+        win = self._presentation
+        self._presentation = None
+        if shiboken6.isValid(view) and view.document is not None and 0 <= page < view.page_count:
+            view.go_to_page(page)
+        if win is not None and shiboken6.isValid(win):
+            win.deleteLater()
+
+    # Encrypted documents (Phase B: PdfView.open_document(path, password), password_required).
+    def _view_can_unlock(self, view: PdfView) -> bool:
+        return getattr(view, "password_required", None) is not None
+
+    @staticmethod
+    def _needs_password(path: str) -> bool:
+        try:
+            return password.needs_password(path)
+        except Exception:
+            return False
+
+    def _unlock_and_open(self, view: PdfView, path: str) -> bool:
+        """Ask for the password (up to MAX_ATTEMPTS times) and open ``path`` in ``view``."""
+        dlg = password.PasswordDialog(self, os.path.basename(path))
+        for _attempt in range(password.MAX_ATTEMPTS):
+            if dlg.exec() != QDialog.DialogCode.Accepted:
+                return False
+            if view.open_document(path, dlg.password()):
+                return True
+            dlg.set_error("Incorrect password. Try again.")
+        self._status.showMessage(f"Could not unlock {os.path.basename(path)}", 4000)
+        return False
+
+    def _on_view_password_required(self, view: PdfView, path: str):
+        # During _open_file the prompt runs inline (and an unopened new tab is closed).
+        if self._open_in_progress or self._reload_in_progress:
+            if self._reload_in_progress:
+                QTimer.singleShot(0, lambda v=view, p=path: self._on_view_password_required(v, p))
+            return
+        if not shiboken6.isValid(view):
+            return
+        if self._unlock_and_open(view, path) and self._is_current_view(view):
+            self._refresh_document_info()
+            self._update_status()
+
+    # --------------------------- Theme ---------------------------
+    THEME_CHOICES = ("light", "dark", "system")
+
+    @staticmethod
+    def _system_theme() -> str:
+        hints = QGuiApplication.styleHints()
+        scheme = hints.colorScheme() if hasattr(hints, "colorScheme") else None
+        return "dark" if scheme == Qt.ColorScheme.Dark else "light"
+
+    def _resolve_theme(self, choice: str) -> str:
+        return self._system_theme() if choice == "system" else theme.normalize_mode(choice)
+
+    def _startup_theme_choice(self) -> str:
+        """The theme menu's initial choice; applies a saved theme the app did not start with.
+
+        NEOVIEW_THEME (already applied by app.main) wins over the saved choice. Without
+        either, nothing is applied: the app keeps whatever theme it has.
+        """
+        hints = QGuiApplication.styleHints()
+        if hasattr(hints, "colorSchemeChanged"):
+            hints.colorSchemeChanged.connect(self._on_system_color_scheme_changed)
+        env = os.getenv("NEOVIEW_THEME", "").strip().lower()
+        if env:
+            return theme.normalize_mode(env)
+        saved = self._settings.value("view/theme", "", type=str)
+        if saved not in self.THEME_CHOICES:
+            return theme.current_mode()
+        mode = self._resolve_theme(saved)
+        app = QApplication.instance()
+        if mode != theme.current_mode() and app is not None:
+            theme.apply_theme(app, mode)
+        return saved
+
+    def _set_theme(self, choice: str, persist: bool = True):
+        """Switch theme at runtime: palette, stylesheets, icon tints, canvas and thumbnails."""
+        if choice not in self.THEME_CHOICES:
+            return
+        self._theme_choice = choice
+        if persist:
+            self._settings.setValue("view/theme", choice)
+        for key, act in self._theme_actions.items():
+            act.setChecked(key == choice)
+        mode = self._resolve_theme(choice)
+        app = QApplication.instance()
+        if app is None:
+            return
+        if mode != theme.current_mode() or not app.styleSheet():
+            theme.apply_theme(app, mode)
+        install_chrome_stylesheet(app, mode)
+        self._icons.retint()
+        self._ann_toolbar.retint()
+        self._thumb_icon_cache.clear()
+        for idx in range(self._tabs.count()):
+            widget = self._tabs.widget(idx)
+            apply_colors = getattr(widget, "apply_theme_colors", None)
+            if callable(apply_colors):
+                apply_colors()
+        self._populate_thumbnails()
+
+    def _on_system_color_scheme_changed(self, *_args):
+        if self._theme_choice == "system":
+            self._set_theme("system", persist=False)
+
+    def _show_about(self):
+        try:
+            from importlib.metadata import version
+
+            ver = version("neoview")
+        except Exception:
+            ver = "dev"
+        QMessageBox.about(
+            self,
+            f"About {APP_NAME}",
+            f"<h3>{APP_NAME} {html.escape(ver)}</h3>"
+            "<p>A PDF viewer with measurement tools, annotations and auto-reload for LaTeX "
+            "workflows.</p><p>Icons: Lucide (ISC). Font: Inter (SIL OFL 1.1).</p>",
+        )
 
     def _update_status(self):
         view = self.current_view()
         ctx = self.current_context()
+        has_doc = view.document is not None
 
-        if view.document:
+        if has_doc:
             name = os.path.basename(ctx.file_path) if ctx.file_path else "Untitled"
             zoom_text = f"{view.zoom * 100:.0f}%"
-
-            self._status_dot.setProperty("offline", False)
-            self._status_dot.style().unpolish(self._status_dot)
-            self._status_dot.style().polish(self._status_dot)
-
-            self._file_lbl.setText(name)
-            self._zoom_lbl.setText(zoom_text)
+            self._status.set_document(name)
+            self._status.set_zoom(view.zoom * 100)
+            self._status.set_page(view.current_page + 1, view.page_count)
             self._doc_name.setText(name)
             self._doc_zoom.setText(zoom_text)
             self._doc_page.setText(f"{view.current_page + 1} / {view.page_count}")
-            self._page_count_lbl.setText(f"Pages: {view.page_count}")
-            self._page_total_lbl.setText(f" / {view.page_count} ")
-            self._page_nav_combo.blockSignals(True)
-            self._page_nav_combo.setCurrentText(str(view.current_page + 1))
-            self._page_nav_combo.blockSignals(False)
-
-            self._sync_zoom_combo()
+            self._page_field.set_pages(view.current_page + 1, view.page_count)
             self._update_measurements_panel(view.selection_rect)
         else:
-            self._status_dot.setProperty("offline", True)
-            self._status_dot.style().unpolish(self._status_dot)
-            self._status_dot.style().polish(self._status_dot)
-
-            self._file_lbl.setText("No file")
-            self._page_count_lbl.setText("Pages: 0")
-            self._page_total_lbl.setText(" / 0 ")
-            self._zoom_lbl.setText("--")
+            self._status.set_document(None)
+            self._status.set_zoom(None)
+            self._status.set_page(0, 0)
             self._doc_name.setText("No file")
             self._doc_page.setText("0 / 0")
             self._doc_zoom.setText("--")
-            self._sync_zoom_combo()
+            self._page_field.set_pages(0, 0)
             self._update_measurements_panel(None)
 
-        self._toolbar_select_action.setChecked(view.tool == ToolMode.SELECT)
-        self._toolbar_hand_action.setChecked(view.tool == ToolMode.HAND)
-        self._toolbar_measure_action.setChecked(view.tool == ToolMode.MEASURE)
-        self._toolbar_annotate_action.setChecked(view.tool == ToolMode.ANNOTATE)
-        self._panel_select_btn.setChecked(view.tool == ToolMode.SELECT)
-        self._panel_hand_btn.setChecked(view.tool == ToolMode.HAND)
-        self._panel_measure_btn.setChecked(view.tool == ToolMode.MEASURE)
-        self._panel_annotate_btn.setChecked(view.tool == ToolMode.ANNOTATE)
+        self._sync_zoom_combo()
+        self._sync_tool_actions(view.tool)
+        self._update_action_states(has_doc)
+        self._update_empty_state()
+
+    def _update_empty_state(self):
+        empty = self._tabs.count() <= 1 and self.current_view().document is None
+        if empty and self._welcome.isHidden():
+            self._welcome.set_recent_files(self._recent_files)
+        self._welcome.setVisible(empty)
+        if empty:
+            self._welcome.raise_()
 
     # ----------------------- Performance mode helpers -----------------------
     def _on_performance_mode_toggled(self, checked: bool) -> None:
@@ -3229,54 +3448,14 @@ class MainWindow(QMainWindow):
     def _update_perf_status(self) -> None:
         view = self.current_view()
         if isinstance(view, PdfView) and view.is_performance_mode():
-            self._perf_label.setText("Perf Mode ON")
+            self._perf_label.setText("Performance mode")
         else:
             self._perf_label.setText("")
 
-    # --------------------------- Utility widgets ---------------------------
-    def _hand_icon(self) -> QIcon:
-        from neoview.ui import icons
-
-        return icons.icon("hand")
-
-    def _icon(self, name: str, fallback: QStyle.StandardPixmap) -> QIcon:
-        # Bundled Lucide icons on every platform; freedesktop names are mapped, the
-        # fallback is unused but kept so existing call sites stay valid.
-        from neoview.ui import icons
-
+    # --------------------------- Utility ---------------------------
+    def _icon(self, name: str) -> QIcon:
+        """A bundled icon tinted for the current theme (see neoview.ui.icons)."""
         return icons.icon(name)
-
-    def _action(self, text: str, slot, shortcut=None) -> QAction:
-        action = QAction(text, self)
-        action.triggered.connect(slot)
-        if shortcut:
-            action.setShortcut(shortcut)
-        return action
-
-    def _divider(self) -> QFrame:
-        line = QFrame()
-        line.setProperty("separator", True)
-        line.setFrameShape(QFrame.Shape.HLine)
-        line.setFrameShadow(QFrame.Shadow.Plain)
-        return line
-
-    def _kv_value(self, label: str) -> QLabel:
-        value = QLabel(f"{label}  --")
-        value.setObjectName("MonoValue")
-        return value
-
-    def _info_row(self, parent_layout: QVBoxLayout, label: str, value: str) -> QLabel:
-        row = QHBoxLayout()
-        key = QLabel(f"{label}:")
-        key.setObjectName("InfoLabel")
-        val = QLabel(value)
-        val.setObjectName("InfoValue")
-        val.setTextFormat(Qt.TextFormat.PlainText)
-        row.addWidget(key)
-        row.addStretch()
-        row.addWidget(val)
-        parent_layout.addLayout(row)
-        return val
 
     def _metadata_text(self, value, empty: str = "--") -> str:
         if value is None:
@@ -3327,6 +3506,8 @@ class MainWindow(QMainWindow):
         return f"{size:.1f} {units[unit_idx]}"
 
     def closeEvent(self, e):
+        if self._presentation is not None and shiboken6.isValid(self._presentation):
+            self._presentation.close()
         self._search_timer.stop()
         self._cancel_search_operation()
         self._reload_timer.stop()

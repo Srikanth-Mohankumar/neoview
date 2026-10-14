@@ -127,7 +127,7 @@ def test_outline_toc_navigation_via_qtbot(tmp_path: Path, qtbot, monkeypatch):
     qtbot.addWidget(win)
     win.show()
     win._open_file(str(pdf))
-    win._outline_dock.show()
+    win._show_sidebar_page("outline")
 
     jumps = []
     monkeypatch.setattr(win.current_view(), "go_to_page", lambda idx: jumps.append(idx))
@@ -149,7 +149,7 @@ def test_thumbnail_navigation_via_qtbot(tmp_path: Path, qtbot, monkeypatch):
     qtbot.addWidget(win)
     win.show()
     win._open_file(str(pdf))
-    win._thumbs_dock.show()
+    win._show_sidebar_page("thumbnails")
     win._render_thumbnail_batch()
 
     jumps = []
@@ -476,15 +476,15 @@ def test_bookmark_context_menu_rename_and_delete_via_qtbot(tmp_path: Path, qtbot
     qtbot.addWidget(win)
     win.show()
     win._open_file(str(pdf))
-    win._outline_dock.show()
+    # Bookmarks have their own sidebar panel (they shared the outline tree before).
+    win._show_sidebar_page("bookmarks")
 
     monkeypatch.setattr(QInputDialog, "getText", lambda *_args, **_kwargs: ("Original Mark", True))
     win._add_bookmark_action.trigger()
     assert len(win.current_context().sidecar_state.bookmarks) == 1
 
-    bookmark_root = win._outline_tree.topLevelItem(1)
-    item = bookmark_root.child(0)
-    rect = win._outline_tree.visualItemRect(item)
+    item = win._bookmarks_list.item(0)
+    rect = win._bookmarks_list.visualItemRect(item)
     pos = rect.center()
 
     monkeypatch.setattr(QInputDialog, "getText", lambda *_args, **_kwargs: ("Renamed Mark", True))
@@ -518,21 +518,19 @@ def test_bookmark_context_menu_rename_and_delete_via_qtbot(tmp_path: Path, qtbot
 
     monkeypatch.setattr("neoview.ui.main_window.QMenu", _FakeMenu)
     _FakeMenu.choice_text = "Rename Bookmark"
-    win._on_outline_context_menu(pos)
+    win._on_bookmarks_context_menu(pos)
 
     assert win.current_context().sidecar_state.bookmarks[0].title == "Renamed Mark"
-    bookmark_root = win._outline_tree.topLevelItem(1)
-    item = bookmark_root.child(0)
-    assert "Renamed Mark" in bookmark_root.child(0).text(0)
+    item = win._bookmarks_list.item(0)
+    assert "Renamed Mark" in item.text()
 
     _FakeMenu.choice_text = "Delete Bookmark"
-    rect = win._outline_tree.visualItemRect(item)
+    rect = win._bookmarks_list.visualItemRect(item)
     pos = rect.center()
-    win._on_outline_context_menu(pos)
+    win._on_bookmarks_context_menu(pos)
 
     assert win.current_context().sidecar_state.bookmarks == []
-    bookmark_root = win._outline_tree.topLevelItem(1)
-    assert bookmark_root.childCount() == 0
+    assert win._bookmarks_list.count() == 0
 
 
 def test_annotation_context_menu_edit_and_delete_via_qtbot(tmp_path: Path, qtbot, monkeypatch):

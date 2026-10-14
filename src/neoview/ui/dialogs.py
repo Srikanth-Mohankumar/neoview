@@ -1,23 +1,28 @@
 """UI dialogs."""
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QIcon, QPixmap
 from PySide6.QtWidgets import (
-    QApplication,
     QCheckBox,
     QColorDialog,
     QComboBox,
     QDialog,
+    QDialogButtonBox,
     QDoubleSpinBox,
+    QFormLayout,
     QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
+    QSlider,
     QSpinBox,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
+
+from neoview import theme
 
 
 class ExportDialog(QDialog):
@@ -182,26 +187,20 @@ class LayoutGridDialog(QDialog):
         panel_layout.addLayout(btns)
 
     def _apply_dialog_style(self):
-        app = QApplication.instance()
-        theme_mode = ""
-        if app is not None:
-            theme_mode = str(app.property("theme_mode") or "").lower()
-        if theme_mode == "dark":
-            self.setStyleSheet(
-                """
-                QDialog#LayoutGridDialog { background: #1e1e1e; }
-                QWidget#LayoutGridPanel { background: #2a2a2a; border: 1px solid #424242; border-radius: 8px; }
-                QWidget#LayoutGridPanel QLabel, QWidget#LayoutGridPanel QCheckBox { color: #e2e4e9; background: transparent; }
-                """
-            )
-        else:
-            self.setStyleSheet(
-                """
-                QDialog#LayoutGridDialog { background: #f2f4f7; }
-                QWidget#LayoutGridPanel { background: #ffffff; border: 1px solid #d4dae3; border-radius: 8px; }
-                QWidget#LayoutGridPanel QLabel, QWidget#LayoutGridPanel QCheckBox { color: #2c3440; background: transparent; }
-                """
-            )
+        # Colours come from the active theme's tokens (theme.current_mode()), not a
+        # hard-coded light/dark pair.
+        t = theme.tokens()
+        self.setStyleSheet(
+            f"""
+            QDialog#LayoutGridDialog {{ background: {t["background"]}; }}
+            QWidget#LayoutGridPanel {{
+                background: {t["surface"]}; border: 1px solid {t["border"]}; border-radius: {theme.RADIUS["lg"]}px;
+            }}
+            QWidget#LayoutGridPanel QLabel, QWidget#LayoutGridPanel QCheckBox {{
+                color: {t["text"]}; background: transparent;
+            }}
+            """
+        )
 
     def _choose_color(self):
         color = QColorDialog.getColor(self._grid_color, self, "Choose Grid Color")
@@ -211,8 +210,11 @@ class LayoutGridDialog(QDialog):
 
     def _sync_color_button(self):
         self.color_btn.setText(self._grid_color.name().upper())
+        # The swatch is the user's colour; the label stays readable on light and dark swatches.
+        label = "#000000" if self._grid_color.lightnessF() > 0.6 else "#ffffff"
+        border = theme.tokens()["border_strong"]
         self.color_btn.setStyleSheet(
-            f"background:{self._grid_color.name()}; color:#ffffff; border:1px solid #666; padding:4px 8px;"
+            f"background:{self._grid_color.name()}; color:{label}; border:1px solid {border}; padding:4px 8px;"
         )
 
     @property
@@ -228,3 +230,85 @@ class LayoutGridDialog(QDialog):
             "corner_length": float(self.corner_length.value()),
             "color": self._grid_color.name(),
         }
+
+
+class AnnotationPropertiesDialog(QDialog):
+    """Edit colour, opacity, text and stroke width of one annotation record.
+
+    The dialog never mutates the record itself; call ``apply_to(record)`` after it was
+    accepted.
+    """
+
+    _TEXT_TYPES = ("note", "text-box")
+    _STROKE_TYPES = ("rectangle", "ellipse", "line", "arrow", "freehand", "text-box")
+
+    def __init__(self, ann, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"Annotation Properties ({ann.type})")
+        self.setMinimumWidth(380)
+        form = QFormLayout(self)
+
+        # Text / contents (for types that support it)
+        self.text_edit: QTextEdit | None = None
+        if ann.type in self._TEXT_TYPES:
+            self.text_edit = QTextEdit()
+            self.text_edit.setPlainText(ann.contents)
+            self.text_edit.setFixedHeight(90)
+            form.addRow("Text:", self.text_edit)
+
+        # Color
+        self.color_btn = QPushButton()
+        self.color_btn.setFixedSize(60, 24)
+        self._color = QColor(ann.color or "#f7c948")
+        self._update_color_btn()
+        self.color_btn.clicked.connect(self._pick_color)
+        form.addRow("Color:", self.color_btn)
+
+        # Opacity
+        self.opacity_slider = QSlider(Qt.Orientation.Horizontal)
+        self.opacity_slider.setRange(5, 100)
+        self.opacity_slider.setValue(int(ann.opacity * 100))
+        opacity_label = QLabel(f"{int(ann.opacity * 100)}%")
+        self.opacity_slider.valueChanged.connect(lambda v: opacity_label.setText(f"{v}%"))
+        opacity_row = QHBoxLayout()
+        opacity_row.addWidget(self.opacity_slider)
+        opacity_row.addWidget(opacity_label)
+        opacity_container = QWidget()
+        opacity_container.setLayout(opacity_row)
+        form.addRow("Opacity:", opacity_container)
+
+        # Border width (for shapes, freehand, line, arrow)
+        self.width_spin: QDoubleSpinBox | None = None
+        if ann.type in self._STROKE_TYPES:
+            self.width_spin = QDoubleSpinBox()
+            self.width_spin.setRange(0.5, 20.0)
+            self.width_spin.setSingleStep(0.5)
+            self.width_spin.setDecimals(1)
+            self.width_spin.setValue(ann.border_width)
+            form.addRow("Stroke width:", self.width_spin)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        form.addRow(buttons)
+
+    def _update_color_btn(self):
+        pix = QPixmap(40, 16)
+        pix.fill(self._color)
+        self.color_btn.setIcon(QIcon(pix))
+        self.color_btn.setText(self._color.name())
+
+    def _pick_color(self):
+        c = QColorDialog.getColor(self._color, self, "Annotation Color")
+        if c.isValid():
+            self._color = c
+            self._update_color_btn()
+
+    def apply_to(self, ann) -> None:
+        ann.color = self._color.name()
+        ann.opacity = self.opacity_slider.value() / 100.0
+        if self.text_edit is not None:
+            ann.contents = self.text_edit.toPlainText()
+        if self.width_spin is not None:
+            ann.border_width = self.width_spin.value()
+        ann.updated_at = ""
