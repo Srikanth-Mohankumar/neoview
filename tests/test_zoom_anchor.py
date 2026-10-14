@@ -13,7 +13,7 @@ from pathlib import Path
 import fitz
 import pytest
 from PySide6.QtCore import QPoint, QPointF, Qt
-from PySide6.QtGui import QWheelEvent
+from PySide6.QtGui import QNativeGestureEvent, QPointingDevice, QWheelEvent
 from PySide6.QtWidgets import QApplication
 
 from neoview.ui.pdf_view import PdfView
@@ -481,6 +481,22 @@ def _ctrl_wheel(view: PdfView, pos: QPoint, *, angle: int = 0, pixel: int = 0) -
     return ev.isAccepted()
 
 
+def _native(view: PdfView, kind: Qt.NativeGestureType, pos: QPoint, value: float = 0.0) -> bool:
+    """Send one touchpad gesture event to the viewport, the way Qt delivers a pinch on
+    X11 (XInput 2.4), Wayland, macOS and Windows precision touchpads."""
+    ev = QNativeGestureEvent(kind, QPointingDevice.primaryPointingDevice(), 2, QPointF(pos),
+                             QPointF(pos), QPointF(view.viewport().mapToGlobal(pos)), value,
+                             QPointF(0, 0))
+    return QApplication.sendEvent(view.viewport(), ev)
+
+
+def _pinch(view: PdfView, pos: QPoint, deltas: list[float]) -> None:
+    _native(view, Qt.NativeGestureType.BeginNativeGesture, pos)
+    for value in deltas:
+        _native(view, Qt.NativeGestureType.ZoomNativeGesture, pos, value)
+    _native(view, Qt.NativeGestureType.EndNativeGesture, pos)
+
+
 def _anchor_under(view: PdfView, vp: QPoint) -> tuple[int, float, float]:
     """Page-local point under *vp*; in a gap, relative to the nearest page."""
     scene_pt = view.mapToScene(vp)
@@ -509,6 +525,7 @@ ZOOM_IN_PATHS = {
     "set_zoom": lambda v: v.set_zoom(v.zoom * 1.25),  # zoom box in the status bar
     "ctrl_wheel_angle": lambda v: [_ctrl_wheel(v, _centre(v), angle=120) for _ in range(3)],
     "ctrl_wheel_pixel": lambda v: [_ctrl_wheel(v, _centre(v), pixel=12) for _ in range(30)],
+    "pinch": lambda v: _pinch(v, _centre(v), [0.02] * 12),
 }
 
 
@@ -579,6 +596,91 @@ def test_zoom_at_document_top_keeps_the_top(pdf_book: Path):
     finally:
         view.close_document()
         view.close()
+
+
+class TestTouchpadPinch:
+    """ZoomNativeGesture: value() is the change in scale since the previous event."""
+
+    def test_pinch_out_zooms_in_and_is_handled(self, pdf_book: Path):
+        view = _load_view(pdf_book)
+        try:
+            pos = _centre(view)
+            assert _native(view, Qt.NativeGestureType.BeginNativeGesture, pos)
+            assert _native(view, Qt.NativeGestureType.ZoomNativeGesture, pos, 0.1)
+            assert view.zoom == pytest.approx(1.1, rel=1e-3)
+            assert _native(view, Qt.NativeGestureType.ZoomNativeGesture, pos, 0.1)
+            assert view.zoom == pytest.approx(1.1 * 1.1, rel=1e-3)
+            assert _native(view, Qt.NativeGestureType.EndNativeGesture, pos)
+        finally:
+            view.close_document()
+            view.close()
+
+    def test_pinch_in_zooms_out(self, pdf_book: Path):
+        view = _load_view(pdf_book)
+        try:
+            _pinch(view, _centre(view), [-0.05] * 4)
+            assert view.zoom == pytest.approx(0.95 ** 4, rel=1e-3)
+        finally:
+            view.close_document()
+            view.close()
+
+    def test_small_deltas_accumulate(self, pdf_book: Path):
+        """Touchpads report ~0.005 per event; every step must count, not be rounded away."""
+        view = _load_view(pdf_book)
+        try:
+            _pinch(view, _centre(view), [0.005] * 10)
+            assert view.zoom == pytest.approx(1.005 ** 10, rel=1e-3)
+        finally:
+            view.close_document()
+            view.close()
+
+    def test_pinch_is_clamped(self, pdf_book: Path):
+        view = _load_view(pdf_book)
+        try:
+            _pinch(view, _centre(view), [0.5] * 20)
+            assert view.zoom == pytest.approx(10.0)
+            _pinch(view, _centre(view), [-0.5] * 20)
+            assert view.zoom == pytest.approx(0.1)
+            _pinch(view, _centre(view), [-1.0, -3.0])  # a factor <= 0 is ignored
+            assert view.zoom == pytest.approx(0.1)
+        finally:
+            view.close_document()
+            view.close()
+
+    def test_pinch_keeps_point_under_fingers(self, pdf_book: Path):
+        """The anchor invariant of TestZoomAtViewportPoint, off-centre, over a long
+        gesture: per-event scrollbar rounding must not add up."""
+        view = _load_view(pdf_book)
+        try:
+            view.set_zoom(2.0, immediate=True)
+            QApplication.processEvents()
+            pos = _viewport_for_page_local(view, 0, 250.0, 200.0)
+            anchor = _anchor_under(view, pos)
+            _pinch(view, pos, [0.01] * 40)
+            QApplication.processEvents()
+            assert view.zoom == pytest.approx(2.0 * 1.01 ** 40, rel=1e-3)
+            dx, dy = _drift(view, anchor, pos)
+            assert dx <= 2 and dy <= 2, f"pinch drifted by ({dx}, {dy}) px"
+        finally:
+            view.close_document()
+            view.close()
+
+    def test_pinch_renders_once_after_the_gesture(self, pdf_book: Path, qtbot):
+        """Each event only relayouts; the pages render once, from the debounce timer."""
+        view = _load_view(pdf_book)
+        try:
+            qtbot.waitUntil(lambda: view.pending_render_count() == 0, timeout=3000)
+            calls = []
+            view._rerender_timer.timeout.connect(lambda: calls.append(1))
+            _pinch(view, _centre(view), [0.02] * 10)
+            assert view.zoom > 1.2
+            assert calls == []
+            assert view._rerender_timer.isActive()
+            qtbot.waitUntil(lambda: view.pending_render_count() == 0, timeout=3000)
+            assert calls == [1]
+        finally:
+            view.close_document()
+            view.close()
 
 
 class TestCtrlWheel:

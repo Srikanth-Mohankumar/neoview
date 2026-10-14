@@ -21,6 +21,7 @@ from PySide6.QtGui import (
     QImage,
     QKeyEvent,
     QMouseEvent,
+    QNativeGestureEvent,
     QPainter,
     QPainterPath,
     QPen,
@@ -2467,6 +2468,33 @@ class PdfView(QGraphicsView):
         ):
             return None
         return anchor
+
+    def _native_gesture(self, e: QNativeGestureEvent) -> bool:
+        """Touchpad pinch (X11 with XInput 2.4, Wayland, macOS, Windows precision
+        touchpads). Return True when handled."""
+        kind = e.gestureType()
+        if kind in (Qt.NativeGestureType.BeginNativeGesture,
+                    Qt.NativeGestureType.EndNativeGesture):
+            # A new gesture starts from the pages as they are now. The relayout per
+            # step is cheap; the sharp render runs once, from the _rerender_timer
+            # debounce, after the last step.
+            self._cursor_zoom_anchor = None
+            return True
+        if kind == Qt.NativeGestureType.ZoomNativeGesture:
+            # value() is the change in scale since the previous event (e.g. 0.02).
+            factor = 1.0 + e.value()
+            if factor > 0:
+                self._zoom_at_viewport_point(e.position().toPoint(), factor)
+            return True
+        return False
+
+    def viewportEvent(self, e: QEvent) -> bool:
+        # Native gestures arrive at the viewport (the widget under the cursor), in its
+        # coordinates. The QPinchGesture grabbed in __init__ only comes from touchscreens.
+        if e.type() == QEvent.Type.NativeGesture and self._native_gesture(e):
+            e.accept()
+            return True
+        return super().viewportEvent(e)
 
     def keyPressEvent(self, e: QKeyEvent):
         key = e.key()
