@@ -5,6 +5,7 @@ from __future__ import annotations
 import html
 import os
 import re
+import time
 from bisect import bisect_right
 from enum import Enum, auto
 from urllib.parse import unquote
@@ -45,6 +46,7 @@ from neoview.ui import icons
 from neoview.ui.annotation_item import AnnotationItem
 from neoview.ui.navigation_history import HistoryEntry, NavigationHistory
 from neoview.ui.page_item import PageItem, new_doc_token, release_freed_memory
+from neoview.ui.page_modes import PAGE_MODES, PageLayout, layout_pages
 from neoview.ui.password import unlock
 from neoview.ui.render_scheduler import RenderRequest, RenderScheduler
 from neoview.ui.selection import SelectionRect
@@ -81,6 +83,7 @@ class PdfView(QGraphicsView):
     performance_mode_toggled = Signal(bool)
     password_required = Signal(str)  # path of an encrypted PDF that needs a (new) password
     history_changed = Signal(bool, bool)  # (can_go_back, can_go_forward)
+    page_mode_changed = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -108,7 +111,14 @@ class PdfView(QGraphicsView):
         # Password the open document was unlocked with; memory only, never persisted.
         self._doc_password: str | None = None
         self._pages: list[PageItem] = []
+        # Top of each page's row in scene coordinates (non-decreasing; equal for pages that
+        # share a row in the two-page modes).
         self._page_positions: list[float] = []
+        self._page_mode: str = "continuous"
+        self._layout: PageLayout | None = None
+        self._page_row: list[int] = []
+        self._single_row = 0  # row shown in "single" mode
+        self._last_page_flip = 0.0
         # Back/forward history of jumps (links, outline, search, go-to-page).
         self._history = NavigationHistory(on_change=self.history_changed.emit)
         self._restoring_history = False
@@ -316,15 +326,20 @@ class PdfView(QGraphicsView):
 
     @property
     def current_page(self) -> int:
+        """Zero-based current page; in the two-page modes, the first page of the spread."""
         if not self._page_positions:
             return 0
+        if self._is_paged():
+            return self._row_pages(self._single_row)[0]
         # Pick the page whose midline is closest to (or above) the viewport center.
         scroll_y = self.verticalScrollBar().value() + self.viewport().height() / 2
         idx = bisect_right(self._page_positions, scroll_y) - 1
         if idx < 0:
             return 0
         if idx >= len(self._page_positions):
-            return len(self._page_positions) - 1
+            idx = len(self._page_positions) - 1
+        if self._layout is not None and idx < len(self._page_row):
+            return self._row_pages(self._page_row[idx])[0]
         return idx
 
     @property
@@ -629,13 +644,98 @@ class PdfView(QGraphicsView):
         return items, y
 
     def _add_page_items(self, items: list[tuple[PageItem, float]], total_height: float) -> None:
-        max_width = max((it.page_rect.width() for it, _y in items), default=600) * self._zoom
-        for item, y in items:
-            item.setPos((max_width - item.page_rect.width() * self._zoom) / 2, y)
+        # Positions come from the page-mode layout; the continuous y from
+        # _build_page_items is the same value and is not needed here.
+        for item, _y in items:
             self._scene.addItem(item)
             self._pages.append(item)
-            self._page_positions.append(y)
-        self._scene.setSceneRect(0, 0, max_width, total_height)
+        self._position_pages(rescale=False)
+
+    # ------------------------------------------------------------------
+    # Page modes
+    # ------------------------------------------------------------------
+
+    def page_mode(self) -> str:
+        return self._page_mode
+
+    def set_page_mode(self, mode: str) -> None:
+        """Switch between "single", "continuous", "two-page" and "two-page-cover"."""
+        if mode not in PAGE_MODES:
+            raise ValueError(f"unknown page mode {mode!r}; expected one of {PAGE_MODES}")
+        if mode == self._page_mode:
+            return
+        anchor = self.current_page
+        self._page_mode = mode
+        if self._pages:
+            self._layout_pages()
+            if self._is_paged():
+                self._single_row = self._page_row[anchor]
+                self._position_pages(rescale=False)
+            if self._zoom_mode in (self.ZOOM_MODE_FIT_WIDTH, self.ZOOM_MODE_FIT_PAGE):
+                self._apply_fit_mode(force_if_close=True)
+            self._scroll_to_page(anchor)
+            self._emit_page_info()
+            if not self._performance_mode:
+                self._rerender_timer.start(0)
+        self.page_mode_changed.emit(mode)
+
+    def _is_paged(self) -> bool:
+        return self._page_mode == "single" and bool(self._pages)
+
+    def _is_two_up(self) -> bool:
+        return self._page_mode in ("two-page", "two-page-cover")
+
+    def _row_pages(self, row: int) -> tuple[int, ...]:
+        if self._layout is None or not self._layout.rows:
+            return (0,)
+        row = min(max(row, 0), len(self._layout.rows) - 1)
+        return self._layout.rows[row]
+
+    def _position_pages(self, rescale: bool) -> None:
+        """Place every page for the current mode and zoom; set the scene rect."""
+        if not self._pages:
+            self._layout = None
+            self._page_row = []
+            self._page_positions = []
+            self._scene.setSceneRect(0, 0, 600, 0)
+            return
+        sizes = [(p.page_rect.width(), p.page_rect.height()) for p in self._pages]
+        layout = layout_pages(sizes, 0.0, self._zoom, float(self.PAGE_GAP), self._page_mode)
+        self._layout = layout
+        page_row = [0] * len(self._pages)
+        row_tops: list[float] = []
+        for r, row in enumerate(layout.rows):
+            row_tops.append(min(layout.rects[i].y for i in row))
+            for i in row:
+                page_row[i] = r
+        self._page_row = page_row
+        self._single_row = min(self._single_row, len(layout.rows) - 1)
+        paged = self._is_paged()
+        for i, (p, rect) in enumerate(zip(self._pages, layout.rects)):
+            if rescale:
+                render_zoom = p.render_zoom if p.render_zoom > 0 else self._zoom
+                p.setScale((self._zoom / render_zoom) / p.render_scale_factor)
+            p.setPos(rect.x, rect.y)
+            visible = not paged or page_row[i] == self._single_row
+            if p.isVisible() != visible:
+                p.setVisible(visible)
+        self._page_positions = [row_tops[r] for r in page_row]
+        if paged:
+            bounds = layout.row_bounds(self._single_row)
+            gap = float(self.PAGE_GAP)
+            self._scene.setSceneRect(0, bounds.y - gap, layout.scene_width, bounds.h + 2 * gap)
+        else:
+            self._scene.setSceneRect(0, 0, layout.scene_width, layout.scene_height)
+
+    def _show_single_row(self, row: int) -> None:
+        """In "single" mode, make *row* the shown page (or spread)."""
+        if not self._is_paged() or self._layout is None:
+            return
+        row = min(max(row, 0), len(self._layout.rows) - 1)
+        if row != self._single_row:
+            self._single_row = row
+            self._position_pages(rescale=False)
+            self._emit_page_info()
 
     def _render_factor(self, page: PageItem) -> float:
         return PageItem.render_factor_for(page.page_rect, self._zoom, self.devicePixelRatioF())
@@ -668,23 +768,9 @@ class PdfView(QGraphicsView):
                 self._rerender_timer.start(40)
 
     def _layout_pages(self):
+        self._position_pages(rescale=True)
         if not self._pages:
-            self._page_positions = []
-            self._scene.setSceneRect(0, 0, 600, 0)
             return
-
-        y = float(self.PAGE_GAP)
-        max_width = max(p.page_rect.width() for p in self._pages) * self._zoom
-        positions: list[float] = []
-        for p in self._pages:
-            render_zoom = p.render_zoom if p.render_zoom > 0 else self._zoom
-            p.setScale((self._zoom / render_zoom) / p.render_scale_factor)
-            p.setPos((max_width - p.page_rect.width() * self._zoom) / 2, y)
-            positions.append(y)
-            y += p.page_rect.height() * self._zoom + self.PAGE_GAP
-
-        self._page_positions = positions
-        self._scene.setSceneRect(0, 0, max_width, y)
 
         if self._selection and 0 <= self._selection_page < len(self._pages):
             page = self._pages[self._selection_page]
@@ -759,6 +845,10 @@ class PdfView(QGraphicsView):
             if page_bottom < top:
                 continue
             visible.append(idx)
+
+        if self._is_paged():
+            shown = set(self._row_pages(self._single_row))
+            visible = [i for i in visible if i in shown] or sorted(shown)
 
         if not visible:
             current = self.current_page
@@ -927,19 +1017,33 @@ class PdfView(QGraphicsView):
 
     def _fit_reference_rect(self) -> QRectF | None:
         """Return the page rect used to compute fit zoom. Prefers current page so
-        mixed-page-size documents (covers, landscape inserts) fit correctly."""
+        mixed-page-size documents (covers, landscape inserts) fit correctly. In the
+        two-page modes this is the current spread (a lone page keeps its half)."""
         if not self._pages:
             return None
         idx = self.current_page
         if not (0 <= idx < len(self._pages)):
             idx = 0
+        if self._is_two_up() and self._layout is not None:
+            row = self._row_pages(self._page_row[idx])
+            rects = [self._pages[i].page_rect for i in row]
+            height = max(r.height() for r in rects)
+            if len(rects) == 2:
+                width = rects[0].width() + rects[1].width()
+            else:
+                width = 2 * rects[0].width()
+            return QRectF(0, 0, width, height)
         return self._pages[idx].page_rect
+
+    def _fit_gap(self) -> float:
+        """Unzoomed space between the two pages of a spread, excluded from fit zoom."""
+        return float(self.PAGE_GAP) if self._is_two_up() else 0.0
 
     def fit_width(self):
         page_rect = self._fit_reference_rect()
         if page_rect is None or page_rect.width() <= 0:
             return
-        view_width = max(40, self.viewport().width() - 40)
+        view_width = max(40, self.viewport().width() - 40 - self._fit_gap())
         self.set_zoom(
             view_width / page_rect.width(),
             immediate=True,
@@ -951,7 +1055,7 @@ class PdfView(QGraphicsView):
         page_rect = self._fit_reference_rect()
         if page_rect is None or page_rect.width() <= 0 or page_rect.height() <= 0:
             return
-        view_w = max(40, self.viewport().width() - 40)
+        view_w = max(40, self.viewport().width() - 40 - self._fit_gap())
         view_h = max(40, self.viewport().height() - 40)
         scale_w = view_w / page_rect.width()
         scale_h = view_h / page_rect.height()
@@ -978,13 +1082,25 @@ class PdfView(QGraphicsView):
     def _scroll_to_page(self, page_num: int, offset: float = 0.0) -> None:
         """Scroll so *page_num*'s top (plus *offset* scene units) is at the viewport top."""
         if 0 <= page_num < len(self._page_positions):
+            if self._is_paged():
+                self._show_single_row(self._page_row[page_num])
             self.verticalScrollBar().setValue(int(self._page_positions[page_num] + offset))
 
+    def _step_row(self, delta: int) -> bool:
+        """Move by *delta* rows (pages, or spreads in the two-page modes)."""
+        if not self._pages or self._layout is None:
+            return False
+        row = self._page_row[self.current_page] + delta
+        if not 0 <= row < len(self._layout.rows):
+            return False
+        self._scroll_to_page(self._layout.rows[row][0])
+        return True
+
     def next_page(self):
-        self._scroll_to_page(self.current_page + 1)
+        self._step_row(1)
 
     def prev_page(self):
-        self._scroll_to_page(self.current_page - 1)
+        self._step_row(-1)
 
     def first_page(self):
         self.go_to_page(0)
@@ -2157,7 +2273,30 @@ class PdfView(QGraphicsView):
                 )
             e.accept()
             return
+        if self._is_paged() and self._flip_page_at_edge(e):
+            e.accept()
+            return
         super().wheelEvent(e)
+
+    PAGE_FLIP_COOLDOWN_S = 0.3
+
+    def _flip_page_at_edge(self, e: QWheelEvent) -> bool:
+        """Single mode: scrolling past the top/bottom of the page turns the page."""
+        delta = e.angleDelta().y() or e.pixelDelta().y()
+        if delta == 0:
+            return False
+        bar = self.verticalScrollBar()
+        now = time.monotonic()
+        if delta < 0 and bar.value() >= bar.maximum():
+            if now - self._last_page_flip >= self.PAGE_FLIP_COOLDOWN_S and self._step_row(1):
+                self._last_page_flip = now
+            return True
+        if delta > 0 and bar.value() <= bar.minimum():
+            if now - self._last_page_flip >= self.PAGE_FLIP_COOLDOWN_S and self._step_row(-1):
+                self._last_page_flip = now
+                bar.setValue(bar.maximum())  # continue reading from the bottom
+            return True
+        return False
 
     def _zoom_at_viewport_point(self, viewport_pos: QPoint, factor: float) -> None:
         """Multiply zoom by ``factor`` while keeping the content under ``viewport_pos`` fixed."""
@@ -2364,14 +2503,14 @@ class PdfView(QGraphicsView):
         if page_rect is None or page_rect.width() <= 0 or page_rect.height() <= 0:
             return
         if self._zoom_mode == self.ZOOM_MODE_FIT_WIDTH:
-            view_width = max(40, self.viewport().width() - 40)
+            view_width = max(40, self.viewport().width() - 40 - self._fit_gap())
             self.set_zoom(
                 view_width / page_rect.width(),
                 zoom_mode=self.ZOOM_MODE_FIT_WIDTH,
                 force_if_close=force_if_close,
             )
         elif self._zoom_mode == self.ZOOM_MODE_FIT_PAGE:
-            view_w = max(40, self.viewport().width() - 40)
+            view_w = max(40, self.viewport().width() - 40 - self._fit_gap())
             view_h = max(40, self.viewport().height() - 40)
             self.set_zoom(
                 min(view_w / page_rect.width(), view_h / page_rect.height()),
