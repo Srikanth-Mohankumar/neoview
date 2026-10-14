@@ -3,7 +3,6 @@
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QIcon, QPixmap
 from PySide6.QtWidgets import (
-    QApplication,
     QCheckBox,
     QColorDialog,
     QComboBox,
@@ -22,6 +21,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from neoview import theme
 
 
 class ExportDialog(QDialog):
@@ -186,26 +187,20 @@ class LayoutGridDialog(QDialog):
         panel_layout.addLayout(btns)
 
     def _apply_dialog_style(self):
-        app = QApplication.instance()
-        theme_mode = ""
-        if app is not None:
-            theme_mode = str(app.property("theme_mode") or "").lower()
-        if theme_mode == "dark":
-            self.setStyleSheet(
-                """
-                QDialog#LayoutGridDialog { background: #1e1e1e; }
-                QWidget#LayoutGridPanel { background: #2a2a2a; border: 1px solid #424242; border-radius: 8px; }
-                QWidget#LayoutGridPanel QLabel, QWidget#LayoutGridPanel QCheckBox { color: #e2e4e9; background: transparent; }
-                """
-            )
-        else:
-            self.setStyleSheet(
-                """
-                QDialog#LayoutGridDialog { background: #f2f4f7; }
-                QWidget#LayoutGridPanel { background: #ffffff; border: 1px solid #d4dae3; border-radius: 8px; }
-                QWidget#LayoutGridPanel QLabel, QWidget#LayoutGridPanel QCheckBox { color: #2c3440; background: transparent; }
-                """
-            )
+        # Colours come from the active theme's tokens (theme.current_mode()), not a
+        # hard-coded light/dark pair.
+        t = theme.tokens()
+        self.setStyleSheet(
+            f"""
+            QDialog#LayoutGridDialog {{ background: {t["background"]}; }}
+            QWidget#LayoutGridPanel {{
+                background: {t["surface"]}; border: 1px solid {t["border"]}; border-radius: {theme.RADIUS["lg"]}px;
+            }}
+            QWidget#LayoutGridPanel QLabel, QWidget#LayoutGridPanel QCheckBox {{
+                color: {t["text"]}; background: transparent;
+            }}
+            """
+        )
 
     def _choose_color(self):
         color = QColorDialog.getColor(self._grid_color, self, "Choose Grid Color")
@@ -215,8 +210,11 @@ class LayoutGridDialog(QDialog):
 
     def _sync_color_button(self):
         self.color_btn.setText(self._grid_color.name().upper())
+        # The swatch is the user's colour; the label stays readable on light and dark swatches.
+        label = "#000000" if self._grid_color.lightnessF() > 0.6 else "#ffffff"
+        border = theme.tokens()["border_strong"]
         self.color_btn.setStyleSheet(
-            f"background:{self._grid_color.name()}; color:#ffffff; border:1px solid #666; padding:4px 8px;"
+            f"background:{self._grid_color.name()}; color:{label}; border:1px solid {border}; padding:4px 8px;"
         )
 
     @property
