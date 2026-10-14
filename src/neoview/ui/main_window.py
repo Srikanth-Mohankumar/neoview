@@ -365,10 +365,10 @@ class MainWindow(QMainWindow):
 
         if self._tabs.count() == 1:
             self._save_sidecar_for_view(widget)
-            timer = self._sidecar_timers.pop(widget, None)
+            # The view is reused for the next document, so keep its save timer.
+            timer = self._sidecar_timers.get(widget)
             if timer is not None:
                 timer.stop()
-                timer.deleteLater()
             widget.close_document()
             self._tab_contexts[widget] = TabContext()
             self._tabs.setTabText(0, "Untitled")

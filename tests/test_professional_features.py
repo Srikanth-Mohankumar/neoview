@@ -264,6 +264,34 @@ def test_add_bookmark_saves_to_sidecar(tmp_path: Path, monkeypatch):
     win.close()
 
 
+def test_edits_autosave_after_closing_last_tab_and_reopening(tmp_path: Path, monkeypatch, qtbot):
+    # Closing the last tab keeps the view for reuse; its debounced sidecar
+    # save must keep working for the next document opened in it.
+    pdf = tmp_path / "reopen.pdf"
+    _create_pdf(pdf, pages=2)
+    monkeypatch.setattr(
+        "neoview.ui.main_window.QInputDialog.getText",
+        lambda *_args, **_kwargs: ("AfterReopen", True),
+    )
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win._open_file(str(pdf))
+    QApplication.processEvents()
+    assert win._tabs.count() == 1
+
+    win._close_tab_index(0)
+    QApplication.processEvents()
+    win._open_file(str(pdf))
+    QApplication.processEvents()
+
+    win._add_bookmark()  # marks the sidecar dirty; no explicit save here
+    qtbot.waitUntil(
+        lambda: [b.title for b in load_sidecar(str(pdf)).bookmarks] == ["AfterReopen"],
+        timeout=3000,
+    )
+
+
 def test_search_panel_builds_snippet_results(tmp_path: Path):
     pdf = tmp_path / "search.pdf"
     _create_pdf(pdf, pages=2, text_prefix="Findable")
