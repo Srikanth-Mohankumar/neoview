@@ -206,10 +206,11 @@ class PageOrganizer(QDialog):
         self.accept()
 
     def reject(self):
-        if self.session.dirty and QMessageBox.question(
+        if (self.session.dirty and not self.session.document.is_closed) and QMessageBox.question(
             self, "Unsaved Page Changes", "Discard the unsaved page changes?",
             QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Cancel,
         ) != QMessageBox.StandardButton.Discard:
             return
+        self.session.dirty = False
         super().reject()

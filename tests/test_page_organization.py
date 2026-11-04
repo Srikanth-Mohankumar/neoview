@@ -352,3 +352,38 @@ def test_organizer_releases_hardlink_readers_and_restores_each_file(tmp_path, qt
     assert labels(path) == ["B", "C"]
     assert labels(alias) == ["A", "B", "C"]
     session.close()
+
+
+def test_closed_organizer_session_does_not_prompt_during_disposal(tmp_path, qtbot, monkeypatch):
+    path = tmp_path / "source.pdf"
+    make_pdf(path)
+    with fitz.open(path) as document:
+        session = PageOrganization(document, DocumentSidecarState())
+    session.delete([0])
+    dialog = PageOrganizer(session, str(path))
+    qtbot.addWidget(dialog)
+    session.close()
+    monkeypatch.setattr(QMessageBox, "question", lambda *_: pytest.fail(
+        "A disposed editing session must not open another modal dialog"))
+    try:
+        dialog.reject()
+    finally:
+        session.dirty = False
+
+
+def test_discard_clears_dirty_flag_and_does_not_prompt_again(tmp_path, qtbot, monkeypatch):
+    path = tmp_path / "source.pdf"
+    make_pdf(path)
+    with fitz.open(path) as document:
+        session = PageOrganization(document, DocumentSidecarState())
+    session.delete([0])
+    dialog = PageOrganizer(session, str(path))
+    qtbot.addWidget(dialog)
+    prompts = []
+    monkeypatch.setattr(QMessageBox, "question", lambda *args: (
+        prompts.append(args), QMessageBox.StandardButton.Discard)[1])
+    dialog.reject()
+    dialog.reject()
+    assert len(prompts) == 1
+    assert not session.dirty
+    session.close()
