@@ -112,7 +112,7 @@ def test_atomic_failure_preserves_existing_report(tmp_path, monkeypatch):
     monkeypatch.setattr(tool_support.os, "replace", fail_replace)
     with fitz.open(source) as document, pytest.raises(OSError, match="simulated"):
         run(window_for(document, source))
-    assert target.read_text() == "Existing"
+    assert target.read_text(encoding="utf-8") == "Existing"
     assert not list(tmp_path.glob(".neoview-export-*"))
 
 
@@ -127,4 +127,4 @@ def test_snapshot_survives_source_close(tmp_path, monkeypatch):
 
     monkeypatch.setattr(QFileDialog, "getSaveFileName", choose)
     run(window_for(document, source))
-    assert json.loads(target.read_text())["outline"][0]["title"] == "Caf\u00e9"
+    assert json.loads(target.read_text(encoding="utf-8"))["outline"][0]["title"] == "Caf\u00e9"

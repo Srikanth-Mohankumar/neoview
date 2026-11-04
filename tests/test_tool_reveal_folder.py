@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import fitz
 import pytest
 from PySide6.QtGui import QDesktopServices
@@ -29,11 +31,11 @@ def test_opens_active_document_folder_as_local_url(tmp_path, qtbot, monkeypatch)
     monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: urls.append(url) or True)
     run(window)
     assert urls[-1].isLocalFile()
-    assert urls[-1].toLocalFile() == str(second_dir)
+    assert Path(urls[-1].toLocalFile()).resolve() == second_dir.resolve()
     assert "Opened PDF containing folder" in window._status.currentMessage()
     window._tabs.setCurrentWidget(first_view)
     run(window)
-    assert urls[-1].toLocalFile() == str(first_dir)
+    assert Path(urls[-1].toLocalFile()).resolve() == first_dir.resolve()
 
 
 def test_failed_desktop_open_is_reported(tmp_path, qtbot, monkeypatch):
@@ -84,5 +86,5 @@ def test_relative_context_uses_absolute_folder(tmp_path, qtbot, monkeypatch):
     urls = []
     monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: urls.append(url) or True)
     run(window)
-    assert urls[-1].toLocalFile() == str(tmp_path)
+    assert Path(urls[-1].toLocalFile()).resolve() == tmp_path.resolve()
     window.current_context().file_path = str(source)

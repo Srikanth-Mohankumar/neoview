@@ -78,7 +78,7 @@ def test_snapshot_survives_dialog_record_mutation(opened, tmp_path, monkeypatch)
 
     monkeypatch.setattr(QFileDialog, "getSaveFileName", destination)
     tool.run(window)
-    assert json.loads(target.read_text())["annotations"][0]["extra"]["nested"]["label"] == "\u00e9"
+    assert json.loads(target.read_text(encoding="utf-8"))["annotations"][0]["extra"]["nested"]["label"] == "\u00e9"
 
 
 def test_cancel_creates_no_file(opened, tmp_path, monkeypatch):
@@ -125,5 +125,5 @@ def test_atomic_write_failure_preserves_existing_report(opened, tmp_path, monkey
     monkeypatch.setattr(support.os, "replace", fail)
     with pytest.raises(OSError, match="write failed"):
         tool.run(window)
-    assert target.read_text() == "existing report"
+    assert target.read_text(encoding="utf-8") == "existing report"
     assert not list(tmp_path.glob(".neoview-export-*"))

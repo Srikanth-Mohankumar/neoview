@@ -65,7 +65,7 @@ def test_export_keeps_source_and_sidecar_unchanged(tmp_path):
     before = source.read_bytes(), sidecar.read_bytes()
     with fitz.open(source) as document:
         export_page_report(document, state, str(source), str(target))
-    assert len(list(csv.DictReader(io.StringIO(target.read_text())))) == 2
+    assert len(list(csv.DictReader(io.StringIO(target.read_text(encoding="utf-8"))))) == 2
     assert (source.read_bytes(), sidecar.read_bytes()) == before
 
 
@@ -102,7 +102,7 @@ def test_failed_replace_keeps_existing_report(tmp_path, monkeypatch):
     monkeypatch.setattr(tool_support.os, "replace", fail_replace)
     with fitz.open(source) as document, pytest.raises(OSError, match="Cannot replace"):
         export_page_report(document, make_state(), str(source), str(target))
-    assert target.read_text() == "old report"
+    assert target.read_text(encoding="utf-8") == "old report"
     assert not list(tmp_path.glob(".neoview-export-*"))
 
 
@@ -127,5 +127,5 @@ def test_run_uses_snapshot_even_if_original_closes_during_dialog(tmp_path, monke
 
     monkeypatch.setattr(QFileDialog, "getSaveFileName", select)
     assert run(window_for(document, source, make_state())) is None
-    rows = list(csv.DictReader(io.StringIO(target.read_text())))
+    rows = list(csv.DictReader(io.StringIO(target.read_text(encoding="utf-8"))))
     assert [row["page"] for row in rows] == ["1", "2"]

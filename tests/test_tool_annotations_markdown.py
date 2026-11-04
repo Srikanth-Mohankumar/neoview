@@ -82,7 +82,7 @@ def test_dialog_mutation_does_not_change_export_snapshot(opened, tmp_path, monke
 
     monkeypatch.setattr(QFileDialog, "getSaveFileName", destination)
     tool.run(window)
-    report = target.read_text()
+    report = target.read_text(encoding="utf-8")
     assert "Editable" in report and "Native" in report and "changed" not in report
 
 
@@ -131,5 +131,5 @@ def test_failed_atomic_replace_preserves_old_report_and_cleans_temp(opened, tmp_
     monkeypatch.setattr(tool_support.os, "replace", fail)
     with pytest.raises(OSError, match="simulated"):
         tool.run(window)
-    assert target.read_text() == "Old report"
+    assert target.read_text(encoding="utf-8") == "Old report"
     assert set(tmp_path.iterdir()) == before
