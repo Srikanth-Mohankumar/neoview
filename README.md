@@ -82,6 +82,23 @@ NeoView is designed to reduce tool switching. Instead of opening one app for rea
 - Print (Ctrl+P) and password-protected PDFs
 - Light, dark, or system theme (View > Theme)
 
+### Page organization
+
+Choose **Pages > Organize Pages...**, or right-click the thumbnail sidebar and
+choose **Organize Pages...**. In the organizer:
+
+- Insert another PDF before the current page, or append it to the end.
+- Select one or more pages and use Move Up/Down or drag them into a new order.
+- Delete selected pages (at least one page must remain).
+- Use Save to replace the original, or Save As to create a separate PDF.
+
+Edits stay in the organizer until saved. Closing with unsaved changes asks before
+discarding them. Annotations, bookmarks, and document outlines follow retained
+pages; records for deleted pages are removed. NeoView annotations and bookmarks
+remain in the accompanying `.neoview.json` sidecar, including in saved copies.
+The saved document opens in the viewer. Password-protected PDFs cannot currently
+be organized or merged; this avoids silently removing password protection.
+
 ### Search
 
 - Find panel with live typing updates
