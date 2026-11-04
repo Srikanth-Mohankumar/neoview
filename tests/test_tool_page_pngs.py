@@ -223,3 +223,59 @@ def test_immediate_cancel_handles_starting_process_on_destination_filesystem(tmp
     assert job.done and job.cancelled
     assert not work.exists()
     assert not (tmp_path / "images").exists()
+
+
+@pytest.mark.parametrize("frozen", [False, True])
+def test_worker_arguments_support_standalone_executable(tmp_path, monkeypatch, frozen):
+    from neoview.ui import background_png_export
+
+    monkeypatch.setattr(background_png_export.sys, "frozen", frozen, raising=False)
+    job = SimpleNamespace(work=tmp_path)
+    arguments = background_png_export.PngExportJob.worker_arguments(job, "1-2", 144)
+    payload = [str(tmp_path / "snapshot.pdf"), "1-2", "144", str(tmp_path / "output")]
+    if frozen:
+        assert arguments == ["--png-export-worker", *payload]
+    else:
+        assert arguments == ["-m", "neoview.ui.background_png_export", "--worker", *payload]
+
+
+def test_worker_renders_without_standard_error_stream(tmp_path, monkeypatch):
+    from neoview.ui import background_png_export
+
+    source = tmp_path / "snapshot.pdf"
+    output = tmp_path / "output"
+    with document() as doc:
+        doc.save(str(source))
+    monkeypatch.setattr(background_png_export.sys, "stderr", None)
+    assert background_png_export.run_worker([str(source), "2", "72", str(output)]) == 0
+    assert [p.name for p in output.iterdir()] == ["page-0002.png"]
+    assert not (tmp_path / "error.txt").exists()
+
+
+def test_worker_failure_writes_utf8_error_without_standard_error_stream(tmp_path, monkeypatch):
+    from neoview.ui import background_png_export
+
+    monkeypatch.setattr(background_png_export.sys, "stderr", None)
+    source = tmp_path / "snapshot.pdf"
+    output = tmp_path / "output"
+    with document() as doc:
+        doc.save(str(source))
+    monkeypatch.setattr(page_pngs, "export_pages_png",
+                        lambda *_: (_ for _ in ()).throw(ValueError("Invalid caf\u00e9 page")))
+    assert background_png_export.run_worker([str(source), "2", "72", str(output)]) == 1
+    assert "caf\u00e9" in (tmp_path / "error.txt").read_text(encoding="utf-8")
+    assert not output.exists()
+
+
+def test_worker_failure_uses_error_file_when_process_stderr_is_empty(tmp_path):
+    from PySide6.QtCore import QProcess
+
+    from neoview.ui.background_png_export import PngExportJob
+
+    (tmp_path / "error.txt").write_text("Useful worker error", encoding="utf-8")
+    results = []
+    job = SimpleNamespace(done=False, cancelled=False, work=tmp_path,
+                          process=SimpleNamespace(readAllStandardError=lambda: b""),
+                          _complete=lambda error=None: results.append(error))
+    PngExportJob._finished(job, 1, QProcess.ExitStatus.NormalExit)
+    assert results == ["Useful worker error"]

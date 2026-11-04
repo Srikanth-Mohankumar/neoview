@@ -17,6 +17,8 @@ hiddenimports = []
 
 # Packaged neoview assets (icon, etc.)
 datas += collect_data_files("neoview")
+# Menu tools are imported by name at runtime; frozen builds must include them.
+hiddenimports += collect_submodules("neoview.ui.tools")
 # PyMuPDF ships compiled libmupdf bindings that PyInstaller does not pick up
 # from a plain `import fitz` — collect them explicitly.
 binaries += collect_dynamic_libs("fitz")

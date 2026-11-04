@@ -45,8 +45,10 @@ class PngExportJob(QObject):
             raise
 
     def worker_arguments(self, ranges, dpi):
-        return ["-m", "neoview.ui.background_png_export", "--worker",
-                str(self.work / "snapshot.pdf"), ranges, str(dpi), str(self.work / "output")]
+        arguments = [str(self.work / "snapshot.pdf"), ranges, str(dpi), str(self.work / "output")]
+        if getattr(sys, "frozen", False):
+            return ["--png-export-worker", *arguments]
+        return ["-m", "neoview.ui.background_png_export", "--worker", *arguments]
 
     def start(self):
         jobs = getattr(self.window, "_document_export_jobs", None)
@@ -84,6 +86,11 @@ class PngExportJob(QObject):
             self._complete()
         elif exit_code or exit_status != QProcess.ExitStatus.NormalExit:
             detail = bytes(self.process.readAllStandardError()).decode("utf-8", errors="replace")
+            if not detail.strip():
+                try:
+                    detail = (self.work / "error.txt").read_text(encoding="utf-8")
+                except OSError:
+                    pass
             self._complete(detail[-2000:] or "The image export process failed.")
         else:
             self._complete()
@@ -132,15 +139,43 @@ class PngExportJob(QObject):
             self.deleteLater()
 
 
+def run_worker(arguments) -> int:
+    """Render one isolated job in Python or the standalone executable.
+
+    Windowed executables can have no standard error stream, so report failures
+    through the job's error file as well as stderr when it is available.
+    """
+    try:
+        if len(arguments) != 4:
+            raise ValueError("Usage: worker PDF RANGES DPI OUTPUT")
+        import fitz
+
+        from neoview.ui.tools.page_pngs import export_pages_png
+
+        source, ranges, dpi, output = arguments
+        with fitz.open(source) as document:
+            export_pages_png(document, ranges, int(dpi), output)
+        return 0
+    except Exception as exc:
+        detail = f"PNG export failed: {exc}"
+        if len(arguments) == 4:
+            try:
+                (Path(arguments[3]).parent / "error.txt").write_text(detail, encoding="utf-8")
+            except OSError:
+                pass
+        if sys.stderr is not None:
+            try:
+                sys.stderr.write(detail + "\n")
+                sys.stderr.flush()
+            except (OSError, UnicodeError):
+                pass
+        return 1
+
+
 def main():
-    if len(sys.argv) != 6 or sys.argv[1] != "--worker":
+    if len(sys.argv) < 2 or sys.argv[1] != "--worker":
         raise SystemExit("Usage: --worker PDF RANGES DPI OUTPUT")
-    import fitz
-
-    from neoview.ui.tools.page_pngs import export_pages_png
-
-    with fitz.open(sys.argv[2]) as document:
-        export_pages_png(document, sys.argv[3], int(sys.argv[4]), sys.argv[5])
+    raise SystemExit(run_worker(sys.argv[2:]))
 
 
 if __name__ == "__main__":
