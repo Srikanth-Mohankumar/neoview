@@ -284,7 +284,8 @@ def _menu_texts(menu) -> list[str]:
 def test_menu_bar_has_standard_menus(qtbot):
     win = _window(qtbot)
     titles = [a.text().replace("&", "") for a in win.menuBar().actions()]
-    assert titles == ["File", "Edit", "View", "Go", "Tools", "Help"]
+    assert titles == ["File", "Edit", "Pages", "View", "Go", "Tools", "Help"]
+    assert "Organize Pages..." in _menu_texts(_menu(win, "Pages"))
     assert {"Open...", "Open Recent", "Close", "Print...", "Quit"} <= set(_menu_texts(_menu(win, "File")))
     assert {"Find...", "Find Next", "Find Previous"} <= set(_menu_texts(_menu(win, "Edit")))
     view_items = set(_menu_texts(_menu(win, "View")))

@@ -479,6 +479,10 @@ class MainWindow(QMainWindow):
             name="action_print", tip="Print",
         )
 
+        self._organize_pages_action = self._action(
+            "&Organize Pages...", self._organize_pages, name="action_organize_pages"
+        )
+
         # Edit
         self._copy_action = self._action(
             "&Copy Measurements", self._copy, QKeySequence.StandardKey.Copy, icon="copy"
@@ -679,7 +683,7 @@ class MainWindow(QMainWindow):
             self._first_page_action, self._last_page_action, self._goto_page_action,
             self._add_bookmark_action, self._annot_highlight_action, self._annot_underline_action,
             self._annot_note_action, self._select_action, self._hand_action, self._measure_action,
-            self._annotate_action,
+            self._annotate_action, self._organize_pages_action,
         ]
 
     def _setup_menus(self):
@@ -707,6 +711,9 @@ class MainWindow(QMainWindow):
         edit_m.addAction(self._find_next_action)
         edit_m.addAction(self._find_prev_action)
         self._edit_menu = edit_m
+
+        pages_m = bar.addMenu("&Pages")
+        pages_m.addAction(self._organize_pages_action)
 
         view_m = bar.addMenu("&View")
         view_m.addAction(self._sidebar_action)
@@ -962,6 +969,8 @@ class MainWindow(QMainWindow):
         # Every cell is the same fixed icon box, so let the view skip per-item size
         # queries; without this, laying out a 5000-page list took ~0.6 s.
         self._thumbs_list.setUniformItemSizes(True)
+        self._thumbs_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._thumbs_list.customContextMenuRequested.connect(self._on_page_context_menu)
         self._thumbs_list.itemActivated.connect(self._jump_to_thumb)
         self._thumbs_list.itemClicked.connect(self._jump_to_thumb)
         self._thumbs_list.verticalScrollBar().valueChanged.connect(self._schedule_thumbnail_render)
@@ -1551,6 +1560,57 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getOpenFileName(self, "Open PDF", "", "PDF (*.pdf);;All (*)")
         if path:
             self._open_file(path)
+
+    def _on_page_context_menu(self, pos):
+        menu = QMenu(self)
+        menu.addAction(self._organize_pages_action)
+        menu.exec(self._thumbs_list.viewport().mapToGlobal(pos))
+
+    def _organize_pages(self):
+        from neoview.models.page_organization import PageOrganization
+        from neoview.ui.page_organizer import PageOrganizer
+
+        view = self.current_view()
+        ctx = self.current_context()
+        if view.document is None or not ctx.file_path:
+            return
+        try:
+            session = PageOrganization(view.document, ctx.sidecar_state)
+        except Exception as exc:
+            QMessageBox.warning(self, "Cannot Organize Pages", str(exc))
+            return
+        # File watching and pending sidecar writes must not race an explicit save.
+        self._stop_watch()
+        self._reload_timer.stop()
+        self._poll_timer.stop()
+        timer = self._sidecar_timers.get(view)
+        if timer is not None:
+            timer.stop()
+        dialog = None
+        try:
+            dialog = PageOrganizer(session, ctx.file_path, self)
+            dialog.pages.setCurrentRow(view.current_page)
+            dialog.exec()
+            if dialog.saved_path:
+                path = os.path.abspath(dialog.saved_path)
+                existing = self._find_open_view(path)
+                if existing is not None:
+                    # Reload state from the newly saved, remapped sidecar before
+                    # any pending timer can write the old page numbers back.
+                    target_ctx = self._context_for_view(existing)
+                    target_ctx.sidecar_state = load_sidecar(path)
+                    self._tabs.setCurrentWidget(existing)
+                    self._do_reload(force=True)
+                else:
+                    self._open_file(path)
+        finally:
+            if dialog is not None:
+                dialog.deleteLater()
+            session.close()
+            self._start_watch()
+            self._poll_timer.start()
+            if timer is not None and not timer.isActive():
+                timer.start(300)
 
     def _close_current_tab(self):
         self._close_tab_index(self._tabs.currentIndex())
