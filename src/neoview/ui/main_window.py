@@ -121,6 +121,7 @@ class MainWindow(QMainWindow):
         self.resize(1280, 900)
         self.setAcceptDrops(True)
 
+        self._closed_pdf_paths: list[str] = []
         self._current_file: str | None = None
         self._last_file_sig: tuple[int, int, int] | None = None
         self._settings = QSettings("NeoView", "NeoView")
@@ -354,6 +355,14 @@ class MainWindow(QMainWindow):
         widget = self._tabs.widget(index)
         if not isinstance(widget, PdfView):
             return
+
+        path = self._context_for_view(widget).file_path
+        if path:
+            self._closed_pdf_paths.append(path)
+            self._closed_pdf_paths = self._closed_pdf_paths[-20:]
+            actions = getattr(self, "_extra_tool_actions", {})
+            if "reopen_closed_tab" in actions:
+                actions["reopen_closed_tab"].setEnabled(True)
 
         if widget is self.current_view():
             self._search_timer.stop()
@@ -729,6 +738,8 @@ class MainWindow(QMainWindow):
         pages_m = bar.addMenu("&Pages")
         pages_m.addAction(self._organize_pages_action)
         pages_m.addAction(self._extract_pages_action)
+        from neoview.ui.document_tools import install_tools
+        install_tools(self, file_m, pages_m)
 
         view_m = bar.addMenu("&View")
         view_m.addAction(self._sidebar_action)
@@ -1628,6 +1639,45 @@ class MainWindow(QMainWindow):
         menu.addAction(self._organize_pages_action)
         menu.exec(self._thumbs_list.viewport().mapToGlobal(pos))
 
+    def _save_organized_pages(self, session, path: str):
+        """Release readers before replacement, then restore them even if saving fails.
+
+        Windows refuses to replace an open PDF. Keep the editing session isolated
+        while temporarily releasing only viewers that hold the destination file.
+        """
+        from neoview.ui.page_organizer import paths_alias
+
+        readers = []
+        for index in range(self._tabs.count()):
+            view = self._tabs.widget(index)
+            if not isinstance(view, PdfView):
+                continue
+            ctx = self._context_for_view(view)
+            if view.document is None or not ctx.file_path or not paths_alias(ctx.file_path, path):
+                continue
+            timer = self._sidecar_timers.get(view)
+            restart_timer = timer is not None and timer.isActive()
+            if timer is not None:
+                timer.stop()
+            readers.append((view, ctx, view.current_page, view.zoom, restart_timer))
+            view.close_document()
+        saved = False
+        try:
+            session.save(path)
+            saved = True
+        finally:
+            for view, ctx, page, zoom, restart_timer in readers:
+                # Replacing a hardlink or symlink may separate it from another
+                # alias. Only readers of the newly written PDF get its sidecar.
+                if saved and paths_alias(ctx.file_path, path):
+                    ctx.sidecar_state = load_sidecar(path)
+                if view.open_document(ctx.file_path):
+                    view.set_zoom(zoom, immediate=True)
+                    view.go_to_page(min(page, view.page_count - 1))
+                timer = self._sidecar_timers.get(view)
+                if restart_timer and timer is not None:
+                    timer.start(300)
+
     def _organize_pages(self):
         from neoview.models.page_organization import PageOrganization
         from neoview.ui.page_organizer import PageOrganizer
@@ -1651,6 +1701,7 @@ class MainWindow(QMainWindow):
         dialog = None
         try:
             dialog = PageOrganizer(session, ctx.file_path, self)
+            dialog.save_document = lambda path: self._save_organized_pages(session, path)
             dialog.pages.setCurrentRow(view.current_page)
             dialog.exec()
             if dialog.saved_path:

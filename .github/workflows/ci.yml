@@ -50,7 +50,8 @@ jobs:
         if: matrix.run-lint == true
         run: ruff check .
       - name: Tests
-        run: python -m pytest -q
+        timeout-minutes: 15
+        run: python -m pytest -q -o faulthandler_timeout=60
       - name: UI smoke screenshots
         # Real platform plugin on Windows (what users see); offscreen on headless Linux.
         env:

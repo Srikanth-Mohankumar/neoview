@@ -234,3 +234,121 @@ def test_external_change_blocks_overwrite(tmp_path, qtbot, monkeypatch):
     monkeypatch.setattr(QMessageBox, "question", lambda *_: QMessageBox.StandardButton.Discard)
     dialog.reject()
     session.close()
+
+
+def test_organizer_releases_open_reader_before_saving(tmp_path, qtbot):
+    path = tmp_path / "source.pdf"
+    make_pdf(path)
+    state = DocumentSidecarState(bookmarks=[BookmarkRecord("b", "B", 1, 0)])
+    save_sidecar(path, state)
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win._open_file(str(path))
+    view = win.current_view()
+    view.set_zoom(1.4, immediate=True)
+    view.go_to_page(1)
+    with fitz.open(path) as source:
+        session = PageOrganization(source, state)
+    session.delete([0])
+    save = session.save
+
+    def windows_locked_save(destination):
+        assert view.document is None, "Windows requires all destination readers to release the PDF"
+        save(destination)
+
+    session.save = windows_locked_save
+    win._save_organized_pages(session, str(path))
+    assert view.page_count == 2
+    assert view.zoom == pytest.approx(1.4)
+    assert view.current_page == 1
+    assert labels(path) == ["B", "C"]
+    assert win.current_context().sidecar_state.bookmarks[0].page == 0
+    session.close()
+
+
+def test_organizer_restores_reader_and_state_after_save_failure(tmp_path, qtbot):
+    path = tmp_path / "source.pdf"
+    make_pdf(path)
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win._open_file(str(path))
+    view = win.current_view()
+    state = win.current_context().sidecar_state
+    state.bookmarks.append(BookmarkRecord("b", "B", 1, 0))
+    view.set_zoom(1.3, immediate=True)
+    view.go_to_page(1)
+    with fitz.open(path) as source:
+        session = PageOrganization(source, state)
+    session.delete([0])
+
+    def fail(destination):
+        assert view.document is None
+        raise OSError("save failed")
+
+    session.save = fail
+    with pytest.raises(OSError, match="save failed"):
+        win._save_organized_pages(session, str(path))
+    assert view.page_count == 3
+    assert view.zoom == pytest.approx(1.3)
+    assert view.current_page == 1
+    assert win.current_context().sidecar_state == state
+    assert state.bookmarks[0].page == 1
+    assert labels(path) == ["A", "B", "C"]
+    session.close()
+
+
+def test_save_as_refuses_source_sidecar_alias(tmp_path, qtbot, monkeypatch):
+    path = tmp_path / "source.pdf"
+    make_pdf(path)
+    sidecar = tmp_path / "source.pdf.neoview.json"
+    sidecar.write_text("keep")
+    alias = tmp_path / "unsafe.pdf"
+    alias.hardlink_to(sidecar)
+    with fitz.open(path) as source:
+        session = PageOrganization(source, DocumentSidecarState())
+    dialog = PageOrganizer(session, str(path))
+    qtbot.addWidget(dialog)
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *_: (str(alias), ""))
+    warnings = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args: warnings.append(args[2]))
+    dialog._save(True)
+    assert warnings and "separate" in warnings[0]
+    assert sidecar.read_text() == "keep"
+    assert dialog.saved_path is None
+    session.close()
+
+
+def test_organizer_releases_hardlink_readers_and_restores_each_file(tmp_path, qtbot):
+    path = tmp_path / "source.pdf"
+    alias = tmp_path / "alias.pdf"
+    make_pdf(path)
+    alias.hardlink_to(path)
+    state = DocumentSidecarState(bookmarks=[BookmarkRecord("b", "B", 1, 0)])
+    save_sidecar(path, state)
+    save_sidecar(alias, state)
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win._open_file(str(path))
+    original_view = win.current_view()
+    win._open_file(str(alias))
+    alias_view = win.current_view()
+    with fitz.open(path) as source:
+        session = PageOrganization(source, state)
+    session.delete([0])
+    save = session.save
+
+    def windows_locked_save(destination):
+        assert original_view.document is None
+        assert alias_view.document is None
+        save(destination)
+
+    session.save = windows_locked_save
+    win._save_organized_pages(session, str(path))
+    # Replacement separates the original path from its pre-existing hardlink.
+    assert original_view.page_count == 2
+    assert alias_view.page_count == 3
+    assert win._context_for_view(original_view).sidecar_state.bookmarks[0].page == 0
+    assert win._context_for_view(alias_view).sidecar_state.bookmarks[0].page == 1
+    assert labels(path) == ["B", "C"]
+    assert labels(alias) == ["A", "B", "C"]
+    session.close()

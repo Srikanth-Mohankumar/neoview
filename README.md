@@ -115,6 +115,9 @@ PDF copies retain NeoView annotations and bookmarks in an accompanying
 unchanged and do not support password-protected documents. CSV export does not
 modify the PDF or sidecar; formula-like text is escaped for spreadsheet use.
 
+For the additional page, export, annotation-transfer, bookmark-transfer, and tab
+commands, see [Document tools](docs/document-tools.md).
+
 ### Search
 
 - Find panel with live typing updates
