@@ -11,6 +11,7 @@ from pathlib import Path
 
 import fitz
 
+from neoview.models.outline_preservation import capture_outline, remap_retained_outline
 from neoview.models.view_state import DocumentSidecarState
 from neoview.persistence.sidecar_store import load_sidecar, save_sidecar, sidecar_path_for
 
@@ -80,26 +81,21 @@ class PageOrganization:
 
     def save(self, path: str):
         """Stage both outputs before replacing either; roll back on replacement failure."""
+        mapped = self.mapped_state()
+        for kind, limit in (("annotations", 10_000), ("bookmarks", 5_000)):
+            if len(getattr(mapped, kind)) > limit:
+                raise ValueError(f"The organized PDF would exceed {limit} {kind}.")
         target = Path(path).absolute()
         sidecar = Path(sidecar_path_for(str(target)))
         with tempfile.TemporaryDirectory(prefix=".neoview-pages-", dir=target.parent) as work:
             staged = Path(work) / "output.pdf"
             with fitz.open(stream=self.document.tobytes(), filetype="pdf") as output:
-                toc = output.get_toc()
+                toc, outline_keys = capture_outline(output)
                 output.select(self.order)
-                mapping = {old + 1: new + 1 for new, old in enumerate(self.order)}
-                # Keep hierarchy valid when a deleted page owned a parent entry.
-                remapped = []
-                previous_level = 0
-                for level, title, page in toc:
-                    if page not in mapping:
-                        continue
-                    level = min(level, previous_level + 1)
-                    remapped.append([level, title, mapping[page]])
-                    previous_level = level
-                output.set_toc(remapped)
+                mapping = {old: new for new, old in enumerate(self.order)}
+                remap_retained_outline(output, toc, outline_keys, mapping)
                 output.save(str(staged), garbage=4, deflate=True)
-            save_sidecar(str(staged), self.mapped_state())
+            save_sidecar(str(staged), mapped)
             pairs = [(staged, target), (Path(sidecar_path_for(str(staged))), sidecar)]
             backups = {}
             for _, destination in pairs:

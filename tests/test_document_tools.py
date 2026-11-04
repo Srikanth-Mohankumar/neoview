@@ -131,3 +131,28 @@ def test_annotation_transfer_roundtrip_preserves_all_editable_fields():
     actual = asdict(imported[0])
     actual["id"] = original.id
     assert actual == asdict(original)
+
+
+def test_window_close_cancels_background_export_and_cleans_staging(tmp_path, qtbot, monkeypatch):
+    from PySide6.QtCore import QProcess
+
+    from neoview.ui.background_png_export import PngExportJob
+
+    path = tmp_path / "source.pdf"
+    make_pdf(path)
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window._open_file(str(path))
+    window.show()
+    monkeypatch.setattr(PngExportJob, "worker_arguments", lambda *_: [
+        "-c", "import time; time.sleep(10)",
+    ])
+    with snapshot(window) as (document, _, __):
+        job = PngExportJob(window, document, "1", 72, str(tmp_path / "images")).start()
+    work = job.work
+    qtbot.waitUntil(lambda: job.process.state() == QProcess.ProcessState.Running)
+    window.close()
+    assert job.done and job.cancelled
+    assert not window._document_export_jobs
+    assert not work.exists()
+    assert not (tmp_path / "images").exists()

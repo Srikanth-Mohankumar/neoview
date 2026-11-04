@@ -140,3 +140,42 @@ def test_save_failure_restores_existing_output(tmp_path, monkeypatch):
     assert target.read_bytes() == before_pdf
     assert sidecar.read_bytes() == before_state
     assert not list(tmp_path.glob(".neoview-pages-*"))
+
+
+def test_reverse_preserves_nonlocal_outline_parent_and_detailed_child(tmp_path):
+    source, target = tmp_path / "source.pdf", tmp_path / "reverse.pdf"
+    with fitz.open() as document:
+        for _ in range(3):
+            document.new_page()
+        document.set_toc([
+            [1, "URI parent", -1], [2, "Local child", 1],
+            [1, "Remote page", -1], [1, "Named target", -1],
+        ])
+        document.set_toc_item(0, dest_dict={"kind": fitz.LINK_URI,
+                                          "uri": "https://example.com", "bold": True})
+        document.set_toc_item(1, dest_dict={"kind": fitz.LINK_GOTO, "page": 0,
+                                          "to": fitz.Point(24, 48), "zoom": 2,
+                                          "italic": True, "color": (0, 0, 1)})
+        document.set_toc_item(2, dest_dict={"kind": fitz.LINK_GOTOR,
+                                          "file": "other.pdf", "page": 1,
+                                          "to": fitz.Point(20, 40), "zoom": 1.5})
+        document.xref_set_key(document.get_outline_xrefs()[3], "A",
+                              "<</S/GoTo/D(NamedChapter)>>")
+        document.save(str(source))
+    with fitz.open(source) as document:
+        original_actions = {
+            index: document.xref_get_key(document.get_outline_xrefs()[index], "A")
+            for index in (0, 2, 3)
+        }
+        reverse_pdf(document, DocumentSidecarState(), str(source), str(target))
+    with fitz.open(target) as document:
+        toc = document.get_toc(simple=False)
+        assert [entry[:3] for entry in toc] == [
+            [1, "URI parent", -1], [2, "Local child", 3],
+            [1, "Remote page", -1], [1, "Named target", 0],
+        ]
+        assert toc[0][3]["bold"] and toc[1][3]["italic"]
+        assert toc[1][3]["page"] == 2 and toc[1][3]["to"] == fitz.Point(24, 48)
+        assert toc[1][3]["zoom"] == 2 and toc[1][3]["color"] == (0, 0, 1)
+        for index, action in original_actions.items():
+            assert document.xref_get_key(document.get_outline_xrefs()[index], "A") == action

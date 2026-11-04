@@ -82,7 +82,7 @@ def test_publish_failure_cleans_reserved_directory(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("cancel", ["range", "dpi", "folder", None])
-def test_run_dialog_flow(tmp_path, monkeypatch, cancel):
+def test_run_dialog_flow(tmp_path, monkeypatch, qtbot, cancel):
     messages = []
     window = SimpleNamespace(_status=SimpleNamespace(showMessage=lambda *args: messages.append(args)))
 
@@ -97,6 +97,10 @@ def test_run_dialog_flow(tmp_path, monkeypatch, cancel):
     monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *_: "" if cancel == "folder" else str(tmp_path))
     assert page_pngs.run(window) is None
     output = tmp_path / "source-pages"
+    if cancel is None:
+        assert not output.exists()
+        assert window._document_export_jobs
+        qtbot.waitUntil(lambda: not window._document_export_jobs, timeout=10000)
     assert output.exists() == (cancel is None)
     assert bool(messages) == (cancel is None)
     if output.exists():
@@ -118,3 +122,104 @@ def test_mid_publish_failure_removes_all_published_files(tmp_path, monkeypatch):
     with document() as doc, pytest.raises(OSError, match="publication failed"):
         page_pngs.export_pages_png(doc, "1-3", 72, str(tmp_path / "images"))
     assert [p for p in tmp_path.iterdir() if p.name != "qsettings"] == []
+
+
+
+def test_background_job_remains_responsive_and_cancels_cleanly(tmp_path, qtbot, monkeypatch):
+    from PySide6.QtCore import QTimer
+
+    from neoview.ui.background_png_export import PngExportJob
+
+    monkeypatch.setattr(PngExportJob, "worker_arguments",
+                        lambda *_: ["-c", "import time; time.sleep(30)"])
+    window = SimpleNamespace(_status=SimpleNamespace(showMessage=lambda *_: None))
+    with document() as doc:
+        job = PngExportJob(window, doc, "1", 72, str(tmp_path / "images")).start()
+    work = job.work
+    events = []
+    QTimer.singleShot(1, lambda: events.append("responsive"))
+    qtbot.waitUntil(lambda: bool(events), timeout=1000)
+    assert not job.done
+    assert not (tmp_path / "images").exists()
+    job.cancel(wait=True, silent=True)
+    qtbot.waitUntil(lambda: not window._document_export_jobs, timeout=1500)
+    assert not work.exists()
+    assert not (tmp_path / "images").exists()
+
+
+def test_background_worker_failure_cleans_staging(tmp_path, qtbot, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    from neoview.ui.background_png_export import PngExportJob
+
+    monkeypatch.setattr(PngExportJob, "worker_arguments", lambda *_: ["-c", "raise SystemExit(3)"])
+    warnings = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *_: warnings.append(True))
+    window = SimpleNamespace(_status=SimpleNamespace(showMessage=lambda *_: None))
+    with document() as doc:
+        job = PngExportJob(window, doc, "1", 72, str(tmp_path / "images")).start()
+    work = job.work
+    qtbot.waitUntil(lambda: not window._document_export_jobs, timeout=10000)
+    assert warnings
+    assert not work.exists()
+    assert not (tmp_path / "images").exists()
+
+
+def test_failed_process_start_cleans_staging(tmp_path, qtbot, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    from neoview.ui.background_png_export import PngExportJob
+
+    warnings = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *_: warnings.append(True))
+    window = SimpleNamespace(_status=SimpleNamespace(showMessage=lambda *_: None))
+    with document() as doc:
+        job = PngExportJob(window, doc, "1", 72, str(tmp_path / "images"))
+    job.process.setProgram(str(tmp_path / "missing-executable"))
+    work = job.work
+    job.start()
+    qtbot.waitUntil(lambda: not window._document_export_jobs, timeout=10000)
+    assert warnings
+    assert not work.exists()
+    assert not (tmp_path / "images").exists()
+
+
+def test_background_publish_does_not_clobber_destination(tmp_path, qtbot, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    from neoview.ui.background_png_export import PngExportJob
+
+    warnings = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *_: warnings.append(True))
+    window = SimpleNamespace(_status=SimpleNamespace(showMessage=lambda *_: None))
+    target = tmp_path / "images"
+    with document() as doc:
+        job = PngExportJob(window, doc, "1", 72, str(target)).start()
+    target.mkdir()
+    marker = target / "existing.txt"
+    marker.write_text("keep")
+    work = job.work
+    qtbot.waitUntil(lambda: not window._document_export_jobs, timeout=10000)
+    assert warnings
+    assert marker.read_text() == "keep"
+    assert [p.name for p in target.iterdir()] == ["existing.txt"]
+    assert not work.exists()
+
+
+def test_immediate_cancel_handles_starting_process_on_destination_filesystem(tmp_path, qtbot, monkeypatch):
+    from neoview.ui.background_png_export import PngExportJob
+
+    monkeypatch.setattr(PngExportJob, "worker_arguments", lambda *_: [
+        "-c", "import time; time.sleep(30)",
+    ])
+    window = SimpleNamespace(_status=SimpleNamespace(showMessage=lambda *_: None))
+    with document() as doc:
+        job = PngExportJob(window, doc, "1", 72, str(tmp_path / "images"))
+    work = job.work
+    assert work.parent == tmp_path
+    job.start()
+    job.cancel(wait=True, silent=True)
+    qtbot.waitUntil(lambda: not window._document_export_jobs, timeout=3000)
+    assert job.done and job.cancelled
+    assert not work.exists()
+    assert not (tmp_path / "images").exists()

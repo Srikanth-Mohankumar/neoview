@@ -8,8 +8,43 @@ from dataclasses import replace
 import fitz
 from PySide6.QtWidgets import QInputDialog
 
+from neoview.models.outline_preservation import capture_outline, write_preserved_outline
 from neoview.models.page_extraction import parse_page_ranges
 from neoview.ui.tool_support import choose_file, save_copy, snapshot
+
+SIDECAR_LIMITS = {"annotations": 10_000, "bookmarks": 5_000}
+
+
+def _duplicate_toc(output, toc, original_positions, copy_positions, original_keys):
+    """Keep original outline actions lossless and append remapped local copies.
+
+    Reusing raw original actions also preserves URI, named and remote destinations
+    that PyMuPDF's detailed-TOC writer cannot round-trip on every supported version.
+    Original page xrefs stay unchanged when physical copies are inserted.
+    """
+    remapped = []
+    for row in toc:
+        entry = copy.deepcopy(row)
+        destination = entry[3]
+        if destination.get("kind") == fitz.LINK_GOTO:
+            page = destination.get("page", entry[2] - 1)
+            if page in original_positions:
+                entry[2] = original_positions[page] + 1
+                destination["page"] = original_positions[page]
+                remapped.append(entry)
+                continue
+        remapped.append(entry)
+    previous_level = 0
+    for row in toc:
+        level, title, page, destination = copy.deepcopy(row)
+        if destination.get("kind") != fitz.LINK_GOTO or page - 1 not in copy_positions:
+            continue
+        level = min(level, previous_level + 1)
+        destination.pop("xref", None)
+        destination["page"] = copy_positions[page - 1]
+        remapped.append([level, title + " (copy)", copy_positions[page - 1] + 1, destination])
+        previous_level = level
+    write_preserved_outline(output, remapped, original_keys + [None] * (len(remapped) - len(toc)))
 
 
 def duplicate_pdf(document, source, state, ranges, target):
@@ -24,6 +59,14 @@ def duplicate_pdf(document, source, state, ranges, target):
         for page in range(document.page_count)
     }
     copy_positions = {page: insert_at + offset for offset, page in enumerate(selected)}
+    # Sidecar loading caps records. Refuse an operation that would otherwise
+    # appear successful but silently lose duplicated records after reopening.
+    for kind, limit in SIDECAR_LIMITS.items():
+        records = getattr(state, kind)
+        count = sum(record.page in original_positions for record in records)
+        count += sum(record.page in copy_positions for record in records)
+        if count > limit:
+            raise ValueError(f"Duplicating these pages would exceed {limit} {kind}.")
     remapped = copy.deepcopy(state)
     for kind in ("annotations", "bookmarks"):
         records = getattr(state, kind)
@@ -33,7 +76,7 @@ def duplicate_pdf(document, source, state, ranges, target):
                       for record in records if record.page in copy_positions]
         setattr(remapped, kind, originals + duplicates)
     with fitz.open(stream=document.tobytes(), filetype="pdf") as output:
-        toc = output.get_toc()
+        toc, original_keys = capture_outline(output)
         # Insert real page copies: select() can repeat the same page xref,
         # making outline destinations resolve to the original occurrence.
         for offset, page in enumerate(selected):
@@ -55,16 +98,7 @@ def duplicate_pdf(document, source, state, ranges, target):
                         continue
                     link["page"] = copy_positions.get(target_page, original_positions[target_page])
                 copied_page.insert_link(link)
-        remapped_toc = [[level, title, original_positions[page - 1] + 1]
-                        for level, title, page in toc if page - 1 in original_positions]
-        previous_level = 0
-        for level, title, page in toc:
-            if page - 1 not in copy_positions:
-                continue
-            level = min(level, previous_level + 1)
-            remapped_toc.append([level, title + " (copy)", copy_positions[page - 1] + 1])
-            previous_level = level
-        output.set_toc(remapped_toc)
+        _duplicate_toc(output, toc, original_positions, copy_positions, original_keys)
         return save_copy(output, remapped, source, target)
 
 

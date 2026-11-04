@@ -16,7 +16,7 @@ operations refuse password-protected PDFs rather than remove their protection.
 | File / Document Exports | Export Page Geometry as CSV | Reports displayed page dimensions in points and millimeters, rotation, and annotation counts. |
 | File / Document Exports | Export Document Text | Saves selectable text as UTF-8 with numbered page separators; scanned pages need OCR elsewhere. |
 | File / Document Exports | Extract Embedded Images | Extracts unique embedded image resources and soft masks into a new folder. |
-| File / Document Exports | Export Pages as PNG | Renders entered pages at 36-300 DPI with image-allocation limits. Native annotations are included; NeoView sidecar overlays are not. |
+| File / Document Exports | Export Pages as PNG | Renders entered pages at 36-300 DPI in a background process with nonmodal progress, cancellation, and image-allocation limits. Native annotations are included; NeoView sidecar overlays are not. |
 | File / Document Exports | Export Outline as JSON | Exports nested outline entries and destination details. |
 | File / Annotation Transfer | Export Editable Annotations as JSON | Transfers complete editable records; native annotations remain in the PDF. |
 | File / Annotation Transfer | Import Editable Annotations from JSON | Validates the entire file and appends records with fresh IDs. |

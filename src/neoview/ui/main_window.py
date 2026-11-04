@@ -3703,6 +3703,8 @@ class MainWindow(QMainWindow):
         return f"{size:.1f} {units[unit_idx]}"
 
     def closeEvent(self, e):
+        for export_job in list(getattr(self, "_document_export_jobs", [])):
+            export_job.cancel(wait=True, silent=True)
         if self._presentation is not None and shiboken6.isValid(self._presentation):
             self._presentation.close()
         self._search_timer.stop()
