@@ -99,6 +99,22 @@ remain in the accompanying `.neoview.json` sidecar, including in saved copies.
 The saved document opens in the viewer. Password-protected PDFs cannot currently
 be organized or merged; this avoids silently removing password protection.
 
+### Extract pages, edit metadata, and export review reports
+
+- **Pages > Extract Pages...** saves a page range such as `1-3, 5` into a
+  separate PDF. The requested page order is preserved, with annotations,
+  bookmarks, and relevant outlines remapped to the extracted pages.
+- **File > Edit Metadata...** edits the title, author, subject, and keywords
+  in a separate PDF copy while preserving the other document information.
+- **File > Export Annotations as CSV...** creates a spreadsheet-friendly report
+  of NeoView and native PDF annotations, including page numbers, contents,
+  colors, opacity, and bounds in PDF points.
+
+PDF copies retain NeoView annotations and bookmarks in an accompanying
+`.neoview.json` sidecar. Extraction and metadata editing leave the original PDF
+unchanged and do not support password-protected documents. CSV export does not
+modify the PDF or sidecar; formula-like text is escaped for spreadsheet use.
+
 ### Search
 
 - Find panel with live typing updates

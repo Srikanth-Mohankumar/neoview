@@ -473,6 +473,13 @@ class MainWindow(QMainWindow):
         self._export_annot_action = self._action(
             "Export PDF with &Annotations...", self._export_pdf_with_annotations, icon="file-down"
         )
+        self._metadata_action = self._action(
+            "Edit &Metadata...", self._edit_metadata, name="action_edit_metadata"
+        )
+        self._export_csv_action = self._action(
+            "Export Annotations as &CSV...", self._export_annotations_csv,
+            name="action_export_annotations_csv",
+        )
         self._quit_action = self._action("&Quit", self.close, QKeySequence.StandardKey.Quit)
         self._print_action = self._action(
             "&Print...", self._print_document, QKeySequence.StandardKey.Print, icon="printer",
@@ -481,6 +488,10 @@ class MainWindow(QMainWindow):
 
         self._organize_pages_action = self._action(
             "&Organize Pages...", self._organize_pages, name="action_organize_pages"
+        )
+
+        self._extract_pages_action = self._action(
+            "&Extract Pages...", self._extract_pages, name="action_extract_pages"
         )
 
         # Edit
@@ -683,7 +694,8 @@ class MainWindow(QMainWindow):
             self._first_page_action, self._last_page_action, self._goto_page_action,
             self._add_bookmark_action, self._annot_highlight_action, self._annot_underline_action,
             self._annot_note_action, self._select_action, self._hand_action, self._measure_action,
-            self._annotate_action, self._organize_pages_action,
+            self._annotate_action, self._organize_pages_action, self._extract_pages_action,
+            self._metadata_action, self._export_csv_action,
         ]
 
     def _setup_menus(self):
@@ -699,6 +711,8 @@ class MainWindow(QMainWindow):
         file_m.addAction(self._print_action)
         file_m.addAction(self._export_action)
         file_m.addAction(self._export_annot_action)
+        file_m.addAction(self._export_csv_action)
+        file_m.addAction(self._metadata_action)
         file_m.addSeparator()
         file_m.addAction(self._quit_action)
         self._file_menu = file_m
@@ -714,6 +728,7 @@ class MainWindow(QMainWindow):
 
         pages_m = bar.addMenu("&Pages")
         pages_m.addAction(self._organize_pages_action)
+        pages_m.addAction(self._extract_pages_action)
 
         view_m = bar.addMenu("&View")
         view_m.addAction(self._sidebar_action)
@@ -1560,6 +1575,53 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getOpenFileName(self, "Open PDF", "", "PDF (*.pdf);;All (*)")
         if path:
             self._open_file(path)
+
+    def _open_saved_pdf_copy(self, path: str):
+        existing = self._find_open_view(path)
+        if existing is None:
+            self._open_file(path)
+            return
+        ctx = self._context_for_view(existing)
+        timer = self._sidecar_timers.get(existing)
+        if timer is not None:
+            timer.stop()
+        ctx.sidecar_state = load_sidecar(path)
+        self._tabs.setCurrentWidget(existing)
+        self._do_reload(force=True)
+
+    def _extract_pages(self):
+        from neoview.ui.page_extraction import extract_pages
+
+        view = self.current_view()
+        ctx = self.current_context()
+        if view.document is None or not ctx.file_path:
+            return
+        path = extract_pages(self, view.document, ctx.file_path, ctx.sidecar_state)
+        if path:
+            self._open_saved_pdf_copy(path)
+
+    def _edit_metadata(self):
+        from neoview.ui.metadata_editor import edit_metadata
+
+        view = self.current_view()
+        ctx = self.current_context()
+        if view.document is None or not ctx.file_path:
+            return
+        path = edit_metadata(self, view.document, ctx.file_path, ctx.sidecar_state)
+        if path:
+            self._open_saved_pdf_copy(path)
+
+    def _export_annotations_csv(self):
+        from neoview.ui.annotation_csv import export_annotations_csv
+
+        ctx = self.current_context()
+        if self.current_view().document is None or not ctx.file_path:
+            return
+        path = export_annotations_csv(
+            self, ctx.file_path, ctx.sidecar_state.annotations, ctx.native_annotations
+        )
+        if path:
+            self._status.showMessage(f"Saved annotation report to {os.path.basename(path)}", 3000)
 
     def _on_page_context_menu(self, pos):
         menu = QMenu(self)
