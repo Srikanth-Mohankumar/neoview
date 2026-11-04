@@ -41,7 +41,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e .[dev] twine
+          python -m pip install -e .[dev] twine pytest-github-actions-annotate-failures
       - name: Environment Info
         run: |
           python -c "import os, sys; print('python', sys.version); print('executable', sys.executable); print('PYTHONPATH', os.environ.get('PYTHONPATH')); print('QT_QPA_PLATFORM', os.environ.get('QT_QPA_PLATFORM'))"
