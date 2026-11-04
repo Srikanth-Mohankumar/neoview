@@ -8,6 +8,7 @@ import math
 from PySide6.QtWidgets import QMessageBox
 
 from neoview.ui.tool_support import atomic_text, choose_file
+from neoview.ui.tools.bookmark_format import normalized_title
 
 
 def render_bookmarks(bookmarks) -> str:
@@ -17,13 +18,14 @@ def render_bookmarks(bookmarks) -> str:
         if (not isinstance(bookmark.page, int) or isinstance(bookmark.page, bool)
                 or bookmark.page < 0):
             raise ValueError("Bookmark pages must be nonnegative integer indexes.")
-        if not isinstance(bookmark.title, str) or not isinstance(bookmark.created_at, str):
+        title = normalized_title(bookmark.title)
+        if not isinstance(bookmark.created_at, str) or len(bookmark.created_at) > 128:
             raise ValueError("Bookmark titles and creation dates must be text.")
         if (isinstance(bookmark.y, bool) or not isinstance(bookmark.y, (int, float))
                 or not math.isfinite(bookmark.y) or bookmark.y < 0):
             raise ValueError("Bookmark positions must be finite, nonnegative numbers.")
         records.append({
-            "title": bookmark.title,
+            "title": title,
             "page": bookmark.page + 1,
             "y": bookmark.y,
             "created_at": bookmark.created_at,

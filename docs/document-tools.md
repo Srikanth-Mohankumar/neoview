@@ -44,6 +44,8 @@ round-trips complete editable records, but import assigns fresh IDs.
 
 Bookmark JSON has `version: 1` and a `bookmarks` array whose records contain
 `title`, **one-based** `page`, `y`, and `created_at`. Import assigns fresh IDs.
+Bookmark transfer trims surrounding title whitespace, rejects empty titles, and
+limits titles to 1024 characters to match persisted sidecars.
 Both importers reject unknown versions, malformed records, nonfinite numbers,
 and pages outside the current document before changing any state. Annotation
 imports are limited to 10 MB and 10,000 combined records; bookmark imports are

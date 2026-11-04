@@ -123,3 +123,23 @@ def test_document_switch_during_dialog_rejects_import(tmp_path, qtbot, monkeypat
     with pytest.raises(ValueError, match="changed"):
         tool.run(win)
     assert win.current_context().sidecar_state == before
+
+
+@pytest.mark.parametrize("title", ["", " \n\t", "x" * 1025])
+def test_unpersistable_bookmark_titles_rejected(title):
+    with pytest.raises(ValueError, match="Bookmark titles"):
+        tool.parse_bookmarks(payload(title=title), 3)
+
+
+def test_imported_title_survives_export_and_persistence(tmp_path):
+    from neoview.models.view_state import DocumentSidecarState
+    from neoview.persistence.sidecar_store import load_sidecar, save_sidecar
+    from neoview.ui.tools.export_bookmarks_json import render_bookmarks
+
+    incoming = tool.parse_bookmarks(payload(title="  " + "x" * 1024 + "  "), 3)
+    source = str(tmp_path / "source.pdf")
+    save_sidecar(source, DocumentSidecarState(bookmarks=incoming))
+    restored = load_sidecar(source).bookmarks
+    transferred = tool.parse_bookmarks(json.loads(render_bookmarks(restored)), 3)
+    assert restored[0].title == transferred[0].title == "x" * 1024
+    assert incoming[0].title == restored[0].title

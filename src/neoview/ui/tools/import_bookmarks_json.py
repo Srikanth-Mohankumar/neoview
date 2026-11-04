@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QFileDialog
 
 from neoview.models.view_state import BookmarkRecord
 from neoview.ui.tool_support import apply_state
+from neoview.ui.tools.bookmark_format import normalized_title
 
 MAX_BOOKMARKS = 5_000
 MAX_FILE_BYTES = 5 * 1024 * 1024
@@ -30,12 +31,11 @@ def parse_bookmarks(payload, page_count: int) -> list[BookmarkRecord]:
         if (not isinstance(record, dict) or not required <= set(record)
                 or set(record) - required - {"id"}):
             raise ValueError("Each bookmark must contain a title, page, y and created_at.")
-        title = record["title"]
+        title = normalized_title(record["title"])
         created_at = record["created_at"]
         page = record["page"]
         y = record["y"]
-        if (not isinstance(title, str) or len(title) > 4096
-                or not isinstance(created_at, str) or len(created_at) > 128
+        if (not isinstance(created_at, str) or len(created_at) > 128
                 or ("id" in record and not isinstance(record["id"], str))):
             raise ValueError("Bookmark titles and timestamps must be bounded text values.")
         if type(page) is not int or not 1 <= page <= page_count:

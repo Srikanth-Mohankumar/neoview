@@ -151,3 +151,12 @@ def test_export_import_round_trip_preserves_values_and_replaces_ids():
     assert (restored.title, restored.page, restored.y, restored.created_at) == (
         original.title, original.page, original.y, original.created_at,
     )
+
+
+@pytest.mark.parametrize("title", ["", " \n\t", "x" * 1025])
+def test_export_rejects_titles_that_cannot_persist(title):
+    bookmark = records()[0]
+    bookmark.title = title
+    with pytest.raises(ValueError, match="Bookmark titles"):
+        render_bookmarks([bookmark])
+    assert bookmark.title == title
