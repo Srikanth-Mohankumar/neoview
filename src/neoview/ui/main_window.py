@@ -121,6 +121,7 @@ class MainWindow(QMainWindow):
         self.resize(1280, 900)
         self.setAcceptDrops(True)
 
+        self._closed_pdf_paths: list[str] = []
         self._current_file: str | None = None
         self._last_file_sig: tuple[int, int, int] | None = None
         self._settings = QSettings("NeoView", "NeoView")
@@ -355,6 +356,14 @@ class MainWindow(QMainWindow):
         if not isinstance(widget, PdfView):
             return
 
+        path = self._context_for_view(widget).file_path
+        if path:
+            self._closed_pdf_paths.append(path)
+            self._closed_pdf_paths = self._closed_pdf_paths[-20:]
+            actions = getattr(self, "_extra_tool_actions", {})
+            if "reopen_closed_tab" in actions:
+                actions["reopen_closed_tab"].setEnabled(True)
+
         if widget is self.current_view():
             self._search_timer.stop()
             self._cancel_search_operation()
@@ -473,6 +482,13 @@ class MainWindow(QMainWindow):
         self._export_annot_action = self._action(
             "Export PDF with &Annotations...", self._export_pdf_with_annotations, icon="file-down"
         )
+        self._metadata_action = self._action(
+            "Edit &Metadata...", self._edit_metadata, name="action_edit_metadata"
+        )
+        self._export_csv_action = self._action(
+            "Export Annotations as &CSV...", self._export_annotations_csv,
+            name="action_export_annotations_csv",
+        )
         self._quit_action = self._action("&Quit", self.close, QKeySequence.StandardKey.Quit)
         self._print_action = self._action(
             "&Print...", self._print_document, QKeySequence.StandardKey.Print, icon="printer",
@@ -481,6 +497,10 @@ class MainWindow(QMainWindow):
 
         self._organize_pages_action = self._action(
             "&Organize Pages...", self._organize_pages, name="action_organize_pages"
+        )
+
+        self._extract_pages_action = self._action(
+            "&Extract Pages...", self._extract_pages, name="action_extract_pages"
         )
 
         # Edit
@@ -683,7 +703,8 @@ class MainWindow(QMainWindow):
             self._first_page_action, self._last_page_action, self._goto_page_action,
             self._add_bookmark_action, self._annot_highlight_action, self._annot_underline_action,
             self._annot_note_action, self._select_action, self._hand_action, self._measure_action,
-            self._annotate_action, self._organize_pages_action,
+            self._annotate_action, self._organize_pages_action, self._extract_pages_action,
+            self._metadata_action, self._export_csv_action,
         ]
 
     def _setup_menus(self):
@@ -699,6 +720,8 @@ class MainWindow(QMainWindow):
         file_m.addAction(self._print_action)
         file_m.addAction(self._export_action)
         file_m.addAction(self._export_annot_action)
+        file_m.addAction(self._export_csv_action)
+        file_m.addAction(self._metadata_action)
         file_m.addSeparator()
         file_m.addAction(self._quit_action)
         self._file_menu = file_m
@@ -714,6 +737,9 @@ class MainWindow(QMainWindow):
 
         pages_m = bar.addMenu("&Pages")
         pages_m.addAction(self._organize_pages_action)
+        pages_m.addAction(self._extract_pages_action)
+        from neoview.ui.document_tools import install_tools
+        install_tools(self, file_m, pages_m)
 
         view_m = bar.addMenu("&View")
         view_m.addAction(self._sidebar_action)
@@ -1561,10 +1587,96 @@ class MainWindow(QMainWindow):
         if path:
             self._open_file(path)
 
+    def _open_saved_pdf_copy(self, path: str):
+        existing = self._find_open_view(path)
+        if existing is None:
+            self._open_file(path)
+            return
+        ctx = self._context_for_view(existing)
+        timer = self._sidecar_timers.get(existing)
+        if timer is not None:
+            timer.stop()
+        ctx.sidecar_state = load_sidecar(path)
+        self._tabs.setCurrentWidget(existing)
+        self._do_reload(force=True)
+
+    def _extract_pages(self):
+        from neoview.ui.page_extraction import extract_pages
+
+        view = self.current_view()
+        ctx = self.current_context()
+        if view.document is None or not ctx.file_path:
+            return
+        path = extract_pages(self, view.document, ctx.file_path, ctx.sidecar_state)
+        if path:
+            self._open_saved_pdf_copy(path)
+
+    def _edit_metadata(self):
+        from neoview.ui.metadata_editor import edit_metadata
+
+        view = self.current_view()
+        ctx = self.current_context()
+        if view.document is None or not ctx.file_path:
+            return
+        path = edit_metadata(self, view.document, ctx.file_path, ctx.sidecar_state)
+        if path:
+            self._open_saved_pdf_copy(path)
+
+    def _export_annotations_csv(self):
+        from neoview.ui.annotation_csv import export_annotations_csv
+
+        ctx = self.current_context()
+        if self.current_view().document is None or not ctx.file_path:
+            return
+        path = export_annotations_csv(
+            self, ctx.file_path, ctx.sidecar_state.annotations, ctx.native_annotations
+        )
+        if path:
+            self._status.showMessage(f"Saved annotation report to {os.path.basename(path)}", 3000)
+
     def _on_page_context_menu(self, pos):
         menu = QMenu(self)
         menu.addAction(self._organize_pages_action)
         menu.exec(self._thumbs_list.viewport().mapToGlobal(pos))
+
+    def _save_organized_pages(self, session, path: str):
+        """Release readers before replacement, then restore them even if saving fails.
+
+        Windows refuses to replace an open PDF. Keep the editing session isolated
+        while temporarily releasing only viewers that hold the destination file.
+        """
+        from neoview.ui.page_organizer import paths_alias
+
+        readers = []
+        for index in range(self._tabs.count()):
+            view = self._tabs.widget(index)
+            if not isinstance(view, PdfView):
+                continue
+            ctx = self._context_for_view(view)
+            if view.document is None or not ctx.file_path or not paths_alias(ctx.file_path, path):
+                continue
+            timer = self._sidecar_timers.get(view)
+            restart_timer = timer is not None and timer.isActive()
+            if timer is not None:
+                timer.stop()
+            readers.append((view, ctx, view.current_page, view.zoom, restart_timer))
+            view.close_document()
+        saved = False
+        try:
+            session.save(path)
+            saved = True
+        finally:
+            for view, ctx, page, zoom, restart_timer in readers:
+                # Replacing a hardlink or symlink may separate it from another
+                # alias. Only readers of the newly written PDF get its sidecar.
+                if saved and paths_alias(ctx.file_path, path):
+                    ctx.sidecar_state = load_sidecar(path)
+                if view.open_document(ctx.file_path):
+                    view.set_zoom(zoom, immediate=True)
+                    view.go_to_page(min(page, view.page_count - 1))
+                timer = self._sidecar_timers.get(view)
+                if restart_timer and timer is not None:
+                    timer.start(300)
 
     def _organize_pages(self):
         from neoview.models.page_organization import PageOrganization
@@ -1589,6 +1701,7 @@ class MainWindow(QMainWindow):
         dialog = None
         try:
             dialog = PageOrganizer(session, ctx.file_path, self)
+            dialog.save_document = lambda path: self._save_organized_pages(session, path)
             dialog.pages.setCurrentRow(view.current_page)
             dialog.exec()
             if dialog.saved_path:
@@ -3590,6 +3703,8 @@ class MainWindow(QMainWindow):
         return f"{size:.1f} {units[unit_idx]}"
 
     def closeEvent(self, e):
+        for export_job in list(getattr(self, "_document_export_jobs", [])):
+            export_job.cancel(wait=True, silent=True)
         if self._presentation is not None and shiboken6.isValid(self._presentation):
             self._presentation.close()
         self._search_timer.stop()

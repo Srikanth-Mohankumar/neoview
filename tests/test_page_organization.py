@@ -234,3 +234,242 @@ def test_external_change_blocks_overwrite(tmp_path, qtbot, monkeypatch):
     monkeypatch.setattr(QMessageBox, "question", lambda *_: QMessageBox.StandardButton.Discard)
     dialog.reject()
     session.close()
+
+
+def test_organizer_releases_open_reader_before_saving(tmp_path, qtbot):
+    path = tmp_path / "source.pdf"
+    make_pdf(path)
+    state = DocumentSidecarState(bookmarks=[BookmarkRecord("b", "B", 1, 0)])
+    save_sidecar(path, state)
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win._open_file(str(path))
+    view = win.current_view()
+    view.set_zoom(1.4, immediate=True)
+    view.go_to_page(1)
+    with fitz.open(path) as source:
+        session = PageOrganization(source, state)
+    session.delete([0])
+    save = session.save
+
+    def windows_locked_save(destination):
+        assert view.document is None, "Windows requires all destination readers to release the PDF"
+        save(destination)
+
+    session.save = windows_locked_save
+    win._save_organized_pages(session, str(path))
+    assert view.page_count == 2
+    assert view.zoom == pytest.approx(1.4)
+    assert view.current_page == 1
+    assert labels(path) == ["B", "C"]
+    assert win.current_context().sidecar_state.bookmarks[0].page == 0
+    session.close()
+
+
+def test_organizer_restores_reader_and_state_after_save_failure(tmp_path, qtbot):
+    path = tmp_path / "source.pdf"
+    make_pdf(path)
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win._open_file(str(path))
+    view = win.current_view()
+    state = win.current_context().sidecar_state
+    state.bookmarks.append(BookmarkRecord("b", "B", 1, 0))
+    view.set_zoom(1.3, immediate=True)
+    view.go_to_page(1)
+    with fitz.open(path) as source:
+        session = PageOrganization(source, state)
+    session.delete([0])
+
+    def fail(destination):
+        assert view.document is None
+        raise OSError("save failed")
+
+    session.save = fail
+    with pytest.raises(OSError, match="save failed"):
+        win._save_organized_pages(session, str(path))
+    assert view.page_count == 3
+    assert view.zoom == pytest.approx(1.3)
+    assert view.current_page == 1
+    assert win.current_context().sidecar_state == state
+    assert state.bookmarks[0].page == 1
+    assert labels(path) == ["A", "B", "C"]
+    session.close()
+
+
+def test_save_as_refuses_source_sidecar_alias(tmp_path, qtbot, monkeypatch):
+    path = tmp_path / "source.pdf"
+    make_pdf(path)
+    sidecar = tmp_path / "source.pdf.neoview.json"
+    sidecar.write_text("keep")
+    alias = tmp_path / "unsafe.pdf"
+    alias.hardlink_to(sidecar)
+    with fitz.open(path) as source:
+        session = PageOrganization(source, DocumentSidecarState())
+    dialog = PageOrganizer(session, str(path))
+    qtbot.addWidget(dialog)
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *_: (str(alias), ""))
+    warnings = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args: warnings.append(args[2]))
+    dialog._save(True)
+    assert warnings and "separate" in warnings[0]
+    assert sidecar.read_text() == "keep"
+    assert dialog.saved_path is None
+    session.close()
+
+
+def test_organizer_releases_hardlink_readers_and_restores_each_file(tmp_path, qtbot):
+    path = tmp_path / "source.pdf"
+    alias = tmp_path / "alias.pdf"
+    make_pdf(path)
+    alias.hardlink_to(path)
+    state = DocumentSidecarState(bookmarks=[BookmarkRecord("b", "B", 1, 0)])
+    save_sidecar(path, state)
+    save_sidecar(alias, state)
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win._open_file(str(path))
+    original_view = win.current_view()
+    win._open_file(str(alias))
+    alias_view = win.current_view()
+    with fitz.open(path) as source:
+        session = PageOrganization(source, state)
+    session.delete([0])
+    save = session.save
+
+    def windows_locked_save(destination):
+        assert original_view.document is None
+        assert alias_view.document is None
+        save(destination)
+
+    session.save = windows_locked_save
+    win._save_organized_pages(session, str(path))
+    # Replacement separates the original path from its pre-existing hardlink.
+    assert original_view.page_count == 2
+    assert alias_view.page_count == 3
+    assert win._context_for_view(original_view).sidecar_state.bookmarks[0].page == 0
+    assert win._context_for_view(alias_view).sidecar_state.bookmarks[0].page == 1
+    assert labels(path) == ["B", "C"]
+    assert labels(alias) == ["A", "B", "C"]
+    session.close()
+
+
+def test_closed_organizer_session_does_not_prompt_during_disposal(tmp_path, qtbot, monkeypatch):
+    path = tmp_path / "source.pdf"
+    make_pdf(path)
+    with fitz.open(path) as document:
+        session = PageOrganization(document, DocumentSidecarState())
+    session.delete([0])
+    dialog = PageOrganizer(session, str(path))
+    qtbot.addWidget(dialog)
+    session.close()
+    monkeypatch.setattr(QMessageBox, "question", lambda *_: pytest.fail(
+        "A disposed editing session must not open another modal dialog"))
+    try:
+        dialog.reject()
+    finally:
+        session.dirty = False
+
+
+def test_discard_clears_dirty_flag_and_does_not_prompt_again(tmp_path, qtbot, monkeypatch):
+    path = tmp_path / "source.pdf"
+    make_pdf(path)
+    with fitz.open(path) as document:
+        session = PageOrganization(document, DocumentSidecarState())
+    session.delete([0])
+    dialog = PageOrganizer(session, str(path))
+    qtbot.addWidget(dialog)
+    prompts = []
+    monkeypatch.setattr(QMessageBox, "question", lambda *args: (
+        prompts.append(args), QMessageBox.StandardButton.Discard)[1])
+    dialog.reject()
+    dialog.reject()
+    assert len(prompts) == 1
+    assert not session.dirty
+    session.close()
+
+
+@pytest.mark.parametrize(("kind", "limit"), [("annotations", 10000), ("bookmarks", 5000)])
+def test_organization_record_limits_preserve_existing_files(tmp_path, kind, limit):
+    source, target = tmp_path / "source.pdf", tmp_path / "target.pdf"
+    make_pdf(source)
+    records = DocumentSidecarState()
+    if kind == "annotations":
+        records.annotations = [AnnotationRecord(f"a{i}", "note", 0, (1, 2, 3, 4))
+                               for i in range(limit + 1)]
+    else:
+        records.bookmarks = [BookmarkRecord(f"b{i}", "First", 0, 0) for i in range(limit + 1)]
+    target.write_bytes(b"existing PDF")
+    target_sidecar = Path(str(target) + ".neoview.json")
+    target_sidecar.write_bytes(b"existing sidecar")
+    before = source.read_bytes(), target.read_bytes(), target_sidecar.read_bytes()
+    with fitz.open(source) as document:
+        session = PageOrganization(document, records)
+    try:
+        with pytest.raises(ValueError, match=str(limit)):
+            session.save(str(target))
+    finally:
+        session.close()
+    assert (source.read_bytes(), target.read_bytes(), target_sidecar.read_bytes()) == before
+    assert len(getattr(records, kind)) == limit + 1
+    assert not list(tmp_path.glob(".neoview-pages-*"))
+
+
+def test_merge_exceeding_bookmark_capacity_cannot_overwrite_original(tmp_path):
+    source, incoming = tmp_path / "source.pdf", tmp_path / "incoming.pdf"
+    make_pdf(source)
+    make_pdf(incoming)
+    original_state = DocumentSidecarState(bookmarks=[
+        BookmarkRecord(f"original{i}", "First", 0, 0) for i in range(2501)
+    ])
+    incoming_state = DocumentSidecarState(bookmarks=[
+        BookmarkRecord(f"incoming{i}", "First", 0, 0) for i in range(2501)
+    ])
+    save_sidecar(source, original_state)
+    save_sidecar(incoming, incoming_state)
+    paths = [source, incoming, Path(str(source) + ".neoview.json"),
+             Path(str(incoming) + ".neoview.json")]
+    before = [path.read_bytes() for path in paths]
+    with fitz.open(source) as document:
+        session = PageOrganization(document, original_state)
+    try:
+        session.insert(str(incoming), 1)
+        assert len(session.state.bookmarks) == 5002
+        with pytest.raises(ValueError, match="5000 bookmarks"):
+            session.save(str(source))
+        assert session.dirty
+    finally:
+        session.close()
+    assert [path.read_bytes() for path in paths] == before
+
+
+def test_deleted_local_outline_parent_keeps_nonlocal_child_and_valid_levels(tmp_path):
+    target = tmp_path / "target.pdf"
+    with fitz.open() as document:
+        for _ in range(3):
+            document.new_page()
+        document.set_toc([
+            [1, "Deleted local parent", 1], [2, "URI child", -1],
+            [3, "Retained local grandchild", 3], [1, "Remote", -1],
+        ])
+        document.set_toc_item(1, dest_dict={"kind": fitz.LINK_URI,
+                                          "uri": "https://example.com", "bold": True})
+        document.set_toc_item(2, dest_dict={"kind": fitz.LINK_GOTO, "page": 2,
+                                          "to": fitz.Point(24, 48), "zoom": 2})
+        document.set_toc_item(3, dest_dict={"kind": fitz.LINK_GOTOR, "file": "other.pdf",
+                                          "page": 1, "to": fitz.Point(20, 40), "zoom": 1})
+        session = PageOrganization(document, DocumentSidecarState())
+    try:
+        session.delete([0])
+        session.save(str(target))
+    finally:
+        session.close()
+    with fitz.open(target) as document:
+        toc = document.get_toc(simple=False)
+        assert [entry[:3] for entry in toc] == [
+            [1, "URI child", -1], [2, "Retained local grandchild", 2], [1, "Remote", -1],
+        ]
+        assert toc[0][3]["uri"] == "https://example.com" and toc[0][3]["bold"]
+        assert toc[1][3]["page"] == 1 and toc[1][3]["to"] == fitz.Point(24, 48)
+        assert toc[1][3]["zoom"] == 2
+        assert toc[2][3]["kind"] == fitz.LINK_GOTOR and toc[2][3]["file"] == "other.pdf"

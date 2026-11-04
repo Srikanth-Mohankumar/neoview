@@ -16,6 +16,10 @@ from neoview.ui.main_window import APP_NAME, MainWindow
 
 
 def main() -> None:
+    if len(sys.argv) > 1 and sys.argv[1] == "--png-export-worker":
+        from neoview.ui.background_png_export import run_worker
+        raise SystemExit(run_worker(sys.argv[2:]))
+
     # Suppress noisy parser diagnostics from malformed third-party PDFs.
     fitz.TOOLS.mupdf_display_errors(False)
     fitz.TOOLS.mupdf_display_warnings(False)

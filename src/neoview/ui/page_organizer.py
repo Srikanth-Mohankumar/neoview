@@ -23,10 +23,20 @@ from PySide6.QtWidgets import (
 from neoview.models.page_organization import PageOrganization
 
 
+def paths_alias(first: str, second: str) -> bool:
+    if os.path.normcase(os.path.realpath(first)) == os.path.normcase(os.path.realpath(second)):
+        return True
+    try:
+        return os.path.samefile(first, second)
+    except FileNotFoundError:
+        return False
+
+
 class PageOrganizer(QDialog):
     def __init__(self, session: PageOrganization, path: str, parent=None):
         super().__init__(parent)
         self.session = session
+        self.save_document = session.save
         self.path = path
         self._source_signature = self._signature(path)
         self.saved_path = None
@@ -174,7 +184,7 @@ class PageOrganizer(QDialog):
             self, "Save Pages", "Replace the original PDF with the organized pages?"
         ) != QMessageBox.StandardButton.Yes:
             return
-        if (os.path.realpath(path) == os.path.realpath(self.path)
+        if (paths_alias(path, self.path)
                 and self._signature(self.path) != self._source_signature):
             QMessageBox.warning(
                 self, "PDF Changed", "The original PDF changed while organizing pages. "
@@ -182,7 +192,13 @@ class PageOrganizer(QDialog):
             )
             return
         try:
-            self.session.save(path)
+            from neoview.persistence.sidecar_store import sidecar_path_for
+
+            if (paths_alias(path, sidecar_path_for(self.path))
+                    or paths_alias(sidecar_path_for(path), self.path)
+                    or paths_alias(path, sidecar_path_for(path))):
+                raise ValueError("The PDF and sidecars must be separate files.")
+            self.save_document(path)
         except Exception as exc:
             QMessageBox.warning(self, "Could Not Save PDF", str(exc))
             return
@@ -190,10 +206,11 @@ class PageOrganizer(QDialog):
         self.accept()
 
     def reject(self):
-        if self.session.dirty and QMessageBox.question(
+        if (self.session.dirty and not self.session.document.is_closed) and QMessageBox.question(
             self, "Unsaved Page Changes", "Discard the unsaved page changes?",
             QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Cancel,
         ) != QMessageBox.StandardButton.Discard:
             return
+        self.session.dirty = False
         super().reject()
