@@ -1,5 +1,8 @@
 # Document tools
 
+For tag-tree, logical reading-order and artifact inspection, see
+[Tagged PDF support](tagged-pdf.md), including the current limits and editing roadmap.
+
 The File menu groups exports, annotation transfer, bookmark transfer, file-location
 commands, and tab commands. The Pages menu contains structural PDF operations.
 All PDF-copy commands leave the original PDF and its `.neoview.json` sidecar
