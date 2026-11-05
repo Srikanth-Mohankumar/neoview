@@ -59,6 +59,10 @@ class TaggedPdfEditorDialog(QDialog):
         )
         description.setWordWrap(True)
         layout.addWidget(description)
+        self.structure_notice = QLabel()
+        self.structure_notice.setTextFormat(Qt.TextFormat.PlainText)
+        self.structure_notice.setWordWrap(True)
+        layout.addWidget(self.structure_notice)
         self.tags = QTreeWidget()
         self.tags.setHeaderLabels(["Tag", "Page", "Object"])
         self.tags.setObjectName("editable_pdf_tags")
@@ -154,6 +158,10 @@ class TaggedPdfEditorDialog(QDialog):
         # Editing only needs the structure tree. Artifact content scans belong to
         # the asynchronous inspector; never rescan page drawing streams here.
         self.report = inspect_tagged_pdf(self.document, max_nodes=2000, scan_artifacts=False)
+        incomplete = [warning for warning in self.report.warnings
+                      if "incomplete" in warning or "could not be completely" in warning]
+        self.structure_notice.setText(" ".join(incomplete))
+        self.structure_notice.setVisible(bool(incomplete))
         self.tags.clear()
         self._nodes = {node.xref: node for node in self.report.reading_order if node.xref}
         selected_item = None

@@ -144,3 +144,20 @@ def test_unchanged_custom_role_can_edit_alternate_text(tmp_path, qtbot):
         assert node.role == 'Custom'
         assert node.alt_text == 'Text for custom tag'
         dialog.done(QDialog.DialogCode.Rejected)
+
+
+def test_editor_displays_structure_truncation_warning(tmp_path, qtbot, monkeypatch):
+    source = tmp_path / 'source.pdf'
+    tagged_source(source)
+
+    def bounded_inspect(document, **options):
+        options['max_nodes'] = 1
+        return inspect_tagged_pdf(document, **options)
+
+    monkeypatch.setattr('neoview.ui.tagged_pdf_editor.inspect_tagged_pdf', bounded_inspect)
+    with fitz.open(source) as document:
+        dialog = TaggedPdfEditorDialog(document, DocumentSidecarState(), str(source))
+    qtbot.addWidget(dialog)
+    assert 'incomplete' in dialog.structure_notice.text()
+    assert len(dialog.report.reading_order) == 1
+    dialog.reject()
