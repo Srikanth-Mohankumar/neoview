@@ -85,11 +85,11 @@ def test_editor_mark_artifact_undo_and_confirm_discard(tmp_path, qtbot, monkeypa
         dialog = TaggedPdfEditorDialog(doc, DocumentSidecarState(), str(source))
         qtbot.addWidget(dialog)
         dialog._mark_artifact()
-        assert dialog.report.artifacts[0].count == 1
+        assert inspect_tagged_pdf(dialog.document).artifacts[0].count == 1
         dialog._unmark_artifact()
-        assert dialog.report.artifacts[0].count == 0
+        assert inspect_tagged_pdf(dialog.document).artifacts[0].count == 0
         dialog._undo_change()
-        assert dialog.report.artifacts[0].count == 1
+        assert inspect_tagged_pdf(dialog.document).artifacts[0].count == 1
         dialog.reject()
         assert dialog.document.is_closed
     assert source.read_bytes() == original

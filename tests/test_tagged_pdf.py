@@ -131,3 +131,69 @@ def test_pdfdocencoding_and_mixed_content_pages_are_explicit():
     assert report.reading_order[1].actual_text == "\u2022\ufb01\u20ac"
     assert any("content page differs" in warning for warning in report.warnings)
     doc.close()
+
+
+def test_numeric_lexer_does_not_copy_remaining_stream_for_reference_lookahead():
+    from neoview.models.tagged_pdf import _Parser
+
+    class NoTailCopies(bytes):
+        def __getitem__(self, key):
+            if isinstance(key, slice) and key.start and key.stop is None:
+                raise AssertionError("Reference lookahead copied the remaining stream")
+            return super().__getitem__(key)
+
+    parser = _Parser(NoTailCopies(b"12 34 m " * 20000 + b"9 0 R"))
+    for _ in range(20000):
+        assert parser.value() == 12
+        assert parser.value() == 34
+        assert parser.value() == "m"
+    assert parser.value().xref == 9
+
+
+def test_cancelled_inspection_returns_explicit_incomplete_report():
+    doc, _, _, _, _ = _fixture()
+    report = inspect_tagged_pdf(doc, cancelled=lambda: True)
+    assert not report.nodes
+    assert any("cancelled" in message and "incomplete" in message for message in report.warnings)
+    doc.close()
+
+
+def test_parser_cancellation_interrupts_long_comments_and_strings():
+    import pytest
+
+    from neoview.models.tagged_pdf import _Parser
+
+    for content in (b"%" + b"x" * 100000, b"(" + b"x" * 100000 + b")"):
+        calls = []
+
+        def cancelled():
+            calls.append(1)
+            return len(calls) > 2
+
+        parser = _Parser(content, cancelled=cancelled)
+        with pytest.raises(ValueError, match="cancelled"):
+            parser.value()
+        assert parser.pos <= 8192
+
+
+def test_structure_only_inspection_preserves_pages_without_reading_content():
+    with fitz.open() as document:
+        document.new_page()
+        root, tag = document.get_new_xref(), document.get_new_xref()
+        document.update_object(root, f'<< /Type /StructTreeRoot /K {tag} 0 R >>')
+        document.update_object(tag, f'<< /S /P /Pg {document.page_xref(0)} 0 R >>')
+        document.xref_set_key(document.pdf_catalog(), 'StructTreeRoot', f'{root} 0 R')
+
+        class WithoutContentReads:
+            def __len__(self):
+                return len(document)
+
+            def __getattr__(self, name):
+                return getattr(document, name)
+
+            def __getitem__(self, index):
+                raise AssertionError('Structure-only mode must not read page drawing streams')
+
+        report = inspect_tagged_pdf(WithoutContentReads(), scan_artifacts=False)
+        assert report.nodes[0].page == 0
+        assert report.artifacts == []

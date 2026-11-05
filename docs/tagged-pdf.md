@@ -16,7 +16,9 @@ visual layout. It provides:
 - Page navigation for entries with a resolved page association.
 - Structural warnings and counts of explicit artifact marked-content sequences.
 
-The report is a snapshot. Close and reopen it after changing or reloading the
+Inspection runs in a separate process on a private snapshot; closing the dialog
+cancels pending work. The editor refreshes structure without rescanning page
+drawing streams. Close and reopen the inspector after changing or reloading the
 PDF. Inspection does not modify the PDF, sidecar, or accessibility metadata.
 An untagged document is reported as untagged; ordinary extracted text is not
 presented as an authoritative accessibility reading order.

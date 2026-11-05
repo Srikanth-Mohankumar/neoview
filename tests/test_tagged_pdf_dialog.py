@@ -2,7 +2,7 @@
 from types import SimpleNamespace
 
 import fitz
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QObject, Qt, QTimer, Signal
 
 import neoview.ui.tagged_pdf as tagged_ui
 
@@ -23,13 +23,32 @@ def _report(**kwargs):
     return SimpleNamespace(**values)
 
 
+def _mock_job(monkeypatch, report):
+    class Job(QObject):
+        ready = Signal(object)
+        failed = Signal(str)
+
+        def __init__(self, document, owner):
+            super().__init__(owner)
+            self.cancelled = False
+
+        def start(self):
+            QTimer.singleShot(0, lambda: self.ready.emit(report) if not self.cancelled else None)
+
+        def cancel(self):
+            self.cancelled = True
+
+    monkeypatch.setattr(tagged_ui, "TaggedInspectionJob", Job)
+
+
 def _dialog(qtbot, monkeypatch, report):
-    monkeypatch.setattr(tagged_ui, "inspect_tagged_pdf", lambda doc: report)
+    _mock_job(monkeypatch, report)
     with fitz.open() as doc:
         doc.new_page()
         doc.new_page()
         dialog = tagged_ui.TaggedPdfDialog(doc)
     qtbot.addWidget(dialog)
+    qtbot.waitUntil(lambda: dialog.report is not None)
     return dialog
 
 
@@ -115,6 +134,7 @@ def test_real_tagged_pdf_backend_integration(qtbot):
         before = [doc.xref_object(xref) for xref in range(1, doc.xref_length())]
         dialog = tagged_ui.TaggedPdfDialog(doc)
         qtbot.addWidget(dialog)
+        qtbot.waitUntil(lambda: dialog.report is not None, timeout=10000)
         assert dialog.tags.topLevelItem(0).text(0) == "H1"
         assert dialog.order.topLevelItem(0).text(3) == "3"
         assert [doc.xref_object(xref) for xref in range(1, doc.xref_length())] == before
@@ -130,11 +150,12 @@ def test_export_report_contains_snapshot_and_limits(qtbot, monkeypatch, tmp_path
     from neoview.ui import tool_support
 
     report = TaggedPdfReport(language="fr", warnings=["Review order manually"])
-    monkeypatch.setattr(tagged_ui, "inspect_tagged_pdf", lambda document: report)
+    _mock_job(monkeypatch, report)
     with fitz.open() as doc:
         doc.new_page()
         dialog = tagged_ui.TaggedPdfDialog(doc)
     qtbot.addWidget(dialog)
+    qtbot.waitUntil(lambda: dialog.report is not None)
     target = tmp_path / "inspection.json"
     monkeypatch.setattr(tool_support, "choose_file", lambda *args: str(target))
     dialog.export_report.click()
@@ -155,6 +176,7 @@ def test_export_report_protects_pdf_source(qtbot, monkeypatch, tmp_path):
     with fitz.open(path) as doc:
         dialog = tagged_ui.TaggedPdfDialog(doc)
     qtbot.addWidget(dialog)
+    qtbot.waitUntil(lambda: dialog.report is not None, timeout=10000)
     monkeypatch.setattr(tool_support, "choose_file", lambda *args: str(path))
     errors = []
     monkeypatch.setattr(tagged_ui.QMessageBox, "warning", lambda *args: errors.append(args[-1]))

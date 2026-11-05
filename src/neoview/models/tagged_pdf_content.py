@@ -52,12 +52,17 @@ def _contents(document, value):
     if any(not isinstance(ref, _Ref) for ref in refs):
         raise ValueError("Unsupported page content representation.")
     result = bytearray()
-    for ref in refs:
+    for index, ref in enumerate(refs):
         if not document.xref_is_stream(ref.xref):
             raise ValueError("Page content does not reference a stream.")
         data = document.xref_stream(ref.xref)
-        if len(result) + len(data) > _MAX_BYTES + len(_PREFIX) + len(_SUFFIX):
+        separator = b" " if index else b""
+        if len(result) + len(separator) + len(data) > _MAX_BYTES + len(_PREFIX) + len(_SUFFIX):
             raise ValueError("Page content exceeds the artifact editing size limit.")
+        # MuPDF treats array stream boundaries as whitespace. Preserve token
+        # separation without adding a line break, which could terminate an
+        # existing comment and make previously commented drawing commands run.
+        result.extend(separator)
         result.extend(data)
     return bytes(result)
 

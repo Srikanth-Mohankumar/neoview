@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from neoview.models.tagged_pdf import inspect_tagged_pdf
+from neoview.ui.background_tagged_inspection import TaggedInspectionJob
 
 
 class TaggedPdfDialog(QDialog):
@@ -32,14 +32,12 @@ class TaggedPdfDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Tagged PDF Inspection")
         self.resize(900, 650)
-        self.report = inspect_tagged_pdf(document)
+        self.report = None
+        self._closed = False
         self._page_count = len(document)
         self._source = document.name or "document.pdf"
         layout = QVBoxLayout(self)
-        self.summary = QLabel(
-            f"Marked as tagged: {'Yes' if self.report.tagged else 'No'} | "
-            f"Document language: {self.report.language or 'Not specified'}"
-        )
+        self.summary = QLabel("Inspecting PDF tags and artifacts...")
         self.summary.setTextFormat(Qt.TextFormat.PlainText)
         self.summary.setWordWrap(True)
         layout.addWidget(self.summary)
@@ -55,39 +53,21 @@ class TaggedPdfDialog(QDialog):
         self.tags.setObjectName("pdf_tags_tree")
         self.tags.setAccessibleName("PDF structure tags")
         self.tabs.addTab(self.tags, "Tags")
-        for node in self.report.nodes:
-            self._add_tag(self.tags, node)
-        if not self.report.nodes:
-            QTreeWidgetItem(self.tags, ["No structure tags found"])
-        self.tags.expandToDepth(1)
         self.order = self._tree(["Order", "Tag / role", "Page", "MCIDs", "Properties"])
         self.order.setObjectName("pdf_reading_order")
         self.order.setAccessibleName("Logical reading order")
         self.tabs.addTab(self.order, "Logical Reading Order")
-        for index, node in enumerate(self.report.reading_order, 1):
-            item = QTreeWidgetItem(self.order, [str(index), *self._values(node)])
-            self._set_page(item, node.page)
         checks_page = QWidget()
         checks_layout = QVBoxLayout(checks_page)
         self.checks = self._tree(["Inspection findings"])
         self.checks.setObjectName("pdf_tag_findings")
-        for warning in self.report.warnings:
-            QTreeWidgetItem(self.checks, [warning])
-        if not self.report.warnings:
-            QTreeWidgetItem(self.checks, [
-                "No findings from these limited automated checks. Manual review is still required."
-            ])
         checks_layout.addWidget(self.checks)
         checks_layout.addWidget(QLabel("Explicit artifact marked-content sequences by page:"))
         self.artifacts = self._tree(["Page", "Artifact sequences"])
         self.artifacts.setObjectName("pdf_artifacts")
-        for artifact in self.report.artifacts:
-            item = QTreeWidgetItem(self.artifacts, [str(artifact.page + 1), str(artifact.count)])
-            self._set_page(item, artifact.page)
-        if not self.report.artifacts:
-            QTreeWidgetItem(self.artifacts, ["No artifact counts available; review inspection findings"])
         checks_layout.addWidget(self.artifacts)
-        limitations = QLabel(self.report.limitations)
+        self.limitations = limitations = QLabel("Inspection runs in a separate process. "
+                                                "You can close this dialog to cancel.")
         limitations.setTextFormat(Qt.TextFormat.PlainText)
         limitations.setWordWrap(True)
         limitations.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -99,6 +79,7 @@ class TaggedPdfDialog(QDialog):
         self.go_to_page.clicked.connect(self._navigate_selected)
         controls.addWidget(self.go_to_page)
         self.export_report = QPushButton("Export Inspection JSON...")
+        self.export_report.setEnabled(False)
         self.export_report.clicked.connect(self._export_report)
         controls.addWidget(self.export_report)
         controls.addStretch()
@@ -111,6 +92,54 @@ class TaggedPdfDialog(QDialog):
             tree.itemSelectionChanged.connect(lambda t=tree: self._selection_changed(t))
             tree.itemActivated.connect(lambda item, _column: self._navigate_item(item))
         self.tabs.currentChanged.connect(self._tab_changed)
+        self.tabs.setEnabled(False)
+        self._job = TaggedInspectionJob(document, self)
+        self._job.ready.connect(self._inspection_ready)
+        self._job.failed.connect(self._inspection_failed)
+        self._job.start()
+
+    def _inspection_ready(self, report):
+        if self._closed:
+            return
+        self.report = report
+        self.summary.setText(
+            f"Marked as tagged: {'Yes' if report.tagged else 'No'} | "
+            f"Document language: {report.language or 'Not specified'}"
+        )
+        for node in report.nodes:
+            self._add_tag(self.tags, node)
+        if not report.nodes:
+            QTreeWidgetItem(self.tags, ["No structure tags found"])
+        self.tags.expandToDepth(1)
+        for index, node in enumerate(report.reading_order, 1):
+            item = QTreeWidgetItem(self.order, [str(index), *self._values(node)])
+            self._set_page(item, node.page)
+        for warning in report.warnings:
+            QTreeWidgetItem(self.checks, [warning])
+        if not report.warnings:
+            QTreeWidgetItem(self.checks, [
+                "No findings from these limited automated checks. Manual review is still required."
+            ])
+        for artifact in report.artifacts:
+            item = QTreeWidgetItem(self.artifacts, [str(artifact.page + 1), str(artifact.count)])
+            self._set_page(item, artifact.page)
+        if not report.artifacts:
+            QTreeWidgetItem(self.artifacts, ["No artifact counts available; review inspection findings"])
+        self.limitations.setText(report.limitations)
+        self.tabs.setEnabled(True)
+        self.export_report.setEnabled(True)
+
+    def _inspection_failed(self, error):
+        if not self._closed:
+            self.summary.setText("Inspection failed: " + error)
+            self.limitations.setText("Close this dialog and try again. The source PDF is unchanged.")
+
+    def done(self, result):
+        self._closed = True
+        self.go_to_page.setEnabled(False)
+        self.export_report.setEnabled(False)
+        self._job.cancel()
+        super().done(result)
 
     @staticmethod
     def _tree(headers):
@@ -167,7 +196,7 @@ class TaggedPdfDialog(QDialog):
             self._navigate_item(self._selected_tree.currentItem())
 
     def _navigate_item(self, item):
-        if item is not None:
+        if self.report is not None and not self._closed and item is not None:
             page = item.data(0, Qt.ItemDataRole.UserRole)
             if page is not None:
                 self.page_requested.emit(page)
@@ -175,6 +204,8 @@ class TaggedPdfDialog(QDialog):
     def _export_report(self):
         from neoview.ui.tool_support import atomic_text, choose_file
 
+        if self.report is None or self._closed:
+            return
         try:
             report = self.report
             # Flat order entries reference the tree instead of duplicating every subtree.

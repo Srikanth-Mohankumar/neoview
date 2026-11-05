@@ -151,7 +151,9 @@ class TaggedPdfEditorDialog(QDialog):
 
     def _refresh(self, selected=None):
         self._loading = True
-        self.report = inspect_tagged_pdf(self.document)
+        # Editing only needs the structure tree. Artifact content scans belong to
+        # the asynchronous inspector; never rescan page drawing streams here.
+        self.report = inspect_tagged_pdf(self.document, max_nodes=2000, scan_artifacts=False)
         self.tags.clear()
         self._nodes = {node.xref: node for node in self.report.reading_order if node.xref}
         selected_item = None

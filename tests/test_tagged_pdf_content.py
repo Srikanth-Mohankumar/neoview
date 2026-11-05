@@ -133,3 +133,43 @@ def test_unmark_refuses_content_reference_replacement():
         doc.xref_set_key(doc[0].xref, 'Contents', f'{old_stream} 0 R')
         with pytest.raises(ValueError, match='Page content changed'):
             unmark_page_artifact(doc, 0)
+
+
+@pytest.mark.parametrize('first_suffix', [b'', b'% stream boundary comment'])
+def test_multiple_content_streams_preserve_token_boundaries_and_rendering(tmp_path, first_suffix):
+    with fitz.open() as doc:
+        page = doc.new_page(width=300, height=300)
+        streams = []
+        # Neither stream has trailing whitespace. The second starts with a
+        # numeric operand, so joining raw bytes would turn the first f into f0.
+        contents = [
+            b'1 0 0 rg 0 0 100 100 re f' + first_suffix,
+            b'0 0 1 rg 0 200 100 100 re f',
+        ]
+        for data in contents:
+            xref = doc.get_new_xref()
+            doc.update_object(xref, '<<>>')
+            doc.update_stream(xref, data)
+            streams.append(xref)
+        refs = ' '.join(f'{xref} 0 R' for xref in streams)
+        doc.xref_set_key(page.xref, 'Contents', f'[{refs}]')
+        original_pixels = doc[0].get_pixmap().samples
+        # An unterminated comment continues over the array stream boundary;
+        # adding a newline would incorrectly reveal the second rectangle.
+        expected_color = (255, 255, 255) if first_suffix else (0, 0, 255)
+        assert doc[0].get_pixmap().pixel(20, 20) == expected_color
+        mark_page_as_artifact(doc, 0)
+        assert doc[0].get_pixmap().samples == original_pixels
+        destination = tmp_path / 'multi-stream-marked.pdf'
+        doc.save(destination)
+    with fitz.open(destination) as saved:
+        assert saved[0].get_pixmap().samples == original_pixels
+        with fitz.open(stream=saved.tobytes(), filetype='pdf') as copy:
+            unmark_page_artifact(copy, 0)
+            assert copy[0].get_pixmap().samples == original_pixels
+            restored_refs = copy[0].get_contents()
+            assert [copy.xref_stream(xref) for xref in restored_refs] == contents
+            unmarked = tmp_path / 'multi-stream-unmarked.pdf'
+            copy.save(unmarked)
+    with fitz.open(unmarked) as restored:
+        assert restored[0].get_pixmap().samples == original_pixels

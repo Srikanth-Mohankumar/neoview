@@ -1648,6 +1648,7 @@ class MainWindow(QMainWindow):
         try:
             dialog.exec()
         finally:
+            dialog.reject()
             dialog.deleteLater()
 
     def _edit_tagged_pdf(self):

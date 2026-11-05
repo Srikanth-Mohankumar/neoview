@@ -53,27 +53,45 @@ class TaggedPdfReport:
     )
 
 
+_REFERENCE_TAIL = re.compile(rb"\d+\s+R\b")
+
+
+class _Cancelled(ValueError):
+    pass
+
+
 class _Parser:
     """Small PDF object lexer: strings and comments never become operators."""
 
-    def __init__(self, data: bytes):
+    def __init__(self, data: bytes, cancelled=None):
+        self.cancelled = cancelled
         self.data = data
         self.pos = 0
         self.tokens = 0
 
+    def _check_cancelled(self):
+        if self.cancelled is not None and self.cancelled():
+            raise _Cancelled("Inspection cancelled; results are incomplete.")
+
     def _space(self):
         d = self.data
         while self.pos < len(d):
+            if not self.pos % 4096:
+                self._check_cancelled()
             if d[self.pos] in b"\x00\t\n\f\r ":
                 self.pos += 1
             elif d[self.pos] == 37:
                 while self.pos < len(d) and d[self.pos] not in b"\r\n":
+                    if not self.pos % 4096:
+                        self._check_cancelled()
                     self.pos += 1
             else:
                 break
 
     def value(self, depth=0):
         self.tokens += 1
+        if self.tokens % 256 == 1:
+            self._check_cancelled()
         if self.tokens > 200000 or depth > 100:
             raise ValueError("PDF object inspection limit exceeded")
         self._space()
@@ -106,6 +124,8 @@ class _Parser:
             self.pos += 1
             level, result = 1, bytearray()
             while self.pos < len(d):
+                if not self.pos % 4096:
+                    self._check_cancelled()
                 c = d[self.pos]
                 self.pos += 1
                 if c == 92:
@@ -148,22 +168,28 @@ class _Parser:
             self.pos += 1
             start = self.pos
             while self.pos < len(d) and d[self.pos] not in b"\x00\t\n\f\r ()<>[]{}/%":
+                if not self.pos % 4096:
+                    self._check_cancelled()
                 self.pos += 1
             raw = re.sub(rb"#([0-9a-fA-F]{2})", lambda m: bytes([int(m[1],16)]), d[start:self.pos])
             return _Name(raw.decode("latin1"))
         start = self.pos
         while self.pos < len(d) and d[self.pos] not in b"\x00\t\n\f\r ()<>[]{}/%":
+            if not self.pos % 4096:
+                self._check_cancelled()
             self.pos += 1
         if self.pos == start:
             raise ValueError("Unexpected PDF delimiter")
         token = d[start:self.pos].decode("latin1")
         if re.fullmatch(r"[+-]?\d+", token):
+            if len(token) > 64:
+                raise ValueError("PDF integer inspection limit exceeded")
             value = int(token)
             saved = self.pos
             self._space()
-            match = re.match(rb"\d+\s+R\b", d[self.pos:])
+            match = _REFERENCE_TAIL.match(d, self.pos)
             if match:
-                self.pos += match.end()
+                self.pos = match.end()
                 return _Ref(value)
             self.pos = saved
             return value
@@ -189,7 +215,8 @@ def _text(value):
     return ""
 
 
-def inspect_tagged_pdf(document, *, max_nodes=10000, max_pages=2000) -> TaggedPdfReport:
+def inspect_tagged_pdf(document, *, max_nodes=10000, max_pages=2000, cancelled=None,
+                       scan_artifacts=True) -> TaggedPdfReport:
     """Inspect existing tags; pages use zero-based indices. Never modify the PDF."""
     report = TaggedPdfReport()
     objects = {}
@@ -199,12 +226,14 @@ def inspect_tagged_pdf(document, *, max_nodes=10000, max_pages=2000) -> TaggedPd
             report.warnings.append(message)
 
     def resolve(value):
+        if cancelled is not None and cancelled():
+            raise _Cancelled("Inspection cancelled; results are incomplete.")
         if isinstance(value, _Ref):
             if value.xref not in objects:
                 raw = document.xref_object(value.xref, compressed=False).encode("latin1")
                 if len(raw) > 4_000_000:
                     raise ValueError("PDF object inspection size limit exceeded")
-                objects[value.xref] = _Parser(raw).value()
+                objects[value.xref] = _Parser(raw, cancelled=cancelled).value()
             return objects[value.xref]
         return value
 
@@ -228,6 +257,8 @@ def inspect_tagged_pdf(document, *, max_nodes=10000, max_pages=2000) -> TaggedPd
 
             def walk(value, inherited_page=None, depth=0, inherited_language=""):
                 nonlocal count
+                if cancelled is not None and cancelled():
+                    raise _Cancelled("Inspection cancelled; results are incomplete.")
                 if depth > 80 or count >= max_nodes:
                     warn("Structure traversal limit reached; results are incomplete.")
                     return []
@@ -307,8 +338,13 @@ def inspect_tagged_pdf(document, *, max_nodes=10000, max_pages=2000) -> TaggedPd
             warn("A Figure tag has no alternate text or actual text; review it manually.")
     if len(document) > max_pages:
         warn("Page inspection limit reached; results are incomplete.")
+    if not scan_artifacts:
+        return report
     scanned_bytes = 0
     for index in range(min(len(document), max_pages)):
+        if cancelled is not None and cancelled():
+            warn("Inspection cancelled; results are incomplete.")
+            break
         try:
             data = document[index].read_contents()
             scanned_bytes += len(data)
@@ -318,7 +354,7 @@ def inspect_tagged_pdf(document, *, max_nodes=10000, max_pages=2000) -> TaggedPd
             if len(data) > 8_000_000:
                 warn(f"Page {index+1} content exceeds the inspection size limit.")
                 continue
-            parser = _Parser(data)
+            parser = _Parser(data, cancelled=cancelled)
             operands = []
             count = 0
             while True:
