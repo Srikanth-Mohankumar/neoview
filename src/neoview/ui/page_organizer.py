@@ -4,13 +4,14 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt, QTimer
+from PySide6.QtCore import QItemSelectionModel, QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
     QFileDialog,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QListWidget,
     QListWidgetItem,
@@ -20,6 +21,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from neoview.models.page_extraction import parse_page_ranges
 from neoview.models.page_organization import PageOrganization
 
 
@@ -57,6 +59,7 @@ class PageOrganizer(QDialog):
         layout.addWidget(self.pages)
         controls = QHBoxLayout()
         for label, callback in (
+            ("Select Pages...", self._select_pages),
             ("Insert PDF Before...", lambda: self._insert(False)),
             ("Append PDF...", lambda: self._insert(True)),
             ("Move Up", lambda: self._move(-1)),
@@ -114,6 +117,23 @@ class PageOrganizer(QDialog):
 
     def _rows(self):
         return sorted(self.pages.row(item) for item in self.pages.selectedItems())
+
+    def _select_pages(self):
+        try:
+            text, accepted = QInputDialog.getText(
+                self, "Select Pages", "Page numbers or ranges (for example 1-3, 5):"
+            )
+            if not accepted:
+                return
+            rows = parse_page_ranges(text, len(self.session.order))
+        except Exception as exc:
+            QMessageBox.warning(self, "Could Not Select Pages", str(exc))
+            return
+        self.pages.clearSelection()
+        for row in rows:
+            self.pages.item(row).setSelected(True)
+        self.pages.setCurrentRow(rows[0], QItemSelectionModel.SelectionFlag.NoUpdate)
+        self.pages.scrollToItem(self.pages.item(rows[0]))
 
     def _reordered(self, *_):
         self.session.reorder([

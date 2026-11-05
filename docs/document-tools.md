@@ -51,3 +51,22 @@ and pages outside the current document before changing any state. Annotation
 imports are limited to 10 MB and 10,000 combined records; bookmark imports are
 limited to 5 MB and 5,000 combined records. Imports schedule normal sidecar
 persistence and preserve existing native annotations.
+
+## Search and review conveniences
+
+- **File > Export Search Results as CSV...** exports the completed search query,
+  matching snippets, one-based page numbers, and bounds in PDF points. Export
+  waits for pending searches and option changes; the report uses the result
+  snapshot taken before the destination dialog. Formula-like text is escaped.
+- **Edit > Copy Current Page Text** copies selectable text from the active page,
+  retaining its Unicode and line breaks. Empty or scanned pages keep the existing
+  clipboard contents and show an informational status message.
+- The **Annotations** sidebar has a case-insensitive text field that combines
+  with its existing type filter. It searches annotation contents in both native
+  and editable records without changing them or rebuilding the document scene.
+- **Select Pages...** in the organizer accepts displayed page ranges such as
+  `1-3, 5`. Selection follows the current order and does not mark the PDF edited.
+  Invalid input or cancellation preserves the previous selection.
+- **File > Open Recent > Clear Recent Files List...** confirms before clearing
+  the recent-file list and its saved setting. Open documents and their sessions
+  are retained. The command also works with no document open.
