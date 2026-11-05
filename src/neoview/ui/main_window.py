@@ -489,6 +489,18 @@ class MainWindow(QMainWindow):
             "Export Annotations as &CSV...", self._export_annotations_csv,
             name="action_export_annotations_csv",
         )
+        self._search_export_action = self._action(
+            "Export Search Results as CSV...", self._export_search_results_csv,
+            name="action_export_search_results_csv",
+        )
+        self._copy_page_text_action = self._action(
+            "Copy Current Page Text", self._copy_current_page_text,
+            name="action_copy_page_text",
+        )
+        self._clear_recent_files_action = self._action(
+            "Clear Recent Files List...", self._clear_recent_files_list,
+            name="action_clear_recent_files",
+        )
         self._quit_action = self._action("&Quit", self.close, QKeySequence.StandardKey.Quit)
         self._print_action = self._action(
             "&Print...", self._print_document, QKeySequence.StandardKey.Print, icon="printer",
@@ -705,6 +717,7 @@ class MainWindow(QMainWindow):
             self._annot_note_action, self._select_action, self._hand_action, self._measure_action,
             self._annotate_action, self._organize_pages_action, self._extract_pages_action,
             self._metadata_action, self._export_csv_action,
+            self._search_export_action, self._copy_page_text_action,
         ]
 
     def _setup_menus(self):
@@ -721,6 +734,7 @@ class MainWindow(QMainWindow):
         file_m.addAction(self._export_action)
         file_m.addAction(self._export_annot_action)
         file_m.addAction(self._export_csv_action)
+        file_m.addAction(self._search_export_action)
         file_m.addAction(self._metadata_action)
         file_m.addSeparator()
         file_m.addAction(self._quit_action)
@@ -728,6 +742,7 @@ class MainWindow(QMainWindow):
 
         edit_m = bar.addMenu("&Edit")
         edit_m.addAction(self._copy_action)
+        edit_m.addAction(self._copy_page_text_action)
         edit_m.addAction(self._clear_selection_action)
         edit_m.addSeparator()
         edit_m.addAction(self._find_action)
@@ -1048,6 +1063,11 @@ class MainWindow(QMainWindow):
         ])
         self._annotation_filter.setToolTip("Show only one kind of annotation")
         self._annotation_filter.currentIndexChanged.connect(self._populate_annotation_list)
+        from neoview.ui.annotation_filter import build_filter_controls
+        annotation_controls, self._annotation_text_filter = build_filter_controls(
+            self._annotation_filter, self
+        )
+        self._annotation_text_filter.textChanged.connect(self._populate_annotation_list)
         self._annotation_list = QListWidget()
         self._annotation_list.setObjectName("annotation_list")
         self._annotation_list.itemActivated.connect(self._jump_to_annotation_item)
@@ -1055,7 +1075,7 @@ class MainWindow(QMainWindow):
         annotations_box, self._annotations_hint = self._hinted(
             self._annotation_list,
             "No annotations.\nUse the Annotate tool (4), or measure an area and press Ctrl+Shift+H.",
-            top=self._annotation_filter,
+            top=annotation_controls,
         )
         self._annotation_edit_btn = QPushButton("Properties")
         self._annotation_delete_btn = QPushButton("Delete")
@@ -1564,10 +1584,12 @@ class MainWindow(QMainWindow):
         self._recent_menu.clear()
         if not self._recent_files:
             self._recent_menu.addAction("(Empty)").setEnabled(False)
-            return
         for path in self._recent_files:
             act = self._recent_menu.addAction(path)
             act.triggered.connect(lambda _checked=False, p=path: self._open_file(p))
+        self._recent_menu.addSeparator()
+        self._recent_menu.addAction(self._clear_recent_files_action)
+        self._clear_recent_files_action.setEnabled(bool(self._recent_files))
 
     def _add_recent_file(self, path: str):
         if not path:
@@ -1586,6 +1608,18 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getOpenFileName(self, "Open PDF", "", "PDF (*.pdf);;All (*)")
         if path:
             self._open_file(path)
+
+    def _export_search_results_csv(self):
+        from neoview.ui.document_tools import invoke
+        invoke(self, "search_results_csv")
+
+    def _copy_current_page_text(self):
+        from neoview.ui.document_tools import invoke
+        invoke(self, "copy_page_text")
+
+    def _clear_recent_files_list(self):
+        from neoview.ui.document_tools import invoke
+        invoke(self, "clear_recent_files")
 
     def _open_saved_pdf_copy(self, path: str):
         existing = self._find_open_view(path)
@@ -1764,6 +1798,7 @@ class MainWindow(QMainWindow):
                 return
 
             target_ctx.file_path = norm_path
+            target_ctx.search_completed_signature = None
             target_ctx.search_query = ""
             target_ctx.search_results = []
             target_ctx.search_index = -1
@@ -2184,6 +2219,7 @@ class MainWindow(QMainWindow):
             return
         self._cancel_search_operation()
         ctx = self.current_context()
+        ctx.search_completed_signature = None
         ctx.search_query = text.strip()
         ctx.search_index = -1
         self._search_timer.start(240)
@@ -2191,6 +2227,7 @@ class MainWindow(QMainWindow):
     def _on_search_options_changed(self, _checked: bool):
         if self._search_input_updating:
             return
+        self.current_context().search_completed_signature = None
         self._cancel_search_operation()
         self._search_timer.start(240)
 
@@ -2210,6 +2247,7 @@ class MainWindow(QMainWindow):
         self._search_timer.stop()
         self._cancel_search_operation()
         ctx = self.current_context()
+        ctx.search_completed_signature = None
         ctx.search_query = ""
         ctx.search_results = []
         ctx.search_index = -1
@@ -2310,7 +2348,20 @@ class MainWindow(QMainWindow):
         operation["page_idx"] = page_idx
         return page_idx >= doc.page_count or len(results) >= result_limit
 
-    def _apply_search_results(self, view: PdfView, ctx: TabContext, results: list[SearchMatch], post_nav: int = 0):
+    def _search_results_are_current(self) -> bool:
+        document = self.current_view().document
+        if document is None:
+            return False
+        query = self._active_search_text()
+        return (self.current_context().search_query == query
+                and self.current_context().search_completed_signature
+                == (id(document), query, self._search_case_chk.isChecked()))
+
+    def _apply_search_results(
+        self, view: PdfView, ctx: TabContext, results: list[SearchMatch], post_nav: int = 0,
+        *, completed_signature: tuple[int, str, bool] | None = None,
+    ):
+        ctx.search_completed_signature = completed_signature
         ctx.search_results = list(results)
         ctx.search_index = 0 if results else -1
 
@@ -2350,7 +2401,11 @@ class MainWindow(QMainWindow):
         results = list(operation["results"])
         post_nav = int(operation.get("post_nav", 0))
         self._cancel_search_operation()
-        self._apply_search_results(view, ctx, results, post_nav=post_nav)
+        self._apply_search_results(
+            view, ctx, results, post_nav=post_nav,
+            completed_signature=(id(operation["doc"]), str(operation["query"]),
+                                 bool(operation["case_sensitive"])),
+        )
 
     def _execute_search_current(
         self,
@@ -2366,6 +2421,7 @@ class MainWindow(QMainWindow):
         result_limit = max_results if max_results is not None else self.MAX_SEARCH_RESULTS
 
         self._cancel_search_operation()
+        ctx.search_completed_signature = None
         if not doc:
             self._clear_search()
             return
@@ -2396,7 +2452,10 @@ class MainWindow(QMainWindow):
             }
             while not self._scan_search_batch(operation):
                 pass
-            self._apply_search_results(view, ctx, operation["results"], post_nav=post_nav)
+            self._apply_search_results(
+                view, ctx, operation["results"], post_nav=post_nav,
+                completed_signature=(id(doc), query, case_sensitive),
+            )
             return
 
         ctx.search_results = []
@@ -2529,9 +2588,11 @@ class MainWindow(QMainWindow):
 
         self._annotation_list.clear()
         filt = self._annotation_filter_kind()
+        query = self._annotation_text_filter.text()
+        from neoview.ui.annotation_filter import annotation_matches
 
         for ann in ctx.sidecar_state.annotations:
-            if filt != "all" and ann.type != filt:
+            if not annotation_matches(ann, filt, query):
                 continue
             preview = ann.contents.strip() if ann.contents else ""
             if not preview:
@@ -2542,7 +2603,7 @@ class MainWindow(QMainWindow):
             self._annotation_list.addItem(item)
 
         for ann in ctx.native_annotations:
-            if filt != "all" and ann.type != filt:
+            if not annotation_matches(ann, filt, query):
                 continue
             preview = ann.contents.strip() if ann.contents else ""
             if not preview:
@@ -2556,8 +2617,13 @@ class MainWindow(QMainWindow):
             item.setToolTip(tip)
             self._annotation_list.addItem(item)
 
-        empty = not (ctx.sidecar_state.annotations or ctx.native_annotations)
-        self._show_hint(self._annotation_list, self._annotations_hint, empty)
+        has_annotations = bool(ctx.sidecar_state.annotations or ctx.native_annotations)
+        self._annotations_hint.setText(
+            "No annotations match the current filters." if has_annotations else
+            "No annotations yet.\nUse the Annotate tool (4), or measure an area and press Ctrl+Shift+H."
+        )
+        self._show_hint(self._annotation_list, self._annotations_hint,
+                        self._annotation_list.count() == 0)
 
         # Do not call view.set_annotations() here — that triggers a full scene
         # rebuild on every filter change.  set_annotations() is called only when
@@ -3078,6 +3144,7 @@ class MainWindow(QMainWindow):
             # and annotation list two extra times per open (O(TOC entries) each).
             return
         ctx = self._context_for_view(view)
+        ctx.search_completed_signature = None
         if ctx.file_path:
             ctx.sidecar_state = clamp_sidecar_for_page_count(ctx.sidecar_state, view.page_count)
             self._load_native_pdf_annotations(view, ctx)
@@ -3184,6 +3251,7 @@ class MainWindow(QMainWindow):
             view.viewport().update()
 
         if reloaded:
+            ctx.search_completed_signature = None
             ctx.sidecar_state = clamp_sidecar_for_page_count(ctx.sidecar_state, view.page_count)
             self._load_native_pdf_annotations(view, ctx)
             view.set_annotations(ctx.sidecar_state.annotations + ctx.native_annotations)
@@ -3350,7 +3418,7 @@ class MainWindow(QMainWindow):
             action.setEnabled(has_doc)
         self._zoom_combo.setEnabled(has_doc)
         self._search_field.setEnabled(has_doc)
-        for widget in (self._annotation_filter, self._annotation_edit_btn, self._annotation_delete_btn,
+        for widget in (self._annotation_filter, self._annotation_text_filter, self._annotation_edit_btn, self._annotation_delete_btn,
                        self._annotation_export_btn, self._outline_filter):
             widget.setEnabled(has_doc)
         self._update_capability_actions()

@@ -118,6 +118,10 @@ modify the PDF or sidecar; formula-like text is escaped for spreadsheet use.
 For the additional page, export, annotation-transfer, bookmark-transfer, and tab
 commands, see [Document tools](docs/document-tools.md).
 
+The [search and review conveniences](docs/document-tools.md#search-and-review-conveniences)
+include search-results CSV, page-text copying, annotation text filtering,
+organizer range selection, and recent-list clearing.
+
 ### Search
 
 - Find panel with live typing updates

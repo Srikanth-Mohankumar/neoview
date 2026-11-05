@@ -88,3 +88,5 @@ class TabContext:
     sidecar_error: str = ""
     # Annotations read from the PDF itself (e.g. made in Acrobat). Read-only; not persisted to sidecar.
     native_annotations: list[AnnotationRecord] = field(default_factory=list)
+    # Document identity and criteria used to compute the cached search results.
+    search_completed_signature: tuple[int, str, bool] | None = None
