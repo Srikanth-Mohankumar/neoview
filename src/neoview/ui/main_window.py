@@ -643,6 +643,15 @@ class MainWindow(QMainWindow):
             "Add &Bookmark...", self._add_bookmark, "Ctrl+D", icon="bookmark-plus", tip="Bookmark this page"
         )
 
+        self._tagged_pdf_action = self._action(
+            "Tags, Reading Order and Artifacts...", self._inspect_tagged_pdf,
+            name="action_tagged_pdf_inspection",
+        )
+        self._tagged_pdf_edit_action = self._action(
+            "Edit Tags and Artifacts in Copy...", self._edit_tagged_pdf,
+            name="action_tagged_pdf_edit",
+        )
+
         # Tools
         self._tool_group = QActionGroup(self)
         self._tool_group.setExclusive(True)
@@ -717,7 +726,8 @@ class MainWindow(QMainWindow):
             self._annot_note_action, self._select_action, self._hand_action, self._measure_action,
             self._annotate_action, self._organize_pages_action, self._extract_pages_action,
             self._metadata_action, self._export_csv_action,
-            self._search_export_action, self._copy_page_text_action,
+            self._search_export_action, self._copy_page_text_action, self._tagged_pdf_action,
+            self._tagged_pdf_edit_action,
         ]
 
     def _setup_menus(self):
@@ -822,6 +832,9 @@ class MainWindow(QMainWindow):
         for act in self._unit_actions.values():
             units_m.addAction(act)
         self._tools_menu = tools_m
+        tools_m.addSeparator()
+        tools_m.addAction(self._tagged_pdf_action)
+        tools_m.addAction(self._tagged_pdf_edit_action)
 
         help_m = bar.addMenu("&Help")
         help_m.addAction(self._about_action)
@@ -1612,6 +1625,53 @@ class MainWindow(QMainWindow):
     def _export_search_results_csv(self):
         from neoview.ui.document_tools import invoke
         invoke(self, "search_results_csv")
+
+    def _inspect_tagged_pdf(self):
+        from neoview.ui.tagged_pdf import TaggedPdfDialog
+
+        view = self.current_view()
+        document = view.document
+        if document is None:
+            return
+        try:
+            dialog = TaggedPdfDialog(document, self)
+        except Exception as exc:
+            QMessageBox.warning(self, "Tagged PDF Inspection", str(exc))
+            return
+
+        def navigate(page):
+            # A reload can replace the PDF while the dialog's snapshot is open.
+            if self.current_view() is view and view.document is document:
+                view.go_to_page(page)
+
+        dialog.page_requested.connect(navigate)
+        try:
+            dialog.exec()
+        finally:
+            dialog.reject()
+            dialog.deleteLater()
+
+    def _edit_tagged_pdf(self):
+        from neoview.ui.tagged_pdf_editor import TaggedPdfEditorDialog
+
+        document = self.current_view().document
+        context = self.current_context()
+        if document is None or not context.file_path:
+            return
+        try:
+            dialog = TaggedPdfEditorDialog(
+                document, context.sidecar_state, context.file_path, self,
+            )
+            try:
+                dialog.exec()
+                if dialog.saved_path:
+                    self._open_saved_pdf_copy(dialog.saved_path)
+            finally:
+                if not dialog.document.is_closed:
+                    dialog.document.close()
+                dialog.deleteLater()
+        except Exception as exc:
+            QMessageBox.warning(self, "Edit Tagged PDF Copy", str(exc))
 
     def _copy_current_page_text(self):
         from neoview.ui.document_tools import invoke
