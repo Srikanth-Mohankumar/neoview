@@ -29,6 +29,8 @@ def test_tagged_pdf_action_guards_and_navigation(tmp_path, qtbot, monkeypatch):
 
     monkeypatch.setattr(TaggedPdfDialog, 'exec', execute)
     window._tagged_pdf_action.trigger()
+    assert window._sidebar.current_key() == 'tags'
+    window._inspect_tagged_pdf()
     assert visited == [1]
     assert path.read_bytes() == original
     window._close_current_tab()
