@@ -4,10 +4,19 @@ NeoView is adding PDF accessibility tooling in stages. Acrobat Pro is a useful
 workflow reference; this work does not establish feature parity or certify PDF/UA
 or WCAG conformance.
 
+## Tags side panel
+
+Choose **View > Sidebar Panel > PDF Tags** or press **Ctrl+Shift+G** to keep
+structure tags visible beside the PDF. The **Tags** sidebar tab provides the
+expandable document hierarchy, tag properties, and page navigation without
+blocking the viewer. It follows the active document and refreshes after reload;
+hiding the panel cancels pending work. Use its inspection and editing buttons
+for the full report and the save-copy editor.
+
 ## Inspection
 
-Open a PDF and choose **Tools > Tags, Reading Order and Artifacts...**. The
-inspector reads the PDF's existing structure rather than inferring tags from its
+Open a PDF and choose **Tools > Tags, Reading Order and Artifacts** to show the
+side panel, then **Inspector...** for the detailed report. The inspector reads the PDF's existing structure rather than inferring tags from its
 visual layout. It provides:
 
 - A hierarchical tag tree with standard/custom roles and role mappings.

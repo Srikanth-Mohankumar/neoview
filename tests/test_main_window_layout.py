@@ -171,7 +171,7 @@ def test_sidebar_tabs_switch_panels(two_pdfs, qtbot):
     a, _b = two_pdfs
     win = _window(qtbot)
     win._open_file(str(a))
-    assert win._sidebar.keys() == ["thumbnails", "outline", "bookmarks", "annotations"]
+    assert win._sidebar.keys() == ["thumbnails", "outline", "bookmarks", "annotations", "tags"]
 
     for key, widget in (
         ("outline", win._outline_tree),

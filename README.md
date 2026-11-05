@@ -123,7 +123,8 @@ include search-results CSV, page-text copying, annotation text filtering,
 organizer range selection, and recent-list clearing.
 
 [Tagged PDF tools](docs/tagged-pdf.md) inspect the structure tree, logical tag
-order, alternate text and artifact markings, with JSON reports. A separate-copy
+order, alternate text and artifact markings, with JSON reports. Browse tags beside
+the PDF with **View > Sidebar Panel > PDF Tags** (`Ctrl+Shift+G`). A separate-copy
 editor supports existing tag properties, sibling ordering, undo/redo and limited
 whole-page artifact marking. Full Acrobat Pro and PDF/UA validation workflows
 remain in development; see the documented limits.

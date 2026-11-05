@@ -543,6 +543,10 @@ class MainWindow(QMainWindow):
             "&Annotations", lambda: self._toggle_sidebar_page("annotations"), "Ctrl+Shift+A",
             icon="message-square-text",
         )
+        self._tags_panel_action = self._action(
+            "PDF &Tags", lambda: self._toggle_sidebar_page("tags"), "Ctrl+Shift+G",
+            icon="layers", name="action_tags_sidebar",
+        )
         self._search_panel_action = self._action(
             "Search &Results", self._toggle_search_dock, "Ctrl+Shift+F", icon="list", checkable=True
         )
@@ -644,7 +648,7 @@ class MainWindow(QMainWindow):
         )
 
         self._tagged_pdf_action = self._action(
-            "Tags, Reading Order and Artifacts...", self._inspect_tagged_pdf,
+            "Tags, Reading Order and Artifacts", lambda: self._show_sidebar_page("tags"),
             name="action_tagged_pdf_inspection",
         )
         self._tagged_pdf_edit_action = self._action(
@@ -772,6 +776,7 @@ class MainWindow(QMainWindow):
         for act in (
             self._thumbs_panel_action, self._outline_panel_action,
             self._bookmarks_panel_action, self._annotations_panel_action,
+            self._tags_panel_action,
         ):
             panels_m.addAction(act)
         view_m.addAction(self._inspector_action)
@@ -1009,6 +1014,12 @@ class MainWindow(QMainWindow):
 
     def _setup_sidebar(self):
         self._sidebar = Sidebar(self._icons, self)
+        from neoview.ui.tagged_pdf_panel import TaggedPdfPanel
+
+        self._tags_panel = TaggedPdfPanel(self)
+        self._tags_panel.page_requested.connect(self._on_tag_page_requested)
+        self._tags_panel.inspect_requested.connect(self._inspect_tagged_pdf)
+        self._tags_panel.edit_requested.connect(self._edit_tagged_pdf)
 
         # Thumbnails
         self._thumbs_list = QListWidget()
@@ -1111,6 +1122,9 @@ class MainWindow(QMainWindow):
         annotations_box.layout().addLayout(ann_buttons)
         self._sidebar.add_page(
             "annotations", "message-square-text", "Annotations", annotations_box, "Annotations (Ctrl+Shift+A)"
+        )
+        self._sidebar.add_page(
+            "tags", "layers", "Tags", self._tags_panel, "PDF Tags (Ctrl+Shift+G)"
         )
 
         self._sidebar_dock = QDockWidget("Sidebar", self)
@@ -1255,10 +1269,27 @@ class MainWindow(QMainWindow):
     def _on_sidebar_visibility_changed(self, _visible: bool):
         self._sidebar_action.setChecked(not self._sidebar_dock.isHidden())
         self._on_thumbs_visibility_changed(self._thumbs_list.isVisible())
+        self._sync_tags_panel()
 
     def _on_sidebar_page_changed(self, key: str):
         self._settings.setValue("window/sidebar_page", key)
         self._on_thumbs_visibility_changed(self._thumbs_list.isVisible())
+        self._sync_tags_panel()
+
+    def _sync_tags_panel(self):
+        active = (not self._sidebar_dock.isHidden()
+                  and self._sidebar.current_key() == "tags")
+        view = self.current_view()
+        self._tags_panel.set_document(
+            view.document if active else None,
+            source_signature=getattr(view, "_tag_source_signature", None),
+            password=getattr(view, "_doc_password", None),
+        )
+
+    def _on_tag_page_requested(self, page):
+        view = self.current_view()
+        if self._tags_panel.document is view.document and view.document is not None:
+            view.go_to_page(page)
 
     def _set_inspector_visible(self, visible: bool):
         self._info_dock.setVisible(visible)
@@ -1970,6 +2001,7 @@ class MainWindow(QMainWindow):
         view = self.current_view()
         ctx = self.current_context()
         doc = view.document
+        self._sync_tags_panel()
 
         if not doc:
             self._doc_name.setText("No file")
@@ -3196,6 +3228,8 @@ class MainWindow(QMainWindow):
         ctx.native_annotations = load_native_annotations(view.document)
 
     def _on_view_document_loaded(self, view: PdfView):
+        # Capture the loaded source identity even when open/reload defers panel refresh.
+        view._tag_source_signature = self._file_signature(view.doc_path)
         if self._reload_in_progress:
             return
         if self._open_in_progress:
@@ -3831,6 +3865,7 @@ class MainWindow(QMainWindow):
         return f"{size:.1f} {units[unit_idx]}"
 
     def closeEvent(self, e):
+        self._tags_panel.set_document(None)
         for export_job in list(getattr(self, "_document_export_jobs", [])):
             export_job.cancel(wait=True, silent=True)
         if self._presentation is not None and shiboken6.isValid(self._presentation):

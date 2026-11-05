@@ -112,3 +112,93 @@ def test_app_dispatches_inspection_worker_before_gui(monkeypatch):
         app.main()
     assert exc.value.code == 0
     assert calls == [['snapshot.pdf', 'report.json']]
+
+
+def test_source_job_stages_only_in_worker_and_never_saves_gui_document(tmp_path, qtbot, monkeypatch):
+    from PySide6.QtWidgets import QWidget
+
+    from neoview.ui.background_tagged_inspection import _signature
+
+    path = tmp_path / 'source.pdf'
+    with fitz.open() as doc:
+        doc.new_page().insert_text((72, 72), 'Accessible source')
+        doc.save(str(path))
+    original = path.read_bytes()
+    owner = QWidget()
+    qtbot.addWidget(owner)
+    with fitz.open(path) as doc:
+        def forbidden_save(*args, **kwargs):
+            raise AssertionError('Automatic inspection must not save on the GUI thread')
+        monkeypatch.setattr(fitz.Document, 'save', forbidden_save)
+        job = TaggedInspectionJob(doc, owner, from_source=True,
+                                  source_signature=_signature(path.stat()))
+        assert not (job.work / 'snapshot.pdf').exists()
+        results = []
+        job.ready.connect(results.append)
+        job.start()
+        qtbot.waitUntil(lambda: job.done, timeout=10000)
+        assert len(results) == 1
+        assert not job.work.exists()
+    assert path.read_bytes() == original
+
+
+def test_source_worker_rejects_changes_since_viewer_opened_file(tmp_path):
+    import json
+
+    from neoview.ui.background_tagged_inspection import _signature
+
+    source, snapshot = tmp_path / 'source.pdf', tmp_path / 'snapshot.pdf'
+    output, request = tmp_path / 'report.json', tmp_path / 'request.json'
+    source.write_bytes(b'Original source')
+    signature = _signature(source.stat())
+    request.write_text(json.dumps({'source': str(source), 'signature': signature}), encoding='utf-8')
+    source.write_bytes(b'Changed source with different length')
+    assert run_worker([str(snapshot), str(output), str(request)]) == 1
+    assert not output.exists()
+    assert not snapshot.exists()
+    assert 'changed since' in (tmp_path / 'error.txt').read_text(encoding='utf-8')
+
+
+def test_source_worker_copies_and_unlocks_encrypted_pdf(tmp_path):
+    import json
+
+    from neoview.ui.background_tagged_inspection import _signature
+
+    source, snapshot = tmp_path / 'source.pdf', tmp_path / 'snapshot.pdf'
+    output, request = tmp_path / 'report.json', tmp_path / 'request.json'
+    with fitz.open() as doc:
+        doc.new_page()
+        doc.save(str(source), encryption=fitz.PDF_ENCRYPT_AES_256,
+                 owner_pw='owner', user_pw='reader')
+    original = source.read_bytes()
+    request.write_text(json.dumps({'source': str(source), 'signature': _signature(source.stat()),
+                                   'password': 'reader'}), encoding='utf-8')
+    assert run_worker([str(snapshot), str(output), str(request)]) == 0
+    assert json.loads(output.read_text(encoding='utf-8'))['artifacts'][0]['page'] == 0
+    assert source.read_bytes() == original
+
+
+def test_source_worker_rejects_modification_during_copy(tmp_path, monkeypatch):
+    import json
+    import shutil
+
+    from neoview.ui.background_tagged_inspection import _signature
+
+    source, snapshot = tmp_path / 'source.pdf', tmp_path / 'snapshot.pdf'
+    output, request = tmp_path / 'report.json', tmp_path / 'request.json'
+    with fitz.open() as document:
+        document.new_page()
+        document.save(str(source))
+    request.write_text(json.dumps({'source': str(source), 'signature': _signature(source.stat())}),
+                       encoding='utf-8')
+    copy = shutil.copyfileobj
+
+    def changed_copy(original, destination, **options):
+        copy(original, destination, **options)
+        with source.open('ab') as changed:
+            changed.write(b'\n')
+
+    monkeypatch.setattr(shutil, 'copyfileobj', changed_copy)
+    assert run_worker([str(snapshot), str(output), str(request)]) == 1
+    assert not output.exists()
+    assert 'changed while' in (tmp_path / 'error.txt').read_text(encoding='utf-8')
