@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -14,6 +15,10 @@ from PySide6.QtWidgets import QApplication
 from neoview.models.tagged_pdf import ArtifactInfo, TaggedPdfReport, TagNode
 
 _MAX_REPORT_BYTES = 32 * 1024 * 1024
+
+
+def _signature(stat):
+    return (int(stat.st_mtime_ns), int(stat.st_size), int(getattr(stat, "st_ino", 0)))
 
 
 def _report_payload(report):
@@ -48,14 +53,23 @@ class TaggedInspectionJob(QObject):
     ready = Signal(object)
     failed = Signal(str)
 
-    def __init__(self, document, owner):
+    def __init__(self, document, owner, *, from_source=False, source_signature=None, password=None):
         # App ownership keeps a killed process alive through final OS termination.
         super().__init__(QApplication.instance())
         self.done = False
         self.cancelled = False
         self.work = Path(tempfile.mkdtemp(prefix=".neoview-tag-inspection-"))
         try:
-            document.save(str(self.work / "snapshot.pdf"))
+            self.from_source = from_source
+            if from_source:
+                if not document.name:
+                    raise ValueError("Automatic inspection requires a saved PDF. Use Inspector instead.")
+                source = str(Path(document.name).absolute())
+                signature = source_signature or _signature(os.stat(source))
+                request = {"source": source, "signature": signature, "password": password or ""}
+                (self.work / "request.json").write_text(json.dumps(request), encoding="utf-8")
+            else:
+                document.save(str(self.work / "snapshot.pdf"))
             self.process = QProcess(self)
             self.process.setProgram(sys.executable)
             self.process.setArguments(self.worker_arguments())
@@ -71,6 +85,8 @@ class TaggedInspectionJob(QObject):
 
     def worker_arguments(self):
         arguments = [str(self.work / "snapshot.pdf"), str(self.work / "report.json")]
+        if self.from_source:
+            arguments.append(str(self.work / "request.json"))
         if getattr(sys, "frozen", False):
             return ["--tag-inspection-worker", *arguments]
         return ["-m", "neoview.ui.background_tagged_inspection", "--worker", *arguments]
@@ -137,14 +153,29 @@ class TaggedInspectionJob(QObject):
 def run_worker(arguments):
     """Worker CLI: snapshot PDF path and report JSON path; no GUI is created."""
     try:
-        if len(arguments) != 2:
-            raise ValueError("Usage: worker SNAPSHOT_PDF REPORT_JSON")
+        if len(arguments) not in (2, 3):
+            raise ValueError("Usage: worker SNAPSHOT_PDF REPORT_JSON [SOURCE_REQUEST]")
         import fitz
 
         from neoview.models.tagged_pdf import inspect_tagged_pdf
 
-        source, destination = arguments
+        source, destination = arguments[:2]
+        password = ""
+        if len(arguments) == 3:
+            request = json.loads(Path(arguments[2]).read_text(encoding="utf-8"))
+            password = request.get("password", "")
+            expected = tuple(request["signature"])
+            with open(request["source"], "rb") as original:
+                if _signature(os.fstat(original.fileno())) != expected:
+                    raise ValueError("PDF changed since it was opened; reload it before inspecting tags.")
+                with open(source, "wb") as snapshot:
+                    shutil.copyfileobj(original, snapshot, length=1024 * 1024)
+                if (_signature(os.fstat(original.fileno())) != expected
+                        or _signature(os.stat(request["source"])) != expected):
+                    raise ValueError("PDF changed while preparing inspection; reload and try again.")
         with fitz.open(source) as document:
+            if document.needs_pass and not document.authenticate(password):
+                raise ValueError("Could not unlock the inspection snapshot; reopen the PDF.")
             payload = _report_payload(inspect_tagged_pdf(document))
         text = json.dumps(payload, ensure_ascii=False)
         if len(text.encode("utf-8")) > _MAX_REPORT_BYTES:
@@ -153,7 +184,7 @@ def run_worker(arguments):
         return 0
     except Exception as exc:
         detail = f"Tagged PDF inspection failed: {exc}"
-        if len(arguments) == 2:
+        if len(arguments) in (2, 3):
             try:
                 (Path(arguments[1]).parent / "error.txt").write_text(detail, encoding="utf-8")
             except OSError:

@@ -1279,7 +1279,12 @@ class MainWindow(QMainWindow):
     def _sync_tags_panel(self):
         active = (not self._sidebar_dock.isHidden()
                   and self._sidebar.current_key() == "tags")
-        self._tags_panel.set_document(self.current_view().document if active else None)
+        view = self.current_view()
+        self._tags_panel.set_document(
+            view.document if active else None,
+            source_signature=getattr(view, "_tag_source_signature", None),
+            password=getattr(view, "_doc_password", None),
+        )
 
     def _on_tag_page_requested(self, page):
         view = self.current_view()
@@ -3223,6 +3228,8 @@ class MainWindow(QMainWindow):
         ctx.native_annotations = load_native_annotations(view.document)
 
     def _on_view_document_loaded(self, view: PdfView):
+        # Capture the loaded source identity even when open/reload defers panel refresh.
+        view._tag_source_signature = self._file_signature(view.doc_path)
         if self._reload_in_progress:
             return
         if self._open_in_progress:

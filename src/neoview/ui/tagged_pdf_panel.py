@@ -32,6 +32,8 @@ class TaggedPdfPanel(QWidget):
         super().__init__(parent)
         self.setObjectName("TaggedPdfPanel")
         self._document = None
+        self._source_signature = None
+        self._password = None
         self._document_id = None
         self._generation = 0
         self._job = None
@@ -104,11 +106,13 @@ class TaggedPdfPanel(QWidget):
         """Current main-thread document, released when the panel is cleared."""
         return self._document
 
-    def set_document(self, document):
+    def set_document(self, document, *, source_signature=None, password=None):
         if document is self.document and (document is not None or self._document_id is None):
             return
         self._invalidate()
         self._document = document
+        self._source_signature = source_signature if document is not None else None
+        self._password = password if document is not None else None
         self._document_id = id(document) if document is not None else None
         self._page_count = len(document) if document is not None else 0
         self._clear()
@@ -149,7 +153,8 @@ class TaggedPdfPanel(QWidget):
         self.status.setText("Loading tags and artifacts...")
         generation = self._generation
         try:
-            job = TaggedInspectionJob(document, self)
+            job = TaggedInspectionJob(document, self, from_source=True,
+                                      source_signature=self._source_signature, password=self._password)
             self._job = job
             job.ready.connect(lambda report: self._ready(generation, report))
             job.failed.connect(lambda error: self._failed(generation, error))

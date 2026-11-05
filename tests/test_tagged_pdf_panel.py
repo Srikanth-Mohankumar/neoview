@@ -15,7 +15,7 @@ def jobs(monkeypatch):
         ready = Signal(object)
         failed = Signal(str)
 
-        def __init__(self, document, owner):
+        def __init__(self, document, owner, **options):
             super().__init__(owner)
             self.done = False
             self.cancelled = False
